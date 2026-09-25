@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hamza Lessons</title>
+  <meta name="description" content="Track every lesson from the @Hamza97 YouTube channel: what you've watched, and what you took from it.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23c2410c'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' stroke='white' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    try { const t = localStorage.getItem('hamza-tracker:theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
+  </script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <h1>Hamza Lessons</h1>
+          <p class="brand-sub">Every lesson from <a id="channel-link" href="https://www.youtube.com/@Hamza97" target="_blank" rel="noopener">@Hamza97</a></p>
+        </div>
+      </div>
+      <nav class="tabs" aria-label="Views">
+        <button type="button" class="tab" data-tab="lessons" aria-pressed="true">Lessons</button>
+        <button type="button" class="tab" data-tab="journal" aria-pressed="false">Journal</button>
+      </nav>
+      <div class="topbar-actions">
+        <button type="button" id="theme-toggle" class="icon-btn" aria-label="Theme: auto" title="Theme: auto"></button>
+        <details class="menu">
+          <summary class="icon-btn" aria-label="Data menu" title="Backup and restore">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+          </summary>
+          <div class="menu-panel">
+            <button type="button" id="export-btn">Export progress</button>
+            <label class="menu-file">Import progress<input type="file" id="import-input" accept="application/json,.json"></label>
+            <hr>
+            <button type="button" id="reset-btn" class="danger">Reset all progress</button>
+          </div>
+        </details>
+      </div>
+    </div>
+  </header>
+
+  <div id="storage-warning" class="banner" hidden>
+    <div class="wrap">This browser is blocking storage, so progress won't be kept after you close the tab. Use <strong>Export progress</strong> to save it.</div>
+  </div>
+
+  <main class="wrap">
+    <section class="stats" aria-label="Progress">
+      <div class="stat-main">
+        <div class="stat-main-head">
+          <p><strong id="stat-watched">0</strong> of <span id="stat-total">0</span> lessons watched</p>
+          <p class="stat-pct" id="stat-pct">0%</p>
+        </div>
+        <div class="bar" role="progressbar" aria-labelledby="stat-watched" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="stat-bar"><span></span></div>
+      </div>
+      <dl class="stat-grid">
+        <div><dt>Hours watched</dt><dd id="stat-hours">0</dd></div>
+        <div><dt>Takeaways</dt><dd id="stat-takeaways">0</dd></div>
+        <div><dt>Starred</dt><dd id="stat-starred">0</dd></div>
+        <div><dt>This week</dt><dd id="stat-week">0</dd></div>
+      </dl>
+    </section>
+
+    <section id="view-lessons" aria-label="Lessons">
+      <div class="topics" id="topic-chips" role="group" aria-label="Filter by topic"></div>
+
+      <div class="toolbar">
+        <label class="search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+          <input type="search" id="search" placeholder="Search titles, takeaways, notes" aria-label="Search lessons" autocomplete="off">
+          <kbd aria-hidden="true">/</kbd>
+        </label>
+        <div class="seg" role="group" aria-label="Status" id="status-seg">
+          <button type="button" data-status="all">All</button>
+          <button type="button" data-status="unwatched">To watch</button>
+          <button type="button" data-status="watched">Watched</button>
+          <button type="button" data-status="starred">Starred</button>
+        </div>
+        <div class="toolbar-row">
+          <div class="types" role="group" aria-label="Video types" id="type-toggles">
+            <button type="button" data-type="video">Videos</button>
+            <button type="button" data-type="live">Live</button>
+            <button type="button" data-type="short">Shorts</button>
+          </div>
+          <label class="select">
+            <span class="visually-hidden">Sort</span>
+            <select id="sort">
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="longest">Longest</option>
+              <option value="shortest">Shortest</option>
+              <option value="views">Most viewed</option>
+            </select>
+          </label>
+          <button type="button" class="btn primary" id="next-btn">Next lesson <span aria-hidden="true">→</span></button>
+        </div>
+      </div>
+
+      <p class="result-count" id="result-count" aria-live="polite"></p>
+      <div class="grid" id="grid"></div>
+      <div id="sentinel" aria-hidden="true"></div>
+      <div class="empty" id="empty" hidden></div>
+    </section>
+
+    <section id="view-journal" aria-label="Journal" hidden>
+      <div class="journal-head">
+        <div>
+          <h2>Your lesson journal</h2>
+          <p class="muted">Every takeaway you've written, grouped by topic.</p>
+        </div>
+        <div class="journal-actions">
+          <label class="search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+            <input type="search" id="journal-search" placeholder="Search takeaways" aria-label="Search takeaways" autocomplete="off">
+          </label>
+          <button type="button" class="btn" id="copy-md">Copy as Markdown</button>
+        </div>
+      </div>
+      <div id="journal"></div>
+    </section>
+  </main>
+
+  <footer class="wrap footer">
+    <p>Video list synced nightly from YouTube · <span id="synced-at">not synced yet</span>. Progress is stored in this browser.</p>
+  </footer>
+
+  <dialog id="lesson" aria-labelledby="lesson-title">
+    <form method="dialog" class="dialog-close"><button class="icon-btn" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button></form>
+    <div class="player"><iframe id="player" title="YouTube video player" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></div>
+    <div class="lesson-body">
+      <h2 id="lesson-title"></h2>
+      <p class="lesson-meta" id="lesson-meta"></p>
+      <div class="lesson-controls">
+        <button type="button" class="btn" id="lesson-watched" aria-pressed="false"></button>
+        <button type="button" class="btn" id="lesson-star" aria-pressed="false"></button>
+        <div class="rating" id="lesson-rating" role="radiogroup" aria-label="Your rating"></div>
+        <label class="select">
+          <span class="visually-hidden">Topic</span>
+          <select id="lesson-topic"></select>
+        </label>
+      </div>
+      <label class="field">
+        <span>Key takeaways <em>one per line</em></span>
+        <textarea id="lesson-takeaways" rows="4" placeholder="What's the lesson? e.g. Discipline is a skill you train, not a mood you wait for."></textarea>
+      </label>
+      <label class="field">
+        <span>Notes</span>
+        <textarea id="lesson-notes" rows="3" placeholder="How you'll apply it, questions, timestamps…"></textarea>
+      </label>
+      <div class="lesson-foot">
+        <a id="lesson-yt" class="link" target="_blank" rel="noopener">Open on YouTube ↗</a>
+        <span class="saved" id="lesson-saved" aria-live="polite"></span>
+        <button type="button" class="btn primary" id="lesson-next">Next lesson <span aria-hidden="true">→</span></button>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

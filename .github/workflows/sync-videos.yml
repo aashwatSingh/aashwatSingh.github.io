@@ -1,0 +1,50 @@
+name: Sync videos
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/fetch_videos.py
+      - .github/workflows/sync-videos.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-videos
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install yt-dlp
+        run: pip install -U yt-dlp
+
+      - name: Test merge logic
+        run: python -m unittest scripts/test_fetch_videos.py
+
+      - name: Fetch channel uploads
+        run: python scripts/fetch_videos.py
+
+      - name: Commit updated list
+        run: |
+          if git diff --quiet -- hamza/data/videos.json; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add hamza/data/videos.json
+          git commit -m "Sync Hamza video list"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
