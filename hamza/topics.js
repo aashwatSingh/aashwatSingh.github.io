@@ -5,9 +5,9 @@
 // video's topic in the app, and overrides always beat these rules.
 export const TOPICS = [
   { name: 'Dating & Women', hue: 350, keywords: [
-    'women', 'woman', 'girl*', 'gf', 'dating', 'date', 'dates', 'relationship*', 'flirt*', 'rizz*',
+    'women', 'woman', 'girl*', 'gf', 'dating', 'a date', 'first date', 'dates', 'relationship*', 'flirt*', 'rizz*',
     'wife', 'marri*', 'marry', 'virgin*', 'crush', 'breakup', 'break up', 'ex', 'simp*', 'love',
-    'female*', 'her', 'she', 'sex*', 'body count', 'approach*', 'attraction'] },
+    'female*', 'her', 'she', 'sex*', 'body count', 'approach*', 'attraction', 'feminis*'] },
   { name: 'Looks & Style', hue: 280, keywords: [
     'looksmax*', 'looks', 'handsome', 'attractive', 'ugly', 'skin*', 'hair*', 'beard', 'jaw*', 'face',
     'style', 'dress*', 'outfit*', 'clothes', 'fashion', 'posture', 'height', 'mog*', 'glow up', 'glow-up',
@@ -20,22 +20,26 @@ export const TOPICS = [
     'money', 'rich', 'wealth*', 'business*', 'entrepreneur*', 'job', 'jobs', 'career*', 'invest*',
     'income', 'broke', 'million*', 'salary', 'hustle', 'side hustle', 'freelanc*', 'sales', 'poor',
     'financ*', 'university', 'uni', 'college', 'degree', 'school', 'work from home', 'ecom*', 'crypto',
-    'startup*', 'agency', 'earn*', 'fired', 'boss'] },
+    'startup*', 'agency', 'earn*', 'fired', 'boss', '$*', 'skool*', 'clients', 'youtube', 'content creat*'] },
   { name: 'Discipline & Habits', hue: 20, keywords: [
     'disciplin*', 'habit*', 'dopamine', 'routine*', 'productiv*', 'lazy', 'laziness', 'procrastinat*',
-    'motivat*', 'focus*', 'monk', 'monk mode', 'porn', 'nofap', 'fap', 'addict*', 'detox', 'phone',
+    'motivat*', 'focus*', 'monk', 'monk mode', 'porn', 'nofap', 'fap*', 'addict*', 'detox', 'phone',
+    'lock in', 'locked in', 'locking in', 'ghost mode', 'lust', 'relaps*', 'semen', 'retention', 'masturbat*',
+    'desexuali*', 'journal*', 'meditat*', 'gratification', 'work hard', 'work harder', 'books', 'reading',
     'morning*', 'schedule', 'study*', 'consisten*', 'grind*', 'work ethic', 'willpower', 'goal*',
     '5am', '4am', 'time', 'waste*', 'wasting', 'hard work', 'hardwork*', 'quit*', 'self control'] },
   { name: 'Social Skills', hue: 195, keywords: [
     'social*', 'friend*', 'charism*', 'conversation*', 'talk*', 'awkward', 'introvert*', 'extrovert*',
     'network*', 'party', 'speak*', 'speech', 'voice', 'eye contact', 'people', 'likeable', 'likable',
-    'humour', 'humor', 'funny', 'banter', 'family', 'parents', 'dad', 'mum', 'mom'] },
+    'humour', 'humor', 'funny', 'banter', 'family', 'parents', 'dad', 'mum', 'mom', 'creep*', 'nice guy'] },
   { name: 'Mindset & Confidence', hue: 230, keywords: [
     'confiden*', 'mindset*', 'masculin*', 'alpha', 'beta', 'sigma', 'self esteem', 'self-esteem',
     'anxiety', 'anxious', 'depress*', 'lonel*', 'purpose', 'stoic*', 'mental*', 'fear*', 'ego',
     'men', 'man', 'life', 'happ*', 'meaning*', 'success*', 'winner*', 'loser*', 'weak*', 'strong*',
     'high value', 'self improvement', 'self-improvement', 'improve*', 'respect*', 'overthink*',
-    'insecur*', 'regret*', 'god', 'faith', 'religio*', 'islam', 'wisdom', 'advice', 'lesson*'] },
+    'insecur*', 'regret*', 'god', 'faith', 'religio*', 'islam', 'wisdom', 'advice', 'lesson*',
+    'think*', 'thought*', 'mind', 'heal*', 'father wound', 'truth*', 'years old', 'year old', 'year olds',
+    'yourself', 'win', 'wins', 'winning', 'testimonial*', 'gen z', 'ascend*'] },
 ];
 
 export const OTHER = { name: 'Other', hue: 60 };
