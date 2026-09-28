@@ -23,6 +23,7 @@ topic, and can copy them all out as Markdown.
 
 - **Insights tab:** streaks, a 26-week activity heatmap, per-topic progress, your rating spread and a
   finish-date projection from your last 4 weeks of pace. The maths lives in `hamza/insights.js`; run
-  its tests with `node --test hamza/insights.test.mjs`.
+  its tests with `node --test hamza/insights.test.mjs`. A standalone sample-data demo lives at
+  `/hamza/demo/`; rebuild it with `node scripts/build_demo.mjs` after changing `insights.js`.
 
 Run the sync tests locally with `python -m unittest scripts/test_fetch_videos.py`.
