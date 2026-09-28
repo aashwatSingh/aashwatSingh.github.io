@@ -1,0 +1,35 @@
+name: Check curators
+
+on:
+  schedule:
+    - cron: '41 7 3 * *'
+  workflow_dispatch:
+  push:
+    paths:
+      - pitch/data/curators.json
+      - pitch/app.js
+      - scripts/test_curators.py
+      - scripts/check_curator_links.py
+      - .github/workflows/check-curators.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Validate directory
+        run: python -m unittest scripts/test_curators.py
+
+      # Monthly, and on demand: fail if an outlet's page is gone.
+      - name: Check links
+        if: github.event_name != 'push'
+        run: python scripts/check_curator_links.py
