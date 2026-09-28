@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Free Pitch</title>
+  <meta name="description" content="Pitch your music to playlist curators, blogs, radio and streaming editors who never charge a cent.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%236d28d9'/%3E%3Cpath d='M8 16.5L24 9l-5 15-3.5-6z' stroke='white' stroke-width='2.4' fill='none' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    try { const t = localStorage.getItem('free-pitch:theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
+  </script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <h1>Free Pitch</h1>
+          <p class="brand-sub">Curators who never charge a cent</p>
+        </div>
+      </div>
+      <nav class="tabs" aria-label="Views">
+        <button type="button" class="tab" data-tab="curators" aria-pressed="true">Curators</button>
+        <button type="button" class="tab" data-tab="pitches" aria-pressed="false">Pitches <span class="tab-badge" id="due-badge" hidden></span></button>
+        <button type="button" class="tab" data-tab="kit" aria-pressed="false">Kit</button>
+      </nav>
+      <div class="topbar-actions">
+        <button type="button" id="theme-toggle" class="icon-btn" aria-label="Theme: auto" title="Theme: auto"></button>
+        <details class="menu">
+          <summary class="icon-btn" aria-label="Data menu" title="Backup and restore">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+          </summary>
+          <div class="menu-panel">
+            <button type="button" id="export-btn">Export my data</button>
+            <label class="menu-file">Import data<input type="file" id="import-input" accept="application/json,.json"></label>
+            <hr>
+            <button type="button" id="reset-btn" class="danger">Erase everything</button>
+          </div>
+        </details>
+      </div>
+    </div>
+  </header>
+
+  <div id="storage-warning" class="banner" hidden>
+    <div class="wrap">This browser is blocking storage, so nothing will be kept after you close the tab. Use <strong>Export my data</strong> to save it.</div>
+  </div>
+
+  <main class="wrap">
+    <section class="release-bar" aria-label="Release you're pitching">
+      <div class="release-pick">
+        <label for="release-select">Pitching</label>
+        <select id="release-select"></select>
+      </div>
+      <p class="release-when" id="release-when"></p>
+      <button type="button" class="btn" id="release-add">New release</button>
+    </section>
+
+    <section id="view-curators" aria-label="Curators">
+      <div class="kinds" id="kind-chips" role="group" aria-label="Filter by kind"></div>
+
+      <div class="toolbar">
+        <label class="search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+          <input type="search" id="search" placeholder="Search names, genres, guidelines" aria-label="Search curators" autocomplete="off">
+          <kbd aria-hidden="true">/</kbd>
+        </label>
+        <div class="seg" role="group" aria-label="Pitch status" id="status-seg">
+          <button type="button" data-status="all">All</button>
+          <button type="button" data-status="todo">Not pitched</button>
+          <button type="button" data-status="pitched">Pitched</button>
+          <button type="button" data-status="hidden">Hidden</button>
+        </div>
+        <div class="toolbar-row">
+          <label class="select">
+            <span class="visually-hidden">Region</span>
+            <select id="region"></select>
+          </label>
+          <label class="select">
+            <span class="visually-hidden">Sort</span>
+            <select id="sort">
+              <option value="deadline">Pitch-by date</option>
+              <option value="name">Name</option>
+              <option value="kind">Kind</option>
+            </select>
+          </label>
+          <button type="button" class="btn" id="add-curator">Add curator</button>
+        </div>
+      </div>
+
+      <p class="result-count" id="result-count" aria-live="polite"></p>
+      <div class="grid" id="grid"></div>
+      <div class="empty" id="empty" hidden></div>
+    </section>
+
+    <section id="view-pitches" aria-label="Pitches" hidden>
+      <dl class="stat-grid" id="pitch-stats"></dl>
+      <div id="due"></div>
+      <div id="pitch-list"></div>
+    </section>
+
+    <section id="view-kit" aria-label="Press kit" hidden>
+      <form id="profile-form" class="panel" autocomplete="on">
+        <div class="panel-head">
+          <div>
+            <h2>Artist profile</h2>
+            <p class="muted">Fill this in once. Every pitch is built from it.</p>
+          </div>
+          <span class="saved" id="profile-saved" aria-live="polite"></span>
+        </div>
+        <div class="form-grid">
+          <label class="field"><span>Artist name</span><input name="artist" autocomplete="nickname" required></label>
+          <label class="field"><span>Your email <em>for replies</em></span><input name="email" type="email" autocomplete="email"></label>
+          <label class="field"><span>City</span><input name="city" placeholder="e.g. Atlanta"></label>
+          <label class="field"><span>Country <em>to flag region-locked outlets</em></span>
+            <select name="country">
+              <option value="">Choose…</option>
+              <option value="US">United States</option>
+              <option value="CA">Canada</option>
+              <option value="UK">United Kingdom</option>
+              <option value="EU">EU / EEA</option>
+              <option value="AU">Australia</option>
+              <option value="other">Somewhere else</option>
+            </select>
+          </label>
+          <label class="field"><span>Your sound</span><input name="genre" placeholder="e.g. melodic trap, boom bap, drill"></label>
+          <label class="field"><span>For fans of</span><input name="similar" placeholder="e.g. JID, Earthgang, Smino"></label>
+          <label class="field wide"><span>Short bio <em>one or two sentences</em></span><textarea name="bio" rows="2" placeholder="Who you are and what makes your music yours."></textarea></label>
+          <label class="field"><span>Spotify artist link</span><input name="spotify" type="url" placeholder="https://open.spotify.com/artist/…"></label>
+          <label class="field"><span>Instagram</span><input name="instagram" placeholder="@handle or link"></label>
+          <label class="field"><span>TikTok</span><input name="tiktok" placeholder="@handle or link"></label>
+          <label class="field"><span>YouTube</span><input name="youtube" type="url" placeholder="https://youtube.com/@…"></label>
+          <label class="field"><span>SoundCloud / Audiomack</span><input name="soundcloud" type="url" placeholder="https://soundcloud.com/…"></label>
+          <label class="field"><span>Website or EPK</span><input name="website" type="url" placeholder="https://…"></label>
+        </div>
+      </form>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Releases</h2>
+            <p class="muted">Each release gets its own pitch-by dates and tracker.</p>
+          </div>
+          <button type="button" class="btn primary" id="release-add-2">New release</button>
+        </div>
+        <div id="release-list"></div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="wrap footer">
+    <p>Every outlet here is free to pitch. Directory checked <span id="checked-at">—</span>. Your kit and pitches stay in this browser.</p>
+  </footer>
+
+  <dialog id="pitch" aria-labelledby="pitch-title">
+    <form method="dialog" class="dialog-close"><button class="icon-btn" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button></form>
+    <div class="dialog-body">
+      <p class="pitch-kicker" id="pitch-kicker"></p>
+      <h2 id="pitch-title"></h2>
+      <p class="pitch-meta" id="pitch-meta"></p>
+      <div class="guide" id="pitch-guide"></div>
+      <div id="pitch-warnings"></div>
+
+      <div class="compose">
+        <div class="compose-head">
+          <h3 id="compose-label">Your pitch</h3>
+          <button type="button" class="link-btn" id="pitch-reset" hidden>Reset to template</button>
+        </div>
+        <label class="field" id="subject-field"><span>Subject</span><input id="pitch-subject" autocomplete="off"></label>
+        <label class="field"><span id="body-label">Message</span><textarea id="pitch-body" rows="12"></textarea></label>
+        <p class="counter" id="pitch-counter" aria-live="polite"></p>
+        <div class="send" id="pitch-send"></div>
+      </div>
+
+      <div class="status-row">
+        <label class="select">
+          <span>Status</span>
+          <select id="pitch-status"></select>
+        </label>
+        <span class="status-dates" id="pitch-dates"></span>
+      </div>
+      <label class="field"><span>Notes <em>reply, playlist added to, who to follow up with</em></span><textarea id="pitch-notes" rows="2"></textarea></label>
+      <p class="saved" id="pitch-saved" aria-live="polite"></p>
+    </div>
+  </dialog>
+
+  <dialog id="curator-dialog" aria-labelledby="curator-dialog-title">
+    <form id="curator-form" class="dialog-body" method="dialog">
+      <h2 id="curator-dialog-title">Add a curator</h2>
+      <p class="muted">Only add outlets that never charge. Saved in this browser.</p>
+      <div class="form-grid">
+        <label class="field"><span>Name</span><input name="name" required></label>
+        <label class="field"><span>Greet them as <em>e.g. Jay</em></span><input name="greet"></label>
+        <label class="field"><span>Kind</span>
+          <select name="kind">
+            <option value="playlist">Playlist</option>
+            <option value="blog">Blog</option>
+            <option value="radio">Radio</option>
+            <option value="youtube">YouTube / video</option>
+            <option value="community">Community</option>
+            <option value="showcase">Showcase</option>
+            <option value="official">Streaming editors</option>
+          </select>
+        </label>
+        <label class="field"><span>How to pitch</span>
+          <select name="method">
+            <option value="email">Email</option>
+            <option value="form">Web form or page</option>
+          </select>
+        </label>
+        <label class="field wide"><span>Email address or submission link</span><input name="contact" required></label>
+        <label class="field"><span>Website</span><input name="url" type="url" placeholder="https://…"></label>
+        <label class="field"><span>Region</span><input name="region" placeholder="Global"></label>
+        <label class="field"><span>Pitch this many days before release</span><input name="lead_days" type="number" min="0" max="120" placeholder="leave blank if anytime"></label>
+        <label class="field check"><input name="released_ok" type="checkbox" checked><span>Takes music that's already out</span></label>
+        <label class="field wide"><span>Guidelines</span><textarea name="guidelines" rows="3" placeholder="What they want, what to include, how often"></textarea></label>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="btn danger" id="curator-delete" hidden>Delete</button>
+        <button type="button" class="btn" id="curator-cancel">Cancel</button>
+        <button type="submit" class="btn primary">Save curator</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="release-dialog" aria-labelledby="release-dialog-title">
+    <form id="release-form" class="dialog-body" method="dialog">
+      <h2 id="release-dialog-title">New release</h2>
+      <div class="form-grid">
+        <label class="field"><span>Title</span><input name="title" required></label>
+        <label class="field"><span>Type</span>
+          <select name="type">
+            <option value="single">Single</option>
+            <option value="EP">EP</option>
+            <option value="album">Album</option>
+            <option value="mixtape">Mixtape</option>
+          </select>
+        </label>
+        <label class="field"><span>Release date</span><input name="date" type="date" required></label>
+        <label class="field"><span>Features <em>optional</em></span><input name="features" placeholder="feat. …"></label>
+        <label class="field wide"><span>Private streaming link <em>for unreleased music: SoundCloud private, Dropbox, Drive</em></span><input name="private_link" type="url" placeholder="https://…"></label>
+        <label class="field wide"><span>Public link <em>Spotify or a smart link once it's out</em></span><input name="public_link" type="url" placeholder="https://open.spotify.com/track/…"></label>
+        <label class="field"><span>Mood</span><input name="mood" placeholder="e.g. late-night, triumphant"></label>
+        <label class="field"><span>BPM</span><input name="bpm" inputmode="numeric" placeholder="e.g. 92"></label>
+        <label class="field wide"><span>The hook <em>one sentence that makes someone press play</em></span><input name="hook" placeholder="e.g. A victory lap over a flipped 70s soul sample."></label>
+        <label class="field wide"><span>The story <em>what it's about, how it was made</em></span><textarea name="story" rows="3"></textarea></label>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="btn danger" id="release-delete" hidden>Delete</button>
+        <button type="button" class="btn" id="release-cancel">Cancel</button>
+        <button type="submit" class="btn primary">Save release</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
