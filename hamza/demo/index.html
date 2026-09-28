@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex">
+<title>Hamza Lessons Insights</title>
+<style>
+  /* Layout: a single centred column, the tracker's own header on top, then the Insights panels. */
+  :root {
+    --bg: #f7f5f2; --surface: #ffffff; --surface-2: #f0ede8; --border: #e4dfd7;
+    --text: #1d1b18; --muted: #6b655c; --accent: #c2410c; --accent-ink: #ffffff;
+    --accent-soft: #fbe6da; --star: #d97706; --shadow: 0 1px 2px rgb(40 30 20 / .05), 0 6px 20px rgb(40 30 20 / .06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141312; --surface: #1d1c1a; --surface-2: #272522; --border: #36322e;
+      --text: #efebe5; --muted: #a39c91; --accent: #f97316; --accent-ink: #1a0f08;
+      --accent-soft: #3b2215; --star: #fbbf24; --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 6px 20px rgb(0 0 0 / .25);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141312; --surface: #1d1c1a; --surface-2: #272522; --border: #36322e;
+    --text: #efebe5; --muted: #a39c91; --accent: #f97316; --accent-ink: #1a0f08;
+    --accent-soft: #3b2215; --star: #fbbf24; --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 6px 20px rgb(0 0 0 / .25);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding-inline: 16px; padding-block: 0 40px; }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 12px; padding-block: 14px; border-bottom: 1px solid var(--border); margin-bottom: 20px; flex-wrap: wrap; }
+  .mark { width: 34px; height: 34px; border-radius: 9px; background: var(--accent); display: grid; place-items: center; flex: none; }
+  .mark svg { width: 20px; height: 20px; stroke: #fff; stroke-width: 3.2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  header h1 { font-size: 17px; margin: 0; line-height: 1.2; }
+  header p { margin: 0; font-size: 13px; color: var(--muted); }
+  .grow { flex: 1; }
+  .tabs { display: flex; gap: 4px; background: var(--surface-2); padding: 3px; border-radius: 10px; }
+  .tab { padding: 6px 14px; border-radius: 8px; font-weight: 550; color: var(--muted); }
+  .tab.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
+  .demo-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; background: var(--accent-soft); border-radius: 12px; padding: 10px 14px; margin-bottom: 20px; font-size: 14px; }
+  .demo-bar strong { margin-right: 2px; }
+  .seg { display: inline-flex; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 2px; gap: 2px; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .seg button { border: 0; background: none; padding: 5px 12px; border-radius: 8px; color: var(--muted); font-weight: 550; }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  .btn { border: 1px solid var(--border); background: var(--surface); border-radius: 10px; padding: 6px 14px; font-weight: 600; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  h2 { font-size: 20px; margin: 0; text-wrap: balance; }
+  .muted { color: var(--muted); }
+  .head { margin-bottom: 16px; } .head p { margin: 2px 0 0; }
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0 0 16px; }
+  .tiles div { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+  .tiles dt { font-size: 12px; color: var(--muted); }
+  .tiles dd { margin: 0; font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; box-shadow: var(--shadow); min-width: 0; }
+  .panel h3 { margin: 0 0 12px; font-size: 15px; }
+  .panel h3 small { font-weight: 500; color: var(--muted); margin-left: 6px; }
+  .cols { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; align-items: start; }
+  .heatmap { display: grid; grid-template-columns: repeat(26, minmax(11px, 22px)); gap: 3px; overflow-x: auto; padding-bottom: 4px; }
+  .hm-col { display: grid; grid-template-rows: repeat(7, auto); gap: 3px; }
+  .cell { display: block; aspect-ratio: 1; border-radius: 3px; background: var(--surface-2); }
+  .cell.none { background: none; }
+  .cell.l1 { background: color-mix(in srgb, var(--accent) 30%, var(--surface-2)); }
+  .cell.l2 { background: color-mix(in srgb, var(--accent) 55%, var(--surface-2)); }
+  .cell.l3 { background: color-mix(in srgb, var(--accent) 80%, var(--surface-2)); }
+  .cell.l4 { background: var(--accent); }
+  .cell.today { outline: 2px solid var(--text); outline-offset: 1px; }
+  .legend { display: flex; align-items: center; gap: 3px; justify-content: flex-end; font-size: 12px; margin: 8px 0 0; color: var(--muted); }
+  .legend .cell { width: 12px; }
+  .row { display: grid; grid-template-columns: minmax(80px, 140px) 1fr 60px; align-items: center; gap: 10px; padding: 4px 0; font-size: 14px; }
+  .row.rt { grid-template-columns: 28px 1fr 28px; }
+  .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .n { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; font-size: 13px; }
+  .bar { height: 8px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
+  .bar span { display: block; height: 100%; border-radius: 99px; transition: width .25s ease; }
+  .rt .bar span { background: var(--star); }
+  footer { margin-top: 8px; font-size: 13px; color: var(--muted); }
+  @media (max-width: 720px) {
+    .cols { grid-template-columns: 1fr; }
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .tabs { order: 3; width: 100%; } .tab { flex: 1; text-align: center; }
+  }
+  @media (prefers-reduced-motion: reduce) { .bar span { transition: none; } }
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+  <header>
+    <span class="mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+    <div><h1>Hamza Lessons</h1><p>Every lesson from @Hamza97</p></div>
+    <div class="grow"></div>
+    <nav class="tabs" aria-label="Views"><span class="tab">Lessons</span><span class="tab">Journal</span><span class="tab on" aria-current="page">Insights</span></nav>
+  </header>
+
+  <div class="demo-bar">
+    <strong>Demo</strong><span>Sample data, not real progress. Try a profile:</span>
+    <div class="seg" id="profiles" role="group" aria-label="Sample profile">
+      <button type="button" data-p="new">Just started</button>
+      <button type="button" data-p="steady" aria-pressed="true">Steady</button>
+      <button type="button" data-p="binge">Binge weeks</button>
+    </div>
+    <button type="button" class="btn primary" id="watch">Mark a lesson watched today</button>
+  </div>
+
+  <div class="head"><h2>Your insights</h2><p class="muted">How you're moving through the channel. Based on when you marked lessons watched.</p></div>
+  <div id="out" aria-live="polite"></div>
+  <footer>Lesson counts per topic match the real channel list (1,047 lessons). Everything else here is generated.</footer>
+</div>
+
+<script>
+// Pure calculations for the Insights tab. No DOM access, so they can be unit tested in Node.
+
+const DAY = 864e5;
+
+// Local calendar day (YYYY-MM-DD) of an ISO timestamp.
+function dayKey(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+const shiftDay = (key, delta) => {
+  const [y, m, d] = key.split('-').map(Number);
+  return dayKey(new Date(y, m - 1, d + delta).toISOString());
+};
+
+/** Lessons watched per local day: Map<dayKey, count>. */
+function activityByDay(watchedTimestamps) {
+  const days = new Map();
+  for (const iso of watchedTimestamps) {
+    const k = dayKey(iso);
+    if (k) days.set(k, (days.get(k) || 0) + 1);
+  }
+  return days;
+}
+
+/**
+ * Current and longest streak of consecutive days with at least one lesson.
+ * The current streak survives until the end of today, so it is still alive if
+ * you watched yesterday but haven't watched yet today.
+ */
+function streaks(days, todayKey) {
+  const keys = [...days.keys()].sort();
+  let longest = 0;
+  let run = 0;
+  let prev = null;
+  for (const k of keys) {
+    run = prev && shiftDay(prev, 1) === k ? run + 1 : 1;
+    longest = Math.max(longest, run);
+    prev = k;
+  }
+  let current = 0;
+  let k = days.has(todayKey) ? todayKey : shiftDay(todayKey, -1);
+  while (days.has(k)) {
+    current++;
+    k = shiftDay(k, -1);
+  }
+  return { current, longest };
+}
+
+/**
+ * Grid for a GitHub-style heatmap: `weeks` columns (Sunday first), 7 rows.
+ * Cells after today are null. `level` is 0-4, scaled to the busiest day.
+ */
+function heatmap(days, todayKey, weeks = 26) {
+  const [y, m, d] = todayKey.split('-').map(Number);
+  const today = new Date(y, m - 1, d);
+  const start = new Date(y, m - 1, d - today.getDay() - (weeks - 1) * 7);
+  const max = Math.max(1, ...days.values());
+  const columns = [];
+  for (let w = 0; w < weeks; w++) {
+    const col = [];
+    for (let r = 0; r < 7; r++) {
+      const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + w * 7 + r);
+      if (date > today) { col.push(null); continue; }
+      const key = dayKey(date.toISOString());
+      const count = days.get(key) || 0;
+      col.push({ key, count, level: count ? Math.min(4, Math.ceil((count / max) * 4)) : 0 });
+    }
+    columns.push(col);
+  }
+  return columns;
+}
+
+/** Watched / total per topic, sorted by remaining lessons. */
+function topicProgress(items) {
+  const map = new Map();
+  for (const { topic, watched } of items) {
+    const t = map.get(topic) || { topic, total: 0, watched: 0 };
+    t.total++;
+    if (watched) t.watched++;
+    map.set(topic, t);
+  }
+  return [...map.values()].sort((a, b) => (b.total - b.watched) - (a.total - a.watched) || a.topic.localeCompare(b.topic));
+}
+
+/** Count of ratings 1-5, plus the average (null when nothing is rated). */
+function ratingSpread(ratings) {
+  const counts = [0, 0, 0, 0, 0];
+  let sum = 0;
+  let n = 0;
+  for (const r of ratings) {
+    if (Number.isInteger(r) && r >= 1 && r <= 5) { counts[r - 1]++; sum += r; n++; }
+  }
+  return { counts, n, average: n ? sum / n : null };
+}
+
+/**
+ * Project a finish date from the pace of the last `windowDays` days.
+ * Returns null when there's no pace to extrapolate from or nothing left to watch.
+ */
+function projection({ remaining, watchedTimestamps, now, windowDays = 28 }) {
+  if (remaining <= 0) return null;
+  const since = now - windowDays * DAY;
+  const recent = watchedTimestamps.map(Date.parse).filter((t) => t >= since && t <= now);
+  if (!recent.length) return null;
+  const perDay = recent.length / windowDays;
+  const daysLeft = Math.ceil(remaining / perDay);
+  return { perWeek: perDay * 7, daysLeft, date: new Date(now + daysLeft * DAY) };
+}
+
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const nf = new Intl.NumberFormat();
+const FULL = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+const DAYMS = 864e5;
+
+const TOPICS = [
+  ['Mindset & Confidence', 256, 200], ['Discipline & Habits', 184, 30], ['Dating & Women', 183, 335],
+  ['Other', 174, 35], ['Fitness & Health', 105, 140], ['Money & Career', 62, 25], ['Social Skills', 55, 185], ['Looks & Style', 28, 300],
+];
+const TOTAL = TOPICS.reduce((a, t) => a + t[1], 0);
+
+// Deterministic PRNG so each profile looks the same every time.
+function rng(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
+
+const PROFILES = {
+  new:    { seed: 3,  daysBack: 9,   p: 0.5,  perDay: [1, 2] },
+  steady: { seed: 11, daysBack: 170, p: 0.42, perDay: [1, 2] },
+  binge:  { seed: 29, daysBack: 176, p: 0.3,  perDay: [1, 6], streakBoost: true },
+};
+
+let lessons = []; // { topic, watched: ISO, rating }
+
+function pickTopic(r) {
+  let x = r() * TOTAL;
+  for (const [name, n] of TOPICS) { if ((x -= n) < 0) return name; }
+  return TOPICS[0][0];
+}
+
+function build(profile) {
+  const cfg = PROFILES[profile], r = rng(cfg.seed), out = [];
+  const now = Date.now();
+  let hot = 0;
+  for (let d = cfg.daysBack; d >= 0; d--) {
+    let p = cfg.p;
+    if (cfg.streakBoost) { if (hot > 0) { p = 0.95; hot--; } else if (r() < 0.05) hot = 5 + Math.floor(r() * 6); }
+    else if (profile === 'steady' && d % 9 < 3) p = 0.75;
+    if (r() > p) continue;
+    const n = cfg.perDay[0] + Math.floor(r() * (cfg.perDay[1] - cfg.perDay[0] + 1));
+    for (let i = 0; i < n; i++) {
+      const at = new Date(now - d * DAYMS); at.setHours(7 + Math.floor(r() * 15), Math.floor(r() * 60));
+      if (at.getTime() > now) continue;
+      const rating = r() < 0.55 ? 0 : Math.min(5, 1 + Math.floor(Math.pow(r(), 0.55) * 5));
+      out.push({ topic: pickTopic(r), watched: at.toISOString(), rating });
+    }
+  }
+  return out;
+}
+
+function render() {
+  const watchedAt = lessons.map((l) => l.watched);
+  const days = activityByDay(watchedAt);
+  const now = Date.now(), today = dayKey(new Date(now).toISOString());
+  const { current, longest } = streaks(days, today);
+  const pace = projection({ remaining: TOTAL - lessons.length, watchedTimestamps: watchedAt, now });
+  const spread = ratingSpread(lessons.map((l) => l.rating));
+  const perTopic = new Map(TOPICS.map(([t, total]) => [t, { topic: t, total, watched: 0 }]));
+  for (const l of lessons) perTopic.get(l.topic).watched++;
+  const topics = [...perTopic.values()].sort((a, b) => (b.total - b.watched) - (a.total - a.watched) || a.topic.localeCompare(b.topic));
+  const cols = heatmap(days, today);
+  const s = (n, one, many) => `${nf.format(n)} ${n === 1 ? one : many}`;
+
+  const tiles = [
+    ['Current streak', s(current, 'day', 'days')], ['Longest streak', s(longest, 'day', 'days')],
+    ['Recent pace', pace ? `${pace.perWeek.toFixed(1)} / week` : 'Not enough data'],
+    ['On pace to finish', pace ? FULL.format(pace.date) : 'Watch some lessons'],
+  ].map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('');
+
+  const cells = cols.map((col) => `<div class="hm-col">${col.map((c) => c
+    ? `<span class="cell l${c.level}${c.key === today ? ' today' : ''}" title="${esc(`${c.key}: ${s(c.count, 'lesson', 'lessons')}`)}"></span>`
+    : '<span class="cell none"></span>').join('')}</div>`).join('');
+
+  const max = Math.max(1, ...spread.counts);
+  const ratings = spread.n
+    ? spread.counts.map((n, i) => `<div class="row rt"><span>${i + 1}★</span><div class="bar"><span style="width:${(n / max) * 100}%"></span></div><span class="n">${n}</span></div>`).reverse().join('')
+    : '<p class="muted">Rate a lesson to see how you score them.</p>';
+
+  const hue = (i) => TOPICS.find((t) => t[0] === topics[i].topic)[2];
+  const topicRows = topics.map((t, i) => `<div class="row"><span class="name" title="${esc(t.topic)}">${esc(t.topic)}</span><div class="bar"><span style="width:${(t.watched / t.total) * 100}%;background:oklch(0.62 0.14 ${hue(i)})"></span></div><span class="n">${t.watched}/${t.total}</span></div>`).join('');
+
+  $('#out').innerHTML = `
+    <dl class="tiles">${tiles}</dl>
+    <div class="panel"><h3>Last 26 weeks <small>${s(lessons.length, 'lesson', 'lessons')} watched</small></h3>
+      <div class="heatmap" role="img" aria-label="Lessons watched per day over the last 26 weeks">${cells}</div>
+      <p class="legend">Less <span class="cell l0"></span><span class="cell l1"></span><span class="cell l2"></span><span class="cell l3"></span><span class="cell l4"></span> More</p>
+    </div>
+    <div class="cols">
+      <div class="panel"><h3>Topics <small>${topics.length}</small></h3>${topicRows}</div>
+      <div class="panel"><h3>Your ratings${spread.average ? ` <small>avg ${spread.average.toFixed(1)}</small>` : ''}</h3>${ratings}</div>
+    </div>`;
+}
+
+function setProfile(p) {
+  for (const b of document.querySelectorAll('#profiles button')) b.setAttribute('aria-pressed', String(b.dataset.p === p));
+  lessons = build(p); render();
+}
+$('#profiles').addEventListener('click', (e) => { const b = e.target.closest('button[data-p]'); if (b) setProfile(b.dataset.p); });
+$('#watch').addEventListener('click', () => {
+  const r = Math.random;
+  lessons.push({ topic: pickTopic(r), watched: new Date().toISOString(), rating: r() < 0.5 ? 0 : 1 + Math.floor(r() * 5) });
+  render();
+});
+setProfile('steady');
+</script>
+
+</body>
+</html>

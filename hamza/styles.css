@@ -372,3 +372,29 @@ dialog::backdrop { background: rgb(15 12 10 / 0.55); backdrop-filter: blur(2px);
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; }
 }
+
+/* ---- insights ---- */
+.insight-tiles { margin-bottom: 16px; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 16px; box-shadow: var(--shadow); min-width: 0; }
+.panel h3 { margin: 0 0 12px; font-size: 15px; }
+.panel h3 small { font-weight: 500; color: var(--muted); margin-left: 6px; }
+.insight-cols { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; align-items: start; }
+.heatmap { display: grid; grid-template-columns: repeat(26, minmax(11px, 22px)); gap: 3px; overflow-x: auto; padding-bottom: 4px; }
+.hm-col { display: grid; grid-template-rows: repeat(7, auto); gap: 3px; }
+.hm-col .hm-cell { display: block; width: auto; height: auto; aspect-ratio: 1; }
+.hm-cell { width: 12px; height: 12px; border-radius: 3px; display: inline-block; background: var(--surface-2); }
+.hm-cell.none { background: none; }
+.hm-cell.l1 { background: color-mix(in srgb, var(--accent) 30%, var(--surface-2)); }
+.hm-cell.l2 { background: color-mix(in srgb, var(--accent) 55%, var(--surface-2)); }
+.hm-cell.l3 { background: color-mix(in srgb, var(--accent) 80%, var(--surface-2)); }
+.hm-cell.l4 { background: var(--accent); }
+.hm-legend { display: flex; align-items: center; gap: 3px; justify-content: flex-end; font-size: 12px; margin: 8px 0 0; }
+.hm-legend .hm-cell { margin: 0; }
+.tp-row, .rt-row { display: grid; grid-template-columns: minmax(80px, 140px) 1fr 52px; align-items: center; gap: 10px; padding: 4px 0; font-size: 14px; }
+.rt-row { grid-template-columns: 28px 1fr 28px; }
+.tp-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tp-n, .rt-n { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; font-size: 13px; }
+.rt-bar { height: 8px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
+.rt-bar span { display: block; height: 100%; background: var(--star); border-radius: 99px; }
+.tp-row .bar { height: 8px; }
+@media (max-width: 720px) { .insight-cols { grid-template-columns: 1fr; } }

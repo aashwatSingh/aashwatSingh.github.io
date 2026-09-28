@@ -26,6 +26,7 @@
       <nav class="tabs" aria-label="Views">
         <button type="button" class="tab" data-tab="lessons" aria-pressed="true">Lessons</button>
         <button type="button" class="tab" data-tab="journal" aria-pressed="false">Journal</button>
+        <button type="button" class="tab" data-tab="insights" aria-pressed="false">Insights</button>
       </nav>
       <div class="topbar-actions">
         <button type="button" id="theme-toggle" class="icon-btn" aria-label="Theme: auto" title="Theme: auto"></button>
@@ -121,6 +122,16 @@
         </div>
       </div>
       <div id="journal"></div>
+    </section>
+
+    <section id="view-insights" aria-label="Insights" hidden>
+      <div class="journal-head">
+        <div>
+          <h2>Your insights</h2>
+          <p class="muted">How you're moving through the channel. Based on when you marked lessons watched.</p>
+        </div>
+      </div>
+      <div id="insights"></div>
     </section>
   </main>
 

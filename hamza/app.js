@@ -1,8 +1,10 @@
 import { ALL_TOPICS, guessTopic, topicHue } from './topics.js';
+import { activityByDay, streaks, heatmap, topicProgress, ratingSpread, projection, dayKey } from './insights.js';
 
 const STORE_KEY = 'hamza-tracker:v1';
 const THEME_KEY = 'hamza-tracker:theme';
 const PAGE_SIZE = 60;
+const TABS = ['lessons', 'journal', 'insights'];
 const TYPES = ['video', 'live', 'short'];
 const DEFAULT_TYPES = ['video', 'live'];
 const STATUSES = ['all', 'unwatched', 'watched', 'starred'];
@@ -137,7 +139,7 @@ function readHash() {
   const types = (p.get('types') || '').split(',').filter((t) => TYPES.includes(t));
   state.types = new Set(types.length ? types : DEFAULT_TYPES);
   state.sort = SORTS[p.get('sort')] ? p.get('sort') : 'newest';
-  state.tab = p.get('tab') === 'journal' ? 'journal' : 'lessons';
+  state.tab = TABS.includes(p.get('tab')) ? p.get('tab') : 'lessons';
   state.v = p.get('v') || '';
 }
 
@@ -376,6 +378,7 @@ function afterChange(id) {
   renderTopics();
   if (current?.id === id) renderLessonControls();
   if (state.tab === 'journal') renderJournal();
+  if (state.tab === 'insights') renderInsights();
 }
 
 function toggleWatched(id) {
@@ -537,6 +540,54 @@ function download(filename, text, type) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// ---------------------------------------------------------------- insights
+
+function renderInsights() {
+  const scoped = videos.filter(inScope);
+  const watchedAt = scoped.map((v) => progress(v.id).watched).filter(Boolean);
+  const days = activityByDay(watchedAt);
+  const now = Date.now();
+  const today = dayKey(new Date(now).toISOString());
+  const { current, longest } = streaks(days, today);
+  const pace = projection({ remaining: scoped.length - watchedAt.length, watchedTimestamps: watchedAt, now });
+  const spread = ratingSpread(scoped.map((v) => progress(v.id).rating));
+  const topics = topicProgress(scoped.map((v) => ({ topic: topicOf(v), watched: !!progress(v.id).watched })));
+  const cols = heatmap(days, today);
+  const s = (n, one, many) => `${nf.format(n)} ${n === 1 ? one : many}`;
+
+  const tiles = [
+    ['Current streak', s(current, 'day', 'days')],
+    ['Longest streak', s(longest, 'day', 'days')],
+    ['Recent pace', pace ? `${pace.perWeek.toFixed(1)} / week` : 'Not enough data'],
+    ['On pace to finish', pace ? FULL_DATE.format(pace.date) : (scoped.length === watchedAt.length && scoped.length ? 'Done!' : 'Watch some lessons')],
+  ].map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('');
+
+  const cells = cols.map((col) => `<div class="hm-col">${col.map((c) => c
+    ? `<span class="hm-cell l${c.level}" title="${esc(`${c.key}: ${s(c.count, 'lesson', 'lessons')}`)}"></span>`
+    : '<span class="hm-cell none"></span>').join('')}</div>`).join('');
+
+  const maxRating = Math.max(1, ...spread.counts);
+  const ratings = spread.n
+    ? spread.counts.map((n, i) => `<div class="rt-row"><span>${i + 1}★</span><div class="rt-bar"><span style="width:${(n / maxRating) * 100}%"></span></div><span class="rt-n">${n}</span></div>`).reverse().join('')
+    : '<p class="muted">Rate a lesson to see how you score them.</p>';
+
+  const topicRows = topics.map((t) => {
+    const pct = t.total ? (t.watched / t.total) * 100 : 0;
+    return `<div class="tp-row"><span class="tp-name">${esc(t.topic)}</span><div class="bar"><span style="width:${pct}%;background:oklch(0.62 0.14 ${topicHue(t.topic)})"></span></div><span class="tp-n">${t.watched}/${t.total}</span></div>`;
+  }).join('');
+
+  $('#insights').innerHTML = `
+    <dl class="stat-grid insight-tiles">${tiles}</dl>
+    <div class="panel"><h3>Last 26 weeks</h3>
+      <div class="heatmap" role="img" aria-label="Lessons watched per day over the last 26 weeks">${cells}</div>
+      <p class="muted hm-legend">Less <span class="hm-cell l0"></span><span class="hm-cell l1"></span><span class="hm-cell l2"></span><span class="hm-cell l3"></span><span class="hm-cell l4"></span> More</p>
+    </div>
+    <div class="insight-cols">
+      <div class="panel"><h3>Topics <small>${topics.length}</small></h3>${topicRows || '<p class="muted">No lessons yet.</p>'}</div>
+      <div class="panel"><h3>Your ratings${spread.average ? ` <small>avg ${spread.average.toFixed(1)}</small>` : ''}</h3>${ratings}</div>
+    </div>`;
+}
+
 // ---------------------------------------------------------------- tabs, theme, controls
 
 function syncControls() {
@@ -547,6 +598,7 @@ function syncControls() {
   for (const b of document.querySelectorAll('.tab')) b.setAttribute('aria-pressed', String(b.dataset.tab === state.tab));
   $('#view-lessons').hidden = state.tab !== 'lessons';
   $('#view-journal').hidden = state.tab !== 'journal';
+  $('#view-insights').hidden = state.tab !== 'insights';
 }
 
 function renderAll() {
@@ -555,6 +607,7 @@ function renderAll() {
   renderTopics();
   renderLessons();
   if (state.tab === 'journal') renderJournal();
+  if (state.tab === 'insights') renderInsights();
 }
 
 const THEMES = ['auto', 'light', 'dark'];
@@ -635,6 +688,7 @@ function bindEvents() {
       state.tab = b.dataset.tab;
       writeHash(); syncControls();
       if (state.tab === 'journal') renderJournal();
+      if (state.tab === 'insights') renderInsights();
     });
   }
 
