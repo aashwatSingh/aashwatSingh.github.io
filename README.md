@@ -21,4 +21,8 @@ topic, and can copy them all out as Markdown.
   say things like "2 years ago". The order is still exact. Videos found by the nightly sync get
   day-accurate dates.
 
+- **Insights tab:** streaks, a 26-week activity heatmap, per-topic progress, your rating spread and a
+  finish-date projection from your last 4 weeks of pace. The maths lives in `hamza/insights.js`; run
+  its tests with `node --test hamza/insights.test.mjs`.
+
 Run the sync tests locally with `python -m unittest scripts/test_fetch_videos.py`.
