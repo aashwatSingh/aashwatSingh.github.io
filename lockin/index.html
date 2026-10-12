@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Lock In</title>
+  <meta name="description" content="Your daily standard: keep your word, beat the urge, and do the work before you watch the lesson.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#c2410c">
+  <meta name="robots" content="noindex">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Lock In">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    try { const t = localStorage.getItem('lockin:theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
+  </script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <h1>Lock In</h1>
+      </div>
+      <nav class="tabs" aria-label="Views">
+        <button type="button" class="tab" data-tab="today" aria-pressed="true">Today</button>
+        <button type="button" class="tab" data-tab="progress" aria-pressed="false">Progress</button>
+      </nav>
+      <div class="topbar-actions">
+        <button type="button" id="theme-toggle" class="icon-btn" aria-label="Theme: auto" title="Theme: auto"></button>
+        <details class="menu">
+          <summary class="icon-btn" aria-label="Menu" title="Setup and backup">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+          </summary>
+          <div class="menu-panel">
+            <button type="button" id="setup-btn">Edit your setup</button>
+            <hr>
+            <button type="button" id="export-btn">Export data</button>
+            <label class="menu-file">Import data<input type="file" id="import-input" accept="application/json,.json"></label>
+            <hr>
+            <a class="menu-link" href="../hamza/">Hamza Lessons ↗</a>
+            <hr>
+            <button type="button" id="reset-btn" class="danger">Erase everything</button>
+          </div>
+        </details>
+      </div>
+    </div>
+  </header>
+
+  <div id="storage-warning" class="banner" hidden>
+    <div class="wrap">This browser is blocking storage, so nothing will be kept after you close the tab. Use <strong>Export data</strong> to save it.</div>
+  </div>
+
+  <main class="wrap">
+    <section id="view-today" aria-label="Today">
+      <div class="hero">
+        <p class="hero-date" id="hero-date"></p>
+        <h2 class="hero-day" id="hero-day">Day 1</h2>
+        <p class="hero-meta" id="hero-meta"></p>
+      </div>
+
+      <figure class="truth" id="truth">
+        <figcaption id="truth-label">Today’s truth</figcaption>
+        <blockquote id="truth-text"></blockquote>
+      </figure>
+
+      <section class="panel" aria-labelledby="one-h">
+        <h3 id="one-h">One Thing</h3>
+        <label class="field">
+          <span>The task that makes today a win</span>
+          <input type="text" id="one-thing" maxlength="200" placeholder="e.g. Finish the take-home assignment and submit it" autocomplete="off">
+        </label>
+        <label class="field">
+          <span>First 2-minute step <em>small enough that you can’t say no</em></span>
+          <input type="text" id="first-step" maxlength="200" placeholder="e.g. Open the repo and write the first heading" autocomplete="off">
+        </label>
+        <div class="row">
+          <button type="button" class="btn primary" id="start-now">Start 10 minutes now</button>
+          <span class="saved" id="one-saved" aria-live="polite"></span>
+        </div>
+      </section>
+
+      <section class="panel standard" id="standard" aria-labelledby="standard-h">
+        <div class="panel-head">
+          <h3 id="standard-h">The standard</h3>
+          <span class="pill" id="standard-count">0 of 3</span>
+        </div>
+        <p class="muted small">Full when you can. The minimum on your worst day. Hit at least the minimum on all of them and the day is kept.</p>
+        <div id="commitments"></div>
+        <div class="locked" id="locked" hidden>
+          <strong id="locked-title">Locked in.</strong>
+          <span id="locked-sub">Day kept. Now you’ve earned the lesson.</span>
+          <a class="btn" href="../hamza/">Your lesson →</a>
+        </div>
+      </section>
+
+      <section class="panel own-words" id="own-words" aria-labelledby="own-h" hidden>
+        <h3 id="own-h">In your own words</h3>
+        <blockquote id="own-text"></blockquote>
+        <p class="muted small" id="own-sub"></p>
+      </section>
+
+      <section class="panel" id="social" aria-labelledby="social-h">
+        <div class="panel-head">
+          <h3 id="social-h">Social reps this week</h3>
+          <span class="pill" id="social-count">0 / 3</span>
+        </div>
+        <p class="suggest"><span class="tag" id="social-level">Level 1 · Warm-up</span> <span id="social-text"></span></p>
+        <form class="inline-form" id="social-form">
+          <label class="visually-hidden" for="social-note">What did you do?</label>
+          <input type="text" id="social-note" maxlength="200" placeholder="What did you do? e.g. Asked the person next to me what they’re building" autocomplete="off">
+          <button type="submit" class="btn">Log rep</button>
+        </form>
+        <ul class="notes" id="social-list"></ul>
+      </section>
+
+      <section class="panel review" id="review" aria-labelledby="review-h">
+        <div class="panel-head">
+          <h3 id="review-h">Night review</h3>
+          <span class="pill" id="review-state"></span>
+        </div>
+        <div id="review-closed">
+          <p class="muted small" id="review-hint">Opens at 6 pm. Ninety seconds: one win, one lesson, tomorrow’s One Thing.</p>
+          <button type="button" class="btn" id="review-open">Review now</button>
+        </div>
+        <form id="review-form" hidden>
+          <div id="review-open-items"></div>
+          <label class="field">
+            <span>One win <em>goes in your proof file</em></span>
+            <input type="text" id="review-win" maxlength="240" autocomplete="off" placeholder="Something you did today that the old you wouldn’t have">
+          </label>
+          <label class="field">
+            <span>One lesson</span>
+            <input type="text" id="review-lesson" maxlength="240" autocomplete="off" placeholder="What would you do differently?">
+          </label>
+          <label class="field">
+            <span>Tomorrow’s One Thing</span>
+            <input type="text" id="review-next" maxlength="200" autocomplete="off">
+          </label>
+          <label class="field">
+            <span>And its first 2-minute step</span>
+            <input type="text" id="review-next-step" maxlength="200" autocomplete="off">
+          </label>
+          <button type="submit" class="btn primary">Close the day</button>
+        </form>
+        <div id="review-done" hidden></div>
+      </section>
+    </section>
+
+    <section id="view-progress" aria-label="Progress" hidden>
+      <div id="progress"></div>
+    </section>
+  </main>
+
+  <footer class="wrap footer">
+    <p>Stored only in this browser. Use the ⋯ menu to move it to another device.</p>
+  </footer>
+
+  <button type="button" class="slip-btn" id="slip-btn">About to slip?</button>
+  <button type="button" class="timer-pill" id="timer-pill" hidden></button>
+
+  <!-- About to slip? -->
+  <dialog id="urge" aria-labelledby="urge-title">
+    <div class="dlg">
+      <div id="urge-breathe" class="urge-step">
+        <h2 id="urge-title">Pause. Phone face down.</h2>
+        <div class="breath" aria-hidden="true"><span></span></div>
+        <p class="breath-text" id="breath-text" aria-live="polite">Breathe in…</p>
+        <p class="muted small"><span id="breath-left">20</span> seconds. The urge doesn’t get a vote until this is done.</p>
+        <button type="button" class="btn ghost" id="urge-skip">Skip</button>
+      </div>
+      <div id="urge-remember" class="urge-step" hidden>
+        <p class="urge-truth" id="urge-truth"></p>
+        <div class="why-box" id="urge-why-box">
+          <h3>Why you’re doing this</h3>
+          <p id="urge-why"></p>
+        </div>
+        <div class="why-box" id="urge-letter-box">
+          <h3>From future you</h3>
+          <p id="urge-letter"></p>
+        </div>
+        <h3 class="swap-h">Don’t fight it. Swap it. Pick one, right now:</h3>
+        <div class="swaps">
+          <button type="button" class="swap" data-swap="focus"><strong id="swap-focus">10 minutes on your first step</strong><span>Starts the timer</span></button>
+          <button type="button" class="swap" data-swap="apply"><strong>Send one application</strong><span>Then hit + on internship reps</span></button>
+          <button type="button" class="swap" data-swap="walk"><strong>5-minute walk, no phone</strong><span>Leave it on the desk</span></button>
+        </div>
+        <button type="button" class="btn ghost" id="urge-close">I’m good, close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Focus timer -->
+  <dialog id="timer" aria-labelledby="timer-title">
+    <div class="dlg">
+      <form method="dialog" class="dialog-close"><button class="icon-btn" aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button></form>
+      <h2 id="timer-title">Focus</h2>
+      <p class="muted" id="timer-label"></p>
+      <div class="seg presets" role="group" aria-label="Length" id="timer-presets">
+        <button type="button" data-min="10">10 min</button>
+        <button type="button" data-min="25">25 min</button>
+        <button type="button" data-min="50">50 min</button>
+      </div>
+      <p class="clock" id="timer-clock" aria-live="off">10:00</p>
+      <div class="bar"><span id="timer-bar"></span></div>
+      <div class="row center">
+        <button type="button" class="btn primary" id="timer-start">Start</button>
+        <button type="button" class="btn" id="timer-stop" hidden>Stop and log</button>
+      </div>
+      <p class="muted small center" id="timer-note">Phone in another room. Minutes count toward deep work, even if you stop early.</p>
+    </div>
+  </dialog>
+
+  <!-- Setup -->
+  <dialog id="setup" aria-labelledby="setup-title">
+    <form class="dlg" id="setup-form">
+      <p class="steps" id="setup-steps" aria-hidden="true"></p>
+      <div class="setup-step" data-step="0">
+        <h2 id="setup-title">Why are you doing this?</h2>
+        <p class="muted">Write it for the version of you who wants to quit at 11 pm. You’ll see it every time you’re about to slip.</p>
+        <label class="field">
+          <span class="visually-hidden">Your why</span>
+          <textarea id="setup-why" rows="5" maxlength="600"></textarea>
+        </label>
+        <button type="button" class="btn ghost" id="use-draft">Start from a draft</button>
+      </div>
+      <div class="setup-step" data-step="1" hidden>
+        <h2>Be honest. What gets you?</h2>
+        <p class="muted">This only picks which truths you’re shown. It never leaves this browser.</p>
+        <div class="checks" id="setup-weak"></div>
+        <h2 class="mt">What are you building toward?</h2>
+        <div class="checks" id="setup-ambitions"></div>
+      </div>
+      <div class="setup-step" data-step="2" hidden>
+        <h2>Your daily standard</h2>
+        <p class="muted">Keep it to three or four. Each one needs a minimum you can hit on your worst day.</p>
+        <div id="setup-commitments"></div>
+        <div class="row">
+          <button type="button" class="btn ghost" id="add-commitment">+ Add one</button>
+        </div>
+        <label class="field narrow">
+          <span>Social reps per week</span>
+          <input type="number" id="setup-social" min="0" max="21" value="3">
+        </label>
+      </div>
+      <div class="setup-step" data-step="3" hidden>
+        <h2>A note from future you</h2>
+        <p class="muted">Two or three lines from the you of a year and a half from now. What did you do that you’re proud of? What would they say to you right now?</p>
+        <label class="field">
+          <span class="visually-hidden">Letter from future you</span>
+          <textarea id="setup-letter" rows="4" maxlength="600" placeholder="You stopped waiting to feel ready…"></textarea>
+        </label>
+        <div class="two">
+          <label class="field">
+            <span>The deadline that matters</span>
+            <input type="text" id="setup-deadline-label" maxlength="60" placeholder="Internship starts">
+          </label>
+          <label class="field">
+            <span>Date</span>
+            <input type="date" id="setup-deadline">
+          </label>
+        </div>
+        <p class="tip"><strong>Tip:</strong> add this page to your home screen (Share → Add to Home Screen) and put it where Instagram used to be.</p>
+      </div>
+      <div class="setup-foot">
+        <button type="button" class="btn ghost" id="setup-back">Back</button>
+        <button type="button" class="btn primary" id="setup-next">Next</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

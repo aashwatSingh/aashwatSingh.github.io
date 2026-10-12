@@ -144,6 +144,9 @@ summary::-webkit-details-marker { display: none; }
 
 .banner { background: var(--accent-soft); border-bottom: 1px solid var(--border); font-size: 14px; }
 .banner .wrap { padding-top: 8px; padding-bottom: 8px; }
+.lockin-banner .wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.lockin-banner span { font-weight: 600; margin-right: auto; }
+.lockin-banner .btn { height: 34px; font-size: 14px; text-decoration: none; }
 
 main.wrap { padding-top: 20px; padding-bottom: 32px; }
 
