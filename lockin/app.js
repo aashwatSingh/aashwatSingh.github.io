@@ -492,7 +492,44 @@ function renderProgress() {
 
 let tab = location.hash === '#progress' ? 'progress' : 'today';
 
+// Re-rendering replaces the commitment controls, so remember which one had focus and put it back.
+function focusKey(el) {
+  if (!el || !el.closest) return null;
+  const mark = el.closest('.seg[data-cid] button[data-mark]');
+  if (mark) {
+    const inReview = !!el.closest('#review-open-items');
+    return { kind: 'mark', cid: mark.parentElement.dataset.cid, mark: mark.dataset.mark, inReview };
+  }
+  const step = el.closest('.stepper button[data-step]');
+  if (step) return { kind: 'step', id: step.parentElement.dataset.count, step: step.dataset.step };
+  const focusBtn = el.closest('#commitments [data-focus]');
+  if (focusBtn) return { kind: 'focusbtn' };
+  return null;
+}
+
+function restoreFocus(key) {
+  if (!key) return;
+  let el = null;
+  if (key.kind === 'mark') {
+    const root = key.inReview ? '#review-open-items' : '#commitments';
+    el = document.querySelector(`${root} .seg[data-cid="${CSS.escape(key.cid)}"] button[data-mark="${key.mark}"]`);
+    // A commitment marked in the review leaves the "still open" list: move on to the next one, or the win field.
+    if (!el && key.inReview) el = document.querySelector('#review-open-items button[data-mark]') || $('#review-win');
+  } else if (key.kind === 'step') {
+    el = document.querySelector(`.stepper[data-count="${CSS.escape(key.id)}"] button[data-step="${key.step}"]`);
+  } else if (key.kind === 'focusbtn') {
+    el = document.querySelector('#commitments [data-focus]');
+  }
+  if (el && !el.closest('[hidden]')) el.focus({ preventScroll: true });
+}
+
 function renderAll() {
+  const key = focusKey(document.activeElement);
+  renderAllInner();
+  if (document.activeElement === document.body || !document.activeElement) restoreFocus(key);
+}
+
+function renderAllInner() {
   if (!P()) return;
   today = todayKey();
   const s = streak(store.days, opts());
@@ -981,6 +1018,8 @@ function bindEvents() {
     download(`lock-in-${today}.json`, JSON.stringify(data, null, 2), 'application/json');
     menu.open = false;
   });
+  $('#setup-import').addEventListener('click', () => $('#setup-import-input').click());
+  $('#import-btn').addEventListener('click', () => $('#import-input').click());
   $('#setup-import-input').addEventListener('change', (e) => importFile(e));
   $('#import-input').addEventListener('change', (e) => importFile(e));
   async function importFile(e) {

@@ -112,11 +112,10 @@ summary::-webkit-details-marker { display: none; }
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   box-shadow: var(--shadow); padding: 6px; display: grid;
 }
-.menu-panel button, .menu-file, .menu-link {
+.menu-panel button, .menu-link {
   text-align: left; border: 0; background: none; padding: 8px 10px; border-radius: 8px; cursor: pointer; text-decoration: none;
 }
-.menu-panel button:hover, .menu-file:hover, .menu-link:hover { background: var(--surface-2); }
-.menu-file input { display: none; }
+.menu-panel button:hover, .menu-link:hover { background: var(--surface-2); }
 .menu-panel hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; width: 100%; }
 .menu-panel .danger { color: var(--danger); }
 
@@ -213,6 +212,8 @@ main.wrap { padding-top: 18px; padding-bottom: 96px; }
 .stepper { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .stepper button { border: 0; background: var(--surface); width: 44px; height: 40px; font-size: 20px; line-height: 1; color: var(--text); }
 .stepper button:hover { background: var(--surface-2); }
+/* The stepper clips its overflow, so draw the focus ring inside the button. */
+.stepper button:focus-visible { outline-offset: -3px; }
 .stepper output { min-width: 36px; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
 .cm .bar { height: 6px; }
 .cm-link { font-size: 13px; color: var(--muted); }
