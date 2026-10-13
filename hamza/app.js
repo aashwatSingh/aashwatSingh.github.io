@@ -1,5 +1,6 @@
 import { ALL_TOPICS, guessTopic, topicHue } from './topics.js';
 import { activityByDay, streaks, heatmap, topicProgress, ratingSpread, projection, dayKey } from './insights.js';
+import { dayStatus, todayKey } from '../lockin/logic.js';
 
 const STORE_KEY = 'hamza-tracker:v1';
 const THEME_KEY = 'hamza-tracker:theme';
@@ -796,6 +797,11 @@ function bindEvents() {
     (state.tab === 'journal' ? $('#journal-search') : $('#search')).focus();
   });
 
+  $('#lockin-skip').addEventListener('click', () => {
+    try { localStorage.setItem(LOCKIN_SKIP_KEY, todayKey()); } catch {}
+    $('#lockin-banner').hidden = true;
+  });
+
   window.addEventListener('hashchange', () => {
     readHash();
     renderAll();
@@ -804,11 +810,34 @@ function bindEvents() {
   });
 }
 
+// ---------------------------------------------------------------- Lock In
+
+// If you use Lock In and today isn't kept yet, say so: lessons are the reward, not the work.
+const LOCKIN_KEY = 'lockin:v1';
+const LOCKIN_SKIP_KEY = 'hamza-tracker:lockin-skip';
+
+function renderLockinBanner() {
+  const banner = $('#lockin-banner');
+  banner.hidden = true;
+  try {
+    const today = todayKey();
+    if (localStorage.getItem(LOCKIN_SKIP_KEY) === today) return;
+    const data = JSON.parse(localStorage.getItem(LOCKIN_KEY) || 'null');
+    const commitments = data?.profile?.commitments;
+    if (!Array.isArray(commitments) || !commitments.length) return;
+    const st = dayStatus(data.days?.[today], commitments);
+    if (st.kept) return;
+    $('#lockin-banner-text').textContent = `Today: ${st.met} of ${st.total} kept. Lessons are the reward, not the work.`;
+    banner.hidden = false;
+  } catch {}
+}
+
 // ---------------------------------------------------------------- boot
 
 async function init() {
   loadStore();
   $('#storage-warning').hidden = storageOk;
+  renderLockinBanner();
   applyTheme(document.documentElement.dataset.theme || 'auto');
   readHash();
   bindEvents();

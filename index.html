@@ -16,6 +16,7 @@
     h1 { font-size: 22px; margin: 0 0 16px; }
     a.card { display: block; text-decoration: none; color: inherit; background: var(--card); border: 1px solid var(--border);
       border-radius: 12px; padding: 16px 18px; }
+    a.card + a.card { margin-top: 10px; }
     a.card:hover { border-color: var(--accent); }
     a.card strong { display: block; }
     a.card span { color: var(--muted); font-size: 14px; }
@@ -24,6 +25,10 @@
 <body>
   <main>
     <h1>Aashwat Singh</h1>
+    <a class="card" href="lockin/">
+      <strong>Lock In →</strong>
+      <span>Your daily standard. Do the work, then watch the lesson.</span>
+    </a>
     <a class="card" href="hamza/">
       <strong>Hamza Lessons →</strong>
       <span>Track every lesson from the @Hamza97 YouTube channel.</span>
