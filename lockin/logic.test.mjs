@@ -192,3 +192,26 @@ test('mergeDays keeps the newer copy and skips junk', () => {
   assert.equal(days['2026-10-03'].win, 'added');
   assert.equal(days.nope, undefined);
 });
+
+test('review fixes: DST-safe day boundary, lessons by Lock In day, honest verdict wording', () => {
+  // Wall-clock 4 am rule (these hold in any timezone, including DST nights).
+  assert.equal(todayKey(new Date(2026, 10, 1, 3, 15).getTime()), '2026-10-31');
+  assert.equal(todayKey(new Date(2026, 2, 8, 4, 30).getTime()), '2026-03-08');
+  assert.equal(todayKey(new Date(2026, 2, 8, 3, 59).getTime()), '2026-03-07');
+
+  // A lesson watched at 1:30 am Monday belongs to Sunday's Lock In day.
+  const late = { videos: { x: { watched: new Date(2026, 9, 19, 1, 30).toISOString() } } };
+  assert.equal(lessonsWatched(late, '2026-10-12', '2026-10-18'), 1);
+  assert.equal(lessonsWatched(late, '2026-10-19', '2026-10-25'), 0);
+
+  // Pace verdict names the real commitment and the real gap.
+  const gym = [{ id: 'phone', label: 'P', kind: 'check' }, { id: 'gym', label: 'Gym sets', kind: 'count', full: 4, min: 1 }];
+  const w = weekStats({ '2026-10-12': { counts: { gym: 1 } } }, { today: '2026-10-14', startDate: '2026-10-01', commitments: gym }, null);
+  assert.equal(weeklyVerdict(w, { countTarget: 20, countLabel: 'Gym sets' }),
+    'Gym sets are behind pace: 1 of 9 by now. 8 more today puts you back on track.');
+
+  // Social line never says "weekend ahead" on the weekend.
+  const sun = { from: '2026-10-12', weekday: 6, daysElapsed: 7, keptDays: 4, todayKept: false, counts: {}, lessons: 0, social: 0 };
+  assert.match(weeklyVerdict(sun, { socialTarget: 3 }), /before the week ends/);
+  assert.match(weeklyVerdict({ ...sun, weekday: 3, daysElapsed: 4, keptDays: 1 }, { socialTarget: 3 }), /weekend ahead/);
+});

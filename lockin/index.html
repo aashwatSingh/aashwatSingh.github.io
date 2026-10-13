@@ -132,19 +132,19 @@
           <div id="review-open-items"></div>
           <label class="field">
             <span>One win <em>goes in your proof file</em></span>
-            <input type="text" id="review-win" maxlength="240" autocomplete="off" placeholder="Something you did today that the old you wouldn’t have">
+            <input type="text" id="review-win" enterkeyhint="next" maxlength="240" autocomplete="off" placeholder="Something you did today that the old you wouldn’t have">
           </label>
           <label class="field">
             <span>One lesson</span>
-            <input type="text" id="review-lesson" maxlength="240" autocomplete="off" placeholder="What would you do differently?">
+            <input type="text" id="review-lesson" enterkeyhint="next" maxlength="240" autocomplete="off" placeholder="What would you do differently?">
           </label>
           <label class="field">
             <span>Tomorrow’s One Thing</span>
-            <input type="text" id="review-next" maxlength="200" autocomplete="off">
+            <input type="text" id="review-next" enterkeyhint="next" maxlength="200" autocomplete="off">
           </label>
           <label class="field">
             <span>And its first 2-minute step</span>
-            <input type="text" id="review-next-step" maxlength="200" autocomplete="off">
+            <input type="text" id="review-next-step" enterkeyhint="done" maxlength="200" autocomplete="off">
           </label>
           <button type="submit" class="btn primary">Close the day</button>
         </form>
@@ -229,7 +229,10 @@
           <span class="visually-hidden">Your why</span>
           <textarea id="setup-why" rows="5" maxlength="600"></textarea>
         </label>
-        <button type="button" class="btn ghost" id="use-draft">Start from a draft</button>
+        <div class="row">
+          <button type="button" class="btn ghost" id="use-draft">Start from a draft</button>
+          <label class="btn ghost" id="setup-import">Import from another device<input type="file" id="setup-import-input" accept="application/json,.json" hidden></label>
+        </div>
       </div>
       <div class="setup-step" data-step="1" hidden>
         <h2>Be honest. What gets you?</h2>

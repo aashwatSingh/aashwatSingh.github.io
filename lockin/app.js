@@ -349,11 +349,13 @@ function renderSocial() {
 }
 
 let reviewForced = false;
+let reviewFilledFor = null;
 function renderReview() {
   const day = getDay();
   const hour = new Date().getHours();
   const open = reviewForced || hour >= REVIEW_HOUR || hour < 4;
   const state = $('#review-state');
+  const wasHidden = $('#review-form').hidden;
   $('#review-done').hidden = !day.reviewed;
   $('#review-form').hidden = !!day.reviewed || !open;
   $('#review-closed').hidden = !!day.reviewed || open;
@@ -377,11 +379,15 @@ function renderReview() {
     ? `<p class="muted small">Still open. Be honest:</p>${pending.map((c) =>
       `<div class="review-open-item"><span>${esc(c.label)}</span>${markSeg(c, null)}</div>`).join('')}`
     : '';
-  setValue($('#review-win'), day.win);
-  setValue($('#review-lesson'), day.lesson);
-  const tmr = getDay(addDays(today, 1));
-  setValue($('#review-next'), tmr.oneThing);
-  setValue($('#review-next-step'), tmr.firstStep);
+  // Fill the fields only when the form opens or the day changes, so a re-render never wipes a draft.
+  if (wasHidden || reviewFilledFor !== today) {
+    reviewFilledFor = today;
+    const tmr = getDay(addDays(today, 1));
+    $('#review-win').value = day.win || '';
+    $('#review-lesson').value = day.lesson || '';
+    $('#review-next').value = tmr.oneThing || '';
+    $('#review-next-step').value = tmr.firstStep || '';
+  }
   $('#review-next').placeholder = day.oneThing ? `Today’s was: ${day.oneThing}` : 'The task that makes tomorrow a win';
 }
 
@@ -463,7 +469,7 @@ function renderProgress() {
         <div><strong>${w.lessons}</strong><span>Hamza lessons watched</span></div>
         <div><strong>${w.keptDays}</strong><span>Days you kept your word</span></div>
       </div>` : ''}
-      <p class="verdict">${esc(weeklyVerdict(w, { countTarget, socialTarget }))}</p>
+      <p class="verdict">${esc(weeklyVerdict(w, { countTarget, countLabel: cc?.label, socialTarget }))}</p>
     </section>
 
     <section class="panel">
@@ -552,7 +558,21 @@ function chime() {
 }
 
 async function holdScreen() {
-  try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
+  try {
+    const lock = await navigator.wakeLock?.request('screen');
+    if (!timer) { lock?.release?.().catch(() => {}); return; }
+    wakeLock?.release?.().catch(() => {});
+    wakeLock = lock || null;
+  } catch {}
+}
+
+function clearTimerState() {
+  timer = null;
+  saveTimer();
+  releaseScreen();
+  clearInterval(tick);
+  document.title = 'Lock In';
+  updateTimerUI();
 }
 function releaseScreen() {
   wakeLock?.release?.().catch(() => {});
@@ -570,10 +590,9 @@ function timerLabel() {
 }
 
 function openTimer(minutes, autostart = false) {
-  if (!timer) {
-    preset = minutes || preset;
-    $('#timer-label').textContent = timerLabel() ? `Working on: ${timerLabel()}` : 'Working on your One Thing.';
-  }
+  if (!timer) preset = minutes || preset;
+  const label = timer ? timer.label : timerLabel();
+  $('#timer-label').textContent = label ? `Working on: ${label}` : 'Working on your One Thing.';
   updateTimerUI();
   if (!$('#timer').open) $('#timer').showModal();
   if (autostart && !timer) startTimer();
@@ -774,6 +793,7 @@ function finishSetup() {
     deadlineLabel: $('#setup-deadline-label').value.trim(),
     deadline: $('#setup-deadline').value,
     socialTarget: $('#setup-social').value,
+    startDate: first ? todayKey() : draft.startDate,
   });
   store.profile = profile;
   saveStore();
@@ -878,7 +898,8 @@ function bindEvents() {
     });
     const next = $('#review-next').value.trim();
     const step = $('#review-next-step').value.trim();
-    if (next || step) updateDay(tomorrow, (d) => ({ ...d, oneThing: next, firstStep: step }));
+    const had = getDay(tomorrow);
+    if (next || step || had.oneThing || had.firstStep) updateDay(tomorrow, (d) => ({ ...d, oneThing: next, firstStep: step }));
     reviewForced = false;
     renderAll();
     toast(isKept() ? 'Day kept and closed. Sleep. Tomorrow you go again.' : 'Logged honestly. Tomorrow, hit the minimums. Never miss twice.');
@@ -960,7 +981,9 @@ function bindEvents() {
     download(`lock-in-${today}.json`, JSON.stringify(data, null, 2), 'application/json');
     menu.open = false;
   });
-  $('#import-input').addEventListener('change', async (e) => {
+  $('#setup-import-input').addEventListener('change', (e) => importFile(e));
+  $('#import-input').addEventListener('change', (e) => importFile(e));
+  async function importFile(e) {
     const file = e.target.files[0];
     e.target.value = '';
     menu.open = false;
@@ -982,14 +1005,13 @@ function bindEvents() {
     } catch {
       toast('That file isn’t a Lock In export.');
     }
-  });
+  }
   $('#reset-btn').addEventListener('click', () => {
     menu.open = false;
     if (!confirm('Erase your setup and every day in this browser? Export first if you want a backup.')) return;
     store = { version: 1, profile: null, days: {} };
     saveStore();
-    timer = null;
-    saveTimer();
+    clearTimerState();
     openSetup();
   });
 
@@ -1008,6 +1030,31 @@ function bindEvents() {
     if (todayKey() !== today) { reviewForced = false; renderAll(); }
   });
   setInterval(() => { if (todayKey() !== today) { reviewForced = false; renderAll(); } }, 60000);
+
+  // Another tab (or the installed app) changed the data: reload it instead of overwriting it later.
+  window.addEventListener('storage', (e) => {
+    if (e.key === STORE_KEY) {
+      const hadProfile = !!P();
+      loadStore();
+      if (P() && !hadProfile && $('#setup').open) $('#setup').close();
+      // This tab isn't the one being typed in, so let its fields take the fresh values.
+      if (!document.hasFocus() && document.activeElement?.matches?.('input, textarea')) document.activeElement.blur();
+      reviewFilledFor = null;
+      renderAll();
+    } else if (e.key === TIMER_KEY) {
+      timer = loadTimer();
+      if (timer) runTick();
+      else { clearInterval(tick); releaseScreen(); document.title = 'Lock In'; updateTimerUI(); }
+    }
+  });
+
+  // Enter in a review field moves to the next one; only the button closes the day.
+  $('#review-form').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
+    e.preventDefault();
+    const inputs = [...$('#review-form').querySelectorAll('input[type="text"]')];
+    inputs[inputs.indexOf(e.target) + 1]?.focus();
+  });
 }
 
 // ---------------------------------------------------------------- boot
@@ -1020,7 +1067,14 @@ function init() {
   timer = loadTimer();
   if (P()) renderAll();
   else openSetup();
-  if (timer) runTick();
+  if (timer) {
+    runTick();
+    if (timer) {
+      holdScreen();
+      // Browsers only allow sound after a tap, so unlock the end-of-timer chime on the first one.
+      document.addEventListener('pointerdown', primeAudio, { once: true });
+    }
+  }
   if (location.hash === '#slip' && P()) openUrge();
 }
 

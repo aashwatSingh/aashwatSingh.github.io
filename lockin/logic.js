@@ -19,7 +19,10 @@ export const DAY_START_HOUR = 4;
 
 /** The Lock In day for a moment in time (ms), as YYYY-MM-DD. */
 export function todayKey(now = Date.now()) {
-  return dayKey(new Date(now - DAY_START_HOUR * 36e5).toISOString());
+  // Use the local wall clock, not "now minus 4 hours", so DST nights still flip at 4 am.
+  const d = new Date(now);
+  const k = dayKey(d.toISOString());
+  return k && d.getHours() < DAY_START_HOUR ? addDays(k, -1) : k;
 }
 
 /** The calendar day `n` days after `key` (YYYY-MM-DD). */
@@ -144,7 +147,8 @@ export function keptRate(days, { today, startDate, commitments }, n = 30) {
 export function lessonsWatched(hamza, from, to) {
   let n = 0;
   for (const p of Object.values(hamza?.videos || {})) {
-    const k = p?.watched ? dayKey(p.watched) : null;
+    const t = p?.watched ? Date.parse(p.watched) : NaN;
+    const k = Number.isNaN(t) ? null : todayKey(t);
     if (k && k >= from && k <= to) n++;
   }
   return n;
@@ -166,7 +170,7 @@ export function takeaways(hamza) {
 export function weekStats(days, { today, startDate, commitments }, hamza) {
   const from = weekStart(today);
   const s = {
-    from, daysElapsed: 0, keptDays: 0, todayKept: false, focusMin: 0, social: 0, urges: 0,
+    from, weekday: daysBetween(from, today), daysElapsed: 0, keptDays: 0, todayKept: false, focusMin: 0, social: 0, urges: 0,
     counts: Object.fromEntries(commitments.filter((c) => c.kind === 'count').map((c) => [c.id, 0])),
     lessons: lessonsWatched(hamza, from, today),
   };
@@ -188,7 +192,7 @@ export function weekStats(days, { today, startDate, commitments }, hamza) {
 }
 
 /** One honest line about the week so far. Today only counts once it's kept. */
-export function weeklyVerdict(s, { countTarget = 0, socialTarget = 0 } = {}) {
+export function weeklyVerdict(s, { countTarget = 0, countLabel = 'Internship reps', socialTarget = 0 } = {}) {
   const countDone = Object.values(s.counts)[0] ?? 0;
   const done = s.daysElapsed - (s.todayKept ? 0 : 1);
   if (s.lessons >= 3 && s.lessons > s.keptDays) {
@@ -200,13 +204,15 @@ export function weeklyVerdict(s, { countTarget = 0, socialTarget = 0 } = {}) {
   }
   const pace = countTarget ? Math.ceil((countTarget * s.daysElapsed) / 7) : 0;
   if (pace && countDone < pace) {
-    return `Internship reps are behind pace: ${countDone} of ${pace} by now. Two before lunch puts you back on track.`;
+    const gap = pace - countDone;
+    return `${countLabel} ${countLabel.endsWith('s') ? 'are' : 'is'} behind pace: ${countDone} of ${pace} by now. ${gap} more today puts you back on track.`;
   }
   if (done - s.keptDays === 1) return s.todayKept
     ? 'One slip this week, and you came back. That is the skill.'
     : 'One slip so far. Keep today and it stays a blip.';
-  if (socialTarget && s.daysElapsed >= 5 && s.social < socialTarget) {
-    return `${s.social} of ${socialTarget} social reps with the weekend ahead. Confidence is built from evidence. Go collect some.`;
+  if (socialTarget && s.weekday >= 3 && s.social < socialTarget) {
+    const when = s.weekday >= 5 ? 'before the week ends' : 'with the weekend ahead';
+    return `${s.social} of ${socialTarget} social reps ${when}. Confidence is built from evidence. Go collect some.`;
   }
   if (s.keptDays === done) return `Kept ${s.keptDays} of ${done}. Solid. Keep the floor where it is.`;
   return `Kept ${s.keptDays} of ${done}. Next week is built by what you do today, not by Monday’s promises.`;

@@ -370,6 +370,8 @@ dialog::backdrop { background: rgb(15 12 10 / 0.6); backdrop-filter: blur(3px); 
 
 @media (max-width: 560px) {
   body { font-size: 14.5px; }
+  /* iOS zooms the page when a focused field's text is under 16px. */
+  .field input, .field textarea, .field select, .inline-form input { font-size: 16px; }
   .hero-day { font-size: 38px; }
   .truth blockquote { font-size: 17px; }
   .panel { padding: 14px; }
@@ -393,3 +395,6 @@ dialog::backdrop { background: rgb(15 12 10 / 0.6); backdrop-filter: blur(3px); 
   *, *::before, *::after { transition: none !important; }
   .breath span { animation: none; transform: scale(0.8); }
 }
+
+/* Long words or pasted URLs in your own text wrap instead of widening the page. */
+.truth blockquote, .own-words blockquote, .notes li, .proof li, .why-box p, .why-text, #review-done p, .urge-truth { overflow-wrap: anywhere; }
