@@ -8,9 +8,11 @@
   --muted: #6b655c;
   --accent: #c2410c;
   --accent-hover: #a8380a;
+  --accent-text: #a8380a; /* accent as text on tinted backgrounds: AA contrast in light */
   --accent-ink: #ffffff;
   --accent-soft: #fbe6da;
   --good: #15803d;
+  --good-text: #166534;
   --good-soft: #dcf2e3;
   --danger: #b91c1c;
   --shadow: 0 1px 2px rgb(40 30 20 / 0.05), 0 6px 20px rgb(40 30 20 / 0.06);
@@ -28,9 +30,11 @@
     --muted: #a39c91;
     --accent: #f97316;
     --accent-hover: #fb8a3c;
+    --accent-text: #f97316;
     --accent-ink: #1a0f08;
     --accent-soft: #3b2215;
     --good: #4ade80;
+    --good-text: #4ade80;
     --good-soft: #173323;
     --danger: #f87171;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 6px 20px rgb(0 0 0 / 0.25);
@@ -47,9 +51,11 @@
   --muted: #a39c91;
   --accent: #f97316;
   --accent-hover: #fb8a3c;
+  --accent-text: #f97316;
   --accent-ink: #1a0f08;
   --accent-soft: #3b2215;
   --good: #4ade80;
+  --good-text: #4ade80;
   --good-soft: #173323;
   --danger: #f87171;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 6px 20px rgb(0 0 0 / 0.25);
@@ -142,7 +148,7 @@ main.wrap { padding-top: 18px; padding-bottom: 96px; }
 }
 .seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); font-weight: 600; }
 .seg button[data-mark="full"][aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
-.seg button[data-mark="min"][aria-pressed="true"] { color: var(--accent); }
+.seg button[data-mark="min"][aria-pressed="true"] { color: var(--accent-text); }
 .field { display: grid; gap: 6px; margin-bottom: 12px; }
 .field > span { font-size: 13px; font-weight: 600; }
 .field em { font-style: normal; font-weight: 400; color: var(--muted); margin-left: 4px; }
@@ -153,16 +159,16 @@ main.wrap { padding-top: 18px; padding-bottom: 96px; }
 .field textarea { resize: vertical; }
 .field input:focus, .field textarea:focus, .field select:focus, .inline-form input:focus { outline: none; border-color: var(--accent); }
 .field.narrow { max-width: 200px; margin-top: 14px; }
-.saved { font-size: 13px; color: var(--good); }
+.saved { font-size: 13px; color: var(--good-text); }
 .pill {
   display: inline-flex; align-items: center; font-size: 12.5px; font-weight: 650; padding: 2px 10px; border-radius: 99px;
   background: var(--surface-2); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .pill.on { background: var(--accent); color: var(--accent-ink); }
-.pill.good { background: var(--good-soft); color: var(--good); }
+.pill.good { background: var(--good-soft); color: var(--good-text); }
 .tag {
   display: inline-block; font-size: 12px; font-weight: 650; padding: 1px 8px; border-radius: 99px;
-  background: var(--accent-soft); color: var(--accent); margin-right: 4px; white-space: nowrap;
+  background: var(--accent-soft); color: var(--accent-text); margin-right: 4px; white-space: nowrap;
 }
 .bar { height: 8px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
 .bar span { display: block; height: 100%; width: 0; background: var(--accent); border-radius: inherit; transition: width 0.4s ease; }
@@ -178,7 +184,7 @@ main.wrap { padding-top: 18px; padding-bottom: 96px; }
   margin: 0 0 16px; padding: 16px 18px; border-radius: var(--radius);
   background: var(--accent-soft); border-left: 4px solid var(--accent);
 }
-.truth figcaption { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; }
+.truth figcaption { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent-text); margin-bottom: 6px; }
 .truth blockquote { margin: 0; font-size: 18.5px; line-height: 1.45; font-weight: 600; letter-spacing: -0.01em; text-wrap: pretty; }
 
 /* Panels */
@@ -357,7 +363,7 @@ dialog::backdrop { background: rgb(15 12 10 / 0.6); backdrop-filter: blur(3px); 
 .proof { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .proof li { display: grid; grid-template-columns: 64px 1fr; gap: 10px; font-size: 14px; }
 .proof time { color: var(--muted); font-size: 12.5px; padding-top: 1px; font-variant-numeric: tabular-nums; }
-.proof .kind { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); margin-right: 6px; }
+.proof .kind { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent-text); margin-right: 6px; }
 .empty-note { color: var(--muted); font-size: 14px; margin: 0; }
 
 .footer { color: var(--muted); font-size: 13px; padding-bottom: 90px; }
