@@ -41,7 +41,8 @@
             <button type="button" id="setup-btn">Edit your setup</button>
             <hr>
             <button type="button" id="export-btn">Export data</button>
-            <label class="menu-file">Import data<input type="file" id="import-input" accept="application/json,.json"></label>
+            <button type="button" id="import-btn">Import data</button>
+            <input type="file" id="import-input" accept="application/json,.json" hidden>
             <hr>
             <a class="menu-link" href="../hamza/">Hamza Lessons ↗</a>
             <hr>
@@ -231,7 +232,8 @@
         </label>
         <div class="row">
           <button type="button" class="btn ghost" id="use-draft">Start from a draft</button>
-          <label class="btn ghost" id="setup-import">Import from another device<input type="file" id="setup-import-input" accept="application/json,.json" hidden></label>
+          <button type="button" class="btn ghost" id="setup-import">Import from another device</button>
+          <input type="file" id="setup-import-input" accept="application/json,.json" hidden>
         </div>
       </div>
       <div class="setup-step" data-step="1" hidden>
