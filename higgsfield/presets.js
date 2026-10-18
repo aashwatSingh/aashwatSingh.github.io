@@ -65,9 +65,9 @@ const def = (id, name, category, description, tags, flags, fn) => P.push({ id, n
 
 // Zoom & Dolly
 def('dolly-in', 'Dolly In', 'zoom', 'Smooth push toward the subject on a track.', ['push', 'forward', 'classic'], { popular: true },
-  (t) => { const e = sine(t); return { zoom: lerp(1.02, 1.42, e), y: lerp(0, -0.012, e), fx: 'parallax', fxAmount: 0.5 }; });
+  (t) => { const e = sine(t); return { zoom: lerp(1.02, 1.42, e), y: lerp(0, -0.012, e) }; });
 def('dolly-out', 'Dolly Out', 'zoom', 'Pull away from the subject to reveal the scene.', ['pull', 'reveal', 'classic'], { popular: true },
-  (t) => { const e = sine(t); return { zoom: lerp(1.42, 1.02, e), y: lerp(-0.012, 0, e), fx: 'parallax', fxAmount: 0.5 }; });
+  (t) => { const e = sine(t); return { zoom: lerp(1.42, 1.02, e), y: lerp(-0.012, 0, e) }; });
 def('super-dolly', 'Super Dolly In', 'zoom', 'Long, accelerating push with zoom streaks.', ['push', 'fast', 'dramatic'], { popular: true },
   (t) => { const e = inOutCubic(t); return { zoom: zoomExp(1, 2.2, e), blur: 3 * bump(t, 0.55, 0.18), fx: 'radial', fxAmount: 0.8 * bump(t, 0.55, 0.2) }; });
 def('super-dolly-out', 'Super Dolly Out', 'zoom', 'Fast, sweeping pull-back from close-up to wide.', ['pull', 'fast', 'reveal'], {},
@@ -102,19 +102,19 @@ def('earth-zoom-out', 'Earth Zoom Out', 'zoom', 'From a tight close-up out to th
 
 // Orbit & Arc
 def('arc-left', 'Arc Left', 'orbit', 'Curved move around the subject to the left.', ['arc', 'parallax', 'move'], { popular: true },
-  (t) => { const e = sine(t); return { zoom: 1.24, x: lerp(0.07, -0.07, e), tiltY: lerp(-0.22, 0.22, e), rotate: lerp(0.015, -0.015, e), fx: 'parallax', fxAmount: 0.8 }; });
+  (t) => { const e = sine(t); return { zoom: 1.24, x: lerp(0.07, -0.07, e), tiltY: lerp(-0.22, 0.22, e), rotate: lerp(0.015, -0.015, e) }; });
 def('arc-right', 'Arc Right', 'orbit', 'Curved move around the subject to the right.', ['arc', 'parallax', 'move'], {},
-  (t) => { const e = sine(t); return { zoom: 1.24, x: lerp(-0.07, 0.07, e), tiltY: lerp(0.22, -0.22, e), rotate: lerp(-0.015, 0.015, e), fx: 'parallax', fxAmount: 0.8 }; });
+  (t) => { const e = sine(t); return { zoom: 1.24, x: lerp(-0.07, 0.07, e), tiltY: lerp(0.22, -0.22, e), rotate: lerp(-0.015, 0.015, e) }; });
 def('orbit-360', '360 Orbit', 'orbit', 'A full circle around the subject. Loops seamlessly.', ['orbit', 'loop', 'circle'], { popular: true },
-  (t) => { const a = TAU * t; return { zoom: 1.3 + 0.05 * Math.cos(a), x: 0.09 * Math.sin(a), y: 0.012 * Math.cos(2 * a), tiltY: 0.3 * Math.sin(a), rotate: 0.02 * Math.sin(a), blur: 0.8 * Math.abs(Math.cos(a)), fx: 'parallax', fxAmount: 0.9 }; });
+  (t) => { const a = TAU * t; return { zoom: 1.3 + 0.05 * Math.cos(a), x: 0.09 * Math.sin(a), y: 0.012 * Math.cos(2 * a), tiltY: 0.3 * Math.sin(a), rotate: 0.02 * Math.sin(a), blur: 0.8 * Math.abs(Math.cos(a)) }; });
 def('orbit-left', 'Orbit Left', 'orbit', 'Wide, steady orbit sweeping left.', ['orbit', 'sweep'], {},
-  (t) => { const e = lerp(t, sine(t), 0.6); return { zoom: 1.36, x: lerp(0.11, -0.11, e), tiltY: lerp(-0.34, 0.34, e), rotate: lerp(0.03, -0.03, e), fx: 'parallax', fxAmount: 1 }; });
+  (t) => { const e = lerp(t, sine(t), 0.6); return { zoom: 1.36, x: lerp(0.11, -0.11, e), tiltY: lerp(-0.34, 0.34, e), rotate: lerp(0.03, -0.03, e) }; });
 def('orbit-right', 'Orbit Right', 'orbit', 'Wide, steady orbit sweeping right.', ['orbit', 'sweep'], {},
-  (t) => { const e = lerp(t, sine(t), 0.6); return { zoom: 1.36, x: lerp(-0.11, 0.11, e), tiltY: lerp(0.34, -0.34, e), rotate: lerp(-0.03, 0.03, e), fx: 'parallax', fxAmount: 1 }; });
+  (t) => { const e = lerp(t, sine(t), 0.6); return { zoom: 1.36, x: lerp(-0.11, 0.11, e), tiltY: lerp(0.34, -0.34, e), rotate: lerp(-0.03, 0.03, e) }; });
 def('lazy-susan', 'Lazy Susan', 'orbit', 'The subject turns like it is on a turntable.', ['turntable', 'product', 'spin'], {},
-  (t) => ({ zoom: 1.22, x: -0.035 * wave(t, 1), tiltY: 0.42 * wave(t, 1), fx: 'parallax', fxAmount: 1 }));
+  (t) => ({ zoom: 1.22, x: -0.035 * wave(t, 1), tiltY: 0.42 * wave(t, 1) }));
 def('bullet-time', 'Bullet Time', 'orbit', 'Frozen-moment sweep that slows to a crawl mid-move.', ['matrix', 'freeze', 'slow-mo'], { popular: true },
-  (t) => { const e = ramp(t); return { zoom: 1.32, x: lerp(0.1, -0.1, e), tiltY: lerp(-0.36, 0.36, e), rotate: lerp(0.02, -0.02, e), blur: 4 * (1 - bump(t, 0.5, 0.28)), fx: 'parallax', fxAmount: 1 }; });
+  (t) => { const e = ramp(t); return { zoom: 1.32, x: lerp(0.1, -0.1, e), tiltY: lerp(-0.36, 0.36, e), rotate: lerp(0.02, -0.02, e), blur: 4 * (1 - bump(t, 0.5, 0.28)) }; });
 def('robo-arm', 'Robo Arm', 'orbit', 'Motion-control rig: precise, fast moves with hard stops.', ['motion control', 'robotic', 'commercial'], { new: true },
   (t) => {
     const T = [[0], [0.28], [0.46], [0.72], [1]];
@@ -129,13 +129,13 @@ def('spiral-out', 'Spiral Out', 'orbit', 'Twisting pull away from the subject.',
 def('head-tracking', 'Head Tracking', 'orbit', 'Camera locks onto the face as the world moves around it.', ['follow', 'face', 'tracking'], { new: true },
   (t) => ({ zoom: 1.24, x: 0.035 * wave(t, 0.8), y: 0.01 * wave(t, 1.6, 0.2), tiltY: 0.12 * wave(t, 0.8), shake: 0.15, fx: 'snorricam', fxAmount: 0.85 }));
 def('arc-push', 'Arc Push-In', 'orbit', 'Arcs to the right while closing in on the subject.', ['arc', 'push', 'hero'], {},
-  (t) => { const e = sine(t); return { zoom: lerp(1.12, 1.55, e), x: lerp(-0.06, 0.05, e), tiltY: lerp(0.24, -0.16, e), fx: 'parallax', fxAmount: 0.8 }; });
+  (t) => { const e = sine(t); return { zoom: lerp(1.12, 1.55, e), x: lerp(-0.06, 0.05, e), tiltY: lerp(0.24, -0.16, e) }; });
 
 // Crane & Lift
 def('crane-up', 'Crane Up', 'crane', 'Rise up and over while tilting down to keep the subject.', ['rise', 'reveal', 'jib'], { popular: true },
-  (t) => { const e = sine(t); return { zoom: 1.26, y: lerp(0.08, -0.08, e), tiltX: lerp(-0.18, 0.18, e), fx: 'parallax', fxAmount: 0.8 }; });
+  (t) => { const e = sine(t); return { zoom: 1.26, y: lerp(0.08, -0.08, e), tiltX: lerp(-0.18, 0.18, e) }; });
 def('crane-down', 'Crane Down', 'crane', 'Descend from above down to eye level.', ['descend', 'jib'], {},
-  (t) => { const e = sine(t); return { zoom: 1.26, y: lerp(-0.08, 0.08, e), tiltX: lerp(0.18, -0.18, e), fx: 'parallax', fxAmount: 0.8 }; });
+  (t) => { const e = sine(t); return { zoom: 1.26, y: lerp(-0.08, 0.08, e), tiltX: lerp(0.18, -0.18, e) }; });
 def('crane-overhead', 'Overhead Crane', 'crane', 'Climb high above for a top-down, god\'s-eye view.', ['top-down', 'rise', 'aerial'], {},
   (t) => { const e = sine(t); return { zoom: lerp(1.2, 1.48, e), y: lerp(0.09, -0.09, e), tiltX: lerp(0, 0.38, e), rotate: lerp(0, 0.07, e) }; });
 def('pedestal-up', 'Pedestal Up', 'crane', 'Straight vertical lift with no tilt.', ['vertical', 'lift'], {},
@@ -143,7 +143,7 @@ def('pedestal-up', 'Pedestal Up', 'crane', 'Straight vertical lift with no tilt.
 def('pedestal-down', 'Pedestal Down', 'crane', 'Straight vertical drop with no tilt.', ['vertical', 'drop'], {},
   (t) => ({ zoom: 1.2, y: lerp(-0.07, 0.07, sine(t)) }));
 def('jib-reveal', 'Jib Reveal', 'crane', 'Starts tight and low, then lifts out to reveal everything.', ['reveal', 'rise', 'pull'], {},
-  (t) => { const e = sine(t); return { zoom: lerp(1.62, 1.1, e), y: lerp(0.07, -0.03, e), tiltX: lerp(-0.2, 0.02, e), fx: 'parallax', fxAmount: 0.6 }; });
+  (t) => { const e = sine(t); return { zoom: lerp(1.62, 1.1, e), y: lerp(0.07, -0.03, e), tiltX: lerp(-0.2, 0.02, e) }; });
 def('levitation', 'Levitation', 'crane', 'Dreamy weightless float with a soft bob and glow.', ['float', 'dreamy', 'surreal'], { new: true },
   (t) => ({ zoom: 1.2 + 0.05 * t, y: lerp(0.04, -0.06, sine(t)) + 0.012 * wave(t, 1.5), rotate: 0.02 * wave(t, 1), fx: 'lightleak', fxAmount: 0.45 }));
 def('low-angle-rise', 'Low-Angle Rise', 'crane', 'From a heroic low angle up to eye level.', ['hero', 'rise', 'low angle'], {},
@@ -197,7 +197,7 @@ def('drone-flyover', 'Drone Flyover', 'drone', 'Glides forward over the scene, l
 def('drone-reveal', 'Drone Reveal', 'drone', 'Rises and pulls back to unveil the landscape.', ['aerial', 'reveal', 'epic'], {},
   (t) => { const e = sine(t); return { zoom: lerp(1.8, 1.05, e), y: lerp(0.06, -0.03, e), tiltX: lerp(-0.1, 0.12, e), shake: 0.06 }; });
 def('drone-orbit', 'Drone Orbit', 'drone', 'High, slow orbit around the subject.', ['aerial', 'orbit'], {},
-  (t) => { const e = sine(t); return { zoom: 1.34, x: lerp(0.07, -0.07, e), rotate: lerp(-0.06, 0.06, e), tiltX: 0.14, tiltY: lerp(-0.2, 0.2, e), shake: 0.05, fx: 'parallax', fxAmount: 0.7 }; });
+  (t) => { const e = sine(t); return { zoom: 1.34, x: lerp(0.07, -0.07, e), rotate: lerp(-0.06, 0.06, e), tiltX: 0.14, tiltY: lerp(-0.2, 0.2, e), shake: 0.05 }; });
 def('flying', 'Flying', 'drone', 'Soaring forward flight with gentle banking.', ['fly', 'soar', 'aerial'], {},
   (t) => ({ zoom: lerp(1.15, 1.62, t), y: 0.02 * wave(t, 1.2), rotate: 0.07 * wave(t, 0.6), x: 0.03 * wave(t, 0.6, 0.1), shake: 0.1 }));
 def('hyperlapse', 'Hyperlapse', 'drone', 'Stepped forward motion with racing light.', ['time', 'city', 'travel'], { new: true },
@@ -231,7 +231,7 @@ def('explosion', 'Explosion', 'fx', 'Shatters outward in a fiery blast.', ['blas
 def('flash-cut', 'Flash Cut', 'fx', 'Paparazzi flashes with jump-cut punch-ins.', ['flash', 'jump cut', 'fashion'], {},
   (t) => ({ zoom: keys(t, [[0.32, 1.06], [0.34, 1.3], [0.65, 1.3], [0.67, 1.55]], smooth), fx: 'flash', fxAmount: Math.max(jolt(t, 0.33, 14), jolt(t, 0.66, 14)) }));
 def('strobe', 'Strobe', 'fx', 'Club strobe hits pulsing in rhythm.', ['flash', 'club', 'rhythm'], {},
-  (t) => ({ zoom: 1.1 + 0.03 * wave(t, 4), fx: 'flash', fxAmount: 0.75 * Math.exp(-((t * 8) % 1) * 9) }));
+  (t) => ({ zoom: 1.1 + 0.03 * wave(t, 4), fx: 'flash', fxAmount: 0.6 * Math.exp(-((t * 8) % 1) * 9) }));
 def('timelapse', 'Timelapse', 'fx', 'Light races from day through dusk to night.', ['time', 'sky', 'day to night'], { popular: true },
   (t) => ({ zoom: lerp(1.06, 1.16, t), fx: 'timelapse', fxAmount: t }));
 def('light-leak', 'Light Leak', 'fx', 'Warm analog light leaks bleed across the frame.', ['analog', 'film', 'warm'], {},

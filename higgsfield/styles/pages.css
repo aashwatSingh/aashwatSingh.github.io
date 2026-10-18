@@ -268,7 +268,8 @@
   .pg-hero-ctas .btn { flex: 1 1 auto; }
   .pg-reel-prompt { display: none; }
   .pg-features, .pg-plans, .pg-topups { grid-template-columns: minmax(0, 1fr); }
-  .pg-feature { min-height: 200px; }
+  .pg-feature { min-height: 176px; }
+  .pg-explore .section-head .pg-small { display: none; }
   .pg-feed { columns: 2; column-gap: 8px; }
   .pg-feed-item { margin-bottom: 8px; }
   .pg-feed-over { padding: 30px 8px 8px; }

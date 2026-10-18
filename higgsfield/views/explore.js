@@ -459,7 +459,7 @@ export async function mount(root, ctx) {
           h('span', { class: 'pg-feed-prompt' }, it.prompt),
           h('span', { class: 'pg-feed-by' }, h('span', { class: 'pg-avatar', style: `--h: ${hash(it.creator) % 360}` }, it.creator[1].toUpperCase()), it.creator,
             h('span', { class: 'pg-feed-likes' }, h('span', { html: ICON.heart }), likeCount))));
-      el._paint = () => { it.src = deps.paint(w, hh, { prompt: it.prompt, seed: it.seed, style: it.style }); drawCover(canvas.getContext('2d'), it.src, w, hh); el.classList.add('is-painted'); };
+      el._paint = () => { if (it.src) return; it.src = deps.paint(w, hh, { prompt: it.prompt, seed: it.seed, style: it.style }); drawCover(canvas.getContext('2d'), it.src, w, hh); el.classList.add('is-painted'); };
       lazy.observe(el);
       if (it.preset) {
         pool.add(el, () => {
