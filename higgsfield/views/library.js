@@ -92,7 +92,7 @@ export async function mount(root, ctx) {
   const toolbar = h('div', { class: 'pg-lib-toolbar' },
     chips,
     h('div', { class: 'pg-lib-tools' },
-      h('label', { class: 'pg-search' }, h('span', { class: 'pg-sr' }, 'Search prompts'), h('span', { html: ICON.search }), search),
+      h('label', { class: 'pg-search' }, h('span', { class: 'pg-sr' }, 'Search prompts'), h('span', { class: 'pg-search-icon', html: ICON.search }), search),
       h('label', { class: 'pg-sort' }, h('span', { class: 'pg-sr' }, 'Sort'), sortSel)));
 
   root.append(h('div', { class: 'page pg-library' },
