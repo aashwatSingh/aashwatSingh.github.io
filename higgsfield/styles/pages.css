@@ -260,8 +260,11 @@
 @media (max-width: 640px) {
   .pg-hero { min-height: 600px; }
   .pg-hero-inner { padding-top: 72px; }
-  .pg-hero-stats { gap: 8px 24px; margin-top: 30px; }
+  .pg-hero-shade { background: radial-gradient(140% 70% at 0% 100%, rgb(5 5 6 / 0.9) 0%, rgb(5 5 6 / 0.6) 55%, rgb(5 5 6 / 0.3) 100%), linear-gradient(180deg, rgb(10 10 11 / 0.5) 0%, transparent 25%, transparent 55%, var(--bg) 100%); }
+  .pg-kicker { font-size: 12px; }
+  .pg-hero-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 30px; }
   .pg-hero-stats dd { font-size: 22px; }
+  .pg-hero-stats dt { font-size: 10px; letter-spacing: .06em; }
   .pg-hero-ctas .btn { flex: 1 1 auto; }
   .pg-reel-prompt { display: none; }
   .pg-features, .pg-plans, .pg-topups { grid-template-columns: minmax(0, 1fr); }
@@ -271,7 +274,6 @@
   .pg-feed-over { padding: 30px 8px 8px; }
   .pg-feed-likes { display: none; }
   .pg-lib-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .pg-viewer-meta { grid-template-columns: minmax(0, 1fr); }
   .pg-balance { width: 100%; }
   .modal .pg-piece, .modal .pg-viewer { margin-top: 28px; }
 }

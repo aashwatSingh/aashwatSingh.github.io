@@ -338,7 +338,7 @@ export async function mount(root, ctx) {
       reel,
       h('div', { class: 'pg-hero-shade' }),
       h('div', { class: 'pg-hero-inner' },
-        h('span', { class: 'pg-kicker' }, h('span', { class: 'badge badge-accent' }, 'New'), `${nPresets} camera presets, rendered in your browser`),
+        h('span', { class: 'pg-kicker' }, h('span', { class: 'badge badge-accent' }, 'New'), `${nPresets} camera presets, all in your browser`),
         h('h1', { id: 'pg-hero-title', class: 'pg-hero-title' }, 'Camera control', h('br'), 'for ', h('em', {}, 'AI video')),
         h('p', { class: 'pg-hero-sub' }, 'Crash zooms, crane shots, bullet time, FPV drone dives. Drop in a photo or write a prompt, pick a move, and get a real video file in seconds.'),
         h('div', { class: 'pg-hero-ctas' },
@@ -347,7 +347,7 @@ export async function mount(root, ctx) {
         h('dl', { class: 'pg-hero-stats' },
           h('div', {}, h('dt', {}, 'Camera moves'), h('dd', {}, String(nPresets))),
           h('div', {}, h('dt', {}, 'Soul styles'), h('dd', {}, String(deps.STYLES.length))),
-          h('div', {}, h('dt', {}, 'Uploads to a server'), h('dd', {}, '0')))),
+          h('div', {}, h('dt', {}, 'Server uploads'), h('dd', {}, '0')))),
       h('div', { class: 'pg-hero-foot' }, caption, dots));
   }
 
@@ -457,7 +457,7 @@ export async function mount(root, ctx) {
         it.preset ? h('span', { class: 'pg-feed-kind' }, h('span', { html: ICON.camera }), deps.presetName(it.preset)) : null,
         h('span', { class: 'pg-feed-over' },
           h('span', { class: 'pg-feed-prompt' }, it.prompt),
-          h('span', { class: 'pg-feed-by' }, h('span', { class: 'pg-avatar', style: { '--h': String(hash(it.creator) % 360) } }, it.creator[1].toUpperCase()), it.creator,
+          h('span', { class: 'pg-feed-by' }, h('span', { class: 'pg-avatar', style: `--h: ${hash(it.creator) % 360}` }, it.creator[1].toUpperCase()), it.creator,
             h('span', { class: 'pg-feed-likes' }, h('span', { html: ICON.heart }), likeCount))));
       el._paint = () => { it.src = deps.paint(w, hh, { prompt: it.prompt, seed: it.seed, style: it.style }); drawCover(canvas.getContext('2d'), it.src, w, hh); el.classList.add('is-painted'); };
       lazy.observe(el);
@@ -504,7 +504,7 @@ export async function mount(root, ctx) {
       const body = h('div', { class: 'pg-piece' },
         h('div', { class: 'pg-piece-media' }, canvas),
         h('div', { class: 'pg-piece-side' },
-          h('div', { class: 'pg-feed-by pg-piece-by' }, h('span', { class: 'pg-avatar', style: { '--h': String(hash(it.creator) % 360) } }, it.creator[1].toUpperCase()), h('strong', {}, it.creator)),
+          h('div', { class: 'pg-feed-by pg-piece-by' }, h('span', { class: 'pg-avatar', style: `--h: ${hash(it.creator) % 360}` }, it.creator[1].toUpperCase()), h('strong', {}, it.creator)),
           h('h2', { class: 'pg-piece-title' }, 'Prompt'),
           h('p', { class: 'pg-piece-prompt' }, it.prompt),
           h('div', { class: 'pg-tags' }, tags),

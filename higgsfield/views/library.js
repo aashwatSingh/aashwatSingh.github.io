@@ -50,16 +50,18 @@ function metaBits(rec) {
   return out;
 }
 
-function metaRows(rec) {
+function metaRows(rec, presetName) {
   const m = rec.meta ?? {};
   const label = { presetName: 'Preset', preset: 'Preset', model: 'Model', duration: 'Duration', aspect: 'Aspect', style: 'Style', styleName: 'Style', seed: 'Seed', voice: 'Voice', width: 'Width', height: 'Height', resolution: 'Resolution', intensity: 'Intensity', batch: 'Batch' };
   const rows = [];
   const used = new Set();
   for (const [k, v] of Object.entries(m)) {
     if (v == null || v === '' || typeof v === 'object') continue;
+    if ((k === 'preset' && m.presetName) || (k === 'style' && m.styleName)) continue; // prefer readable names
     const name = label[k] ?? k.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase());
-    if (used.has(name)) continue; // presetName wins over preset id when both exist
+    if (used.has(name)) continue;
     used.add(name);
+    if (k === 'preset' && presetName) { rows.push([name, presetName(v)]); continue; }
     rows.push([name, k === 'duration' ? `${v}s` : String(v)]);
   }
   return rows;
@@ -67,6 +69,7 @@ function metaRows(rec) {
 
 export async function mount(root, ctx) {
   const { store } = ctx;
+  const presetsMod = await import('../presets.js').catch(() => null);
   const urls = new Map(); // asset id -> object URL
   const urlFor = (rec) => {
     if (!(rec.blob instanceof Blob)) return null;
@@ -273,7 +276,7 @@ export async function mount(root, ctx) {
       rec.prompt ? h('button', { type: 'button', class: `btn${rec.type === 'image' ? '' : ' btn-primary'}`, onclick: () => go(tool, { prompt: rec.prompt }) }, h('span', { html: ICON.sparkle }), 'Reuse prompt') : null,
       dlBtn, favBtn, delBtn);
 
-    const rows = metaRows(rec);
+    const rows = metaRows(rec, (id) => presetsMod?.presetById?.(id)?.name ?? id);
     const created = new Date(rec.createdAt);
     const body = h('div', { class: 'pg-viewer' },
       h('div', { class: 'pg-viewer-media' }, player),
@@ -281,11 +284,11 @@ export async function mount(root, ctx) {
         h('span', { class: `badge pg-type pg-type-${rec.type}` }, h('span', { html: ICON[TYPE_ICON[rec.type]] ?? ICON.sparkle }), TYPE_NAME[rec.type] ?? rec.type),
         h('h2', { class: 'pg-viewer-title' }, rec.type === 'speak' ? 'Script' : 'Prompt'),
         h('p', { class: 'pg-viewer-prompt' }, rec.prompt || 'No prompt'),
+        actions,
         h('dl', { class: 'pg-viewer-meta' },
           h('div', {}, h('dt', {}, 'Created'), h('dd', {}, h('time', { datetime: created.toISOString() }, created.toLocaleString()))),
           rec.blob?.size ? h('div', {}, h('dt', {}, 'Size'), h('dd', {}, fmtBytes(rec.blob.size))) : null,
-          rows.map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, v)))),
-        actions));
+          rows.map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, v))))));
     openModal = modal(body, {
       label: `${TYPE_NAME[rec.type] ?? 'Asset'} viewer`, wide: true,
       onClose: () => {
