@@ -279,7 +279,7 @@ export function analyzePrompt(prompt) {
   }
   const ref = backdrop || scene;
   if (flags.neon && ['city', 'cyberpunk', 'portrait', 'car', 'rain', 'studio'].includes(ref) && (!time || time === 'night')) time = 'neon';
-  if (!time) time = DEFAULT_TIME[ref] || 'sunset';
+  if (!time) time = scene === 'car' && ref === 'city' ? 'dusk' : DEFAULT_TIME[ref] || 'sunset';
   if (ref === 'space') time = 'space';
 
   // weather
@@ -320,8 +320,8 @@ export function buildPalette({ scene, time, colors = [], flags = {}, mood = 'neu
     p[4] = c1;
     p[2] = mixc(p[2], c1, 0.6);
     p[3] = mixc(p[3], mixc(c1, WHITE, 0.65), 0.45);
-    p[1] = mixc(p[1], c2, vivid[1] ? 0.55 : 0.35);
-    p[0] = mixc(p[0], mul(c2, 0.32), 0.45);
+    p[1] = mixc(p[1], c2, vivid[1] ? 0.5 : 0.28);
+    p[0] = mixc(p[0], mul(c2, 0.32), vivid[1] ? 0.4 : 0.18);
     p[5] = mixc(p[5], mul(c2, 0.18), 0.35);
     p[6] = mixc(p[6], c1, 0.14);
   } else if (colors.includes('white')) {
@@ -433,7 +433,7 @@ function sun(S, x, y, r, { moon = false, glow = 1 } = {}) {
   ctx.fillStyle = rgrad(ctx, x, y, r * 4, [[0, css(P.light, 0.85 * glow)], [0.3, css(P.light, 0.3 * glow)], [1, css(P.light, 0)]]);
   ctx.fillRect(x - r * 4, y - r * 4, r * 8, r * 8);
   ctx.restore();
-  const core = mixc(P.light, WHITE, moon ? 0.4 : 0.6);
+  const core = mixc(P.light, WHITE, moon ? 0.4 : 0.45);
   ctx.fillStyle = rgrad(ctx, x, y, r, [[0, css(core)], [0.8, css(mixc(core, P.light, 0.5))], [0.96, css(P.light, 0.95)], [1, css(P.light, 0)]]);
   ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
   if (moon) {
@@ -480,8 +480,8 @@ function stars(S, n, y1, key = 'st') {
     const c = mixc(WHITE, r() < 0.5 ? P.light : P.accent, r() * 0.45);
     ctx.fillStyle = css(c, al);
     ctx.fillRect(x - sz / 2, y - sz / 2, sz, sz);
-    if (b > 0.55) {
-      glowDot(ctx, x, y, sz * 7, c, al * 0.5);
+    if (b > 0.82) {
+      glowDot(ctx, x, y, sz * 6, c, al * 0.45);
       ctx.fillStyle = css(c, al * 0.6);
       ctx.fillRect(x - sz * 6, y - sz * 0.15, sz * 12, sz * 0.3);
       ctx.fillRect(x - sz * 0.15, y - sz * 6, sz * 0.3, sz * 12);
@@ -664,7 +664,7 @@ function treeLine(S, base, { hMin, hMax, gap, col, key, round = 0, snow = false 
   }
   ctx.fill();
   ctx.fillRect(-0.01, base, W + 0.02, S.H - base + 0.01);
-  if (snow) {
+  if (snow && false) {
     ctx.fillStyle = css(mixc(WHITE, P.light, 0.3), 0.75);
     ctx.beginPath();
     for (const [tx, b, ht] of tips) {
@@ -987,7 +987,7 @@ function sceneMountain(S, o = {}) {
   const lake = has(a, 'lake') || (!o.noLake && r() < 0.35);
   const fog = mixc(P.hor, P.light, 0.3);
   const near = mixc(P.shadow, P.land, 0.4);
-  let base = hz + 0.01, amp = H * 0.34, freq = 1.25;
+  let base = hz + 0.02, amp = H * 0.42, freq = 1.15;
   const layers = lake ? 3 : 5;
   let lastYs = null;
   for (let k = 0; k < layers; k++) {
@@ -1968,17 +1968,17 @@ function rainfall(S) {
 // ---------------------------------------------------------------- post-processing looks
 
 const LOOKS = {
-  realistic: { contrast: 1.06, sat: 1.04, grain: 0.035, vignette: 0.3, bloom: 0.14 },
-  cinematic: { contrast: 1.12, sat: 1.06, shadows: [-14, 6, 18], highs: [18, 5, -14], grain: 0.05, vignette: 0.5, bloom: 0.34 },
-  editorial: { contrast: 0.95, sat: 0.78, lift: 16, highs: [10, 4, -4], shadows: [4, 0, 6], grain: 0.045, vignette: 0.22, bloom: 0.1 },
+  realistic: { contrast: 1.06, sat: 1.04, grain: 0.016, vignette: 0.3, bloom: 0.14 },
+  cinematic: { contrast: 1.12, sat: 1.06, shadows: [-14, 6, 18], highs: [18, 5, -14], grain: 0.022, vignette: 0.5, bloom: 0.34 },
+  editorial: { contrast: 0.95, sat: 0.78, lift: 16, highs: [10, 4, -4], shadows: [4, 0, 6], grain: 0.02, vignette: 0.22, bloom: 0.1 },
   anime: { contrast: 1.08, sat: 1.38, gamma: 0.9, posterize: 9, ink: 0.85, inkT: 26, vignette: 0.08, bloom: 0.25 },
-  'film-noir': { mono: true, contrast: 1.55, gamma: 1.12, grain: 0.1, vignette: 0.72, blinds: true, bloom: 0.2 },
-  vaporwave: { contrast: 1.04, sat: 1.2, shadows: [34, -8, 46], highs: [24, -6, 22], scan: 0.16, chroma: 3, grain: 0.03, vignette: 0.3, overlay: 'vapor', bloom: 0.3 },
-  'analog-film': { contrast: 0.9, sat: 0.86, lift: 22, shadows: [6, 4, -4], highs: [20, 8, -20], grain: 0.13, vignette: 0.45, leaks: true, stamp: true, bloom: 0.22 },
+  'film-noir': { mono: true, contrast: 1.45, gamma: 0.95, levels: 1, grain: 0.05, vignette: 0.6, blinds: true, bloom: 0.2 },
+  vaporwave: { contrast: 1.04, sat: 1.2, shadows: [34, -8, 46], highs: [24, -6, 22], scan: 0.16, chroma: 3, grain: 0.012, vignette: 0.3, overlay: 'vapor', bloom: 0.3 },
+  'analog-film': { contrast: 0.9, sat: 0.86, lift: 22, shadows: [6, 4, -4], highs: [20, 8, -20], grain: 0.06, vignette: 0.45, leaks: true, stamp: true, bloom: 0.22 },
   '3d-render': { contrast: 1.1, sat: 1.24, gamma: 0.95, vignette: 0.2, bloom: 0.36, tilt: true },
   watercolor: { contrast: 0.9, sat: 0.88, lift: 30, posterize: 14, paper: true, ink: 0.3, inkT: 18, bleed: true, highs: [8, 4, -6] },
   y2k: { contrast: 1.22, sat: 1.26, highs: [-8, 10, 26], shadows: [10, 0, 20], halftone: 0.5, chroma: 2, sparkle: true, bloom: 0.3, vignette: 0.25 },
-  ethereal: { contrast: 0.86, sat: 0.84, lift: 26, highs: [10, 6, 14], bloom: 0.6, bloomThr: 0.45, vignette: 0.15, haze: true, grain: 0.02 },
+  ethereal: { contrast: 0.86, sat: 0.84, lift: 26, highs: [10, 6, 14], bloom: 0.6, bloomThr: 0.45, vignette: 0.15, haze: true, grain: 0.008 },
   pixel: { pixel: 112, posterize: 6, sat: 1.18, contrast: 1.1 },
 };
 
@@ -2107,9 +2107,19 @@ function grade(S, L) {
   try { img = ctx.getImageData(0, 0, w, h); } catch { return; }
   const d = img.data;
   const contrast = L.contrast ?? 1, sat = L.sat ?? 1, lift = (L.lift ?? 0) / 255, gamma = L.gamma ?? 1;
+  // auto levels: stretch the 1st..99th luma percentile (blended by L.levels) so dark scenes still read
+  const hist = new Uint32Array(256);
+  let cnt = 0;
+  for (let i = 0; i < d.length; i += 4 * 13) { hist[(d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8]++; cnt++; }
+  let lo = 0, hi = 255, acc = 0;
+  for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc > cnt * 0.01) { lo = v; break; } }
+  acc = 0;
+  for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc > cnt * 0.01) { hi = v; break; } }
+  if (hi - lo < 90) { const mid = (hi + lo) / 2; lo = Math.max(0, mid - 45); hi = Math.min(255, mid + 45); }
+  const lv = L.levels ?? 0.45;
   const lut = new Float32Array(256);
   for (let v = 0; v < 256; v++) {
-    let x = v / 255;
+    let x = lerp(v / 255, clamp((v - lo) / (hi - lo)), lv);
     if (gamma !== 1) x = Math.pow(x, gamma);
     x = (x - 0.5) * contrast + 0.5;
     lut[v] = clamp(lift + x * (1 - lift)) * 255;
@@ -2266,9 +2276,7 @@ export function paintScene(ctx, width, height, { prompt = '', seed = 1, style = 
   ctx.beginPath();
   ctx.rect(0, 0, S.W, S.H);
   ctx.clip();
-  const T0 = performance.now();
   (PAINTERS[a.scene] || sceneSea)(S, {});
-  const T1 = performance.now();
   if (a.weather === 'snow') snowfall(S);
   else if (a.weather === 'rain' || (a.scene === 'cyberpunk' && !a.weather)) rainfall(S);
   else if (a.weather === 'fog' && !['city', 'mountain', 'forest'].includes(a.scene)) fogLayer(S, S.H * 0.45, S.H, 0.45);
@@ -2277,12 +2285,9 @@ export function paintScene(ctx, width, height, { prompt = '', seed = 1, style = 
   ctx.save();
   ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.clip();
   preLook(S, look, r);
-  const T2 = performance.now();
   grade(S, look);
-  const T3 = performance.now();
   postLook(S, look, r);
   ctx.restore();
-  (globalThis.__prof ||= []).push([a.scene, style, Math.round(T1 - T0), Math.round(T2 - T1), Math.round(T3 - T2)]);
 }
 
 /** Convenience: a new canvas with the scene painted in. */

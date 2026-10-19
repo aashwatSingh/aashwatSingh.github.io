@@ -38,7 +38,7 @@ API, but they are real files you can download.
   with optional burned-in captions. Timing maths lives in `higgsfield/speak-logic.js`.
 - **Assets, Explore, Pricing:** your library (IndexedDB, this browser only), a community-style feed, and demo
   plans and credits (no payment is ever taken).
-- Run the tests with `node --test higgsfield/`.
+- Run the tests with `node --test higgsfield/*.test.mjs`.
 
 ## Hamza Lessons (`/hamza/`)
 
