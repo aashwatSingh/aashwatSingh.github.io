@@ -648,7 +648,7 @@ function roundTree(ctx, x, base, ht, r) {
   }
 }
 
-function treeLine(S, base, { hMin, hMax, gap, col, key, round = 0, snow = false }) {
+function treeLine(S, base, { hMin, hMax, gap, col, key, round = 0, snow = false, clear = 0 }) {
   const { ctx, W, P } = S;
   const r = S.rng(key);
   const N = S.noise(key);
@@ -659,11 +659,13 @@ function treeLine(S, base, { hMin, hMax, gap, col, key, round = 0, snow = false 
   while (x < W + 0.03) {
     const b = base + (N.fbm(x * 3, 0.3, 3) - 0.5) * 0.04;
     const ht = hMin + (hMax - hMin) * Math.pow(r(), 0.8);
-    if (r() < round) roundTree(ctx, x, b, ht, r); else { pine(ctx, x, b, ht, r); tips.push([x, b, ht]); }
+    const skip = clear && Math.abs(x - W / 2) < (clear * W) / 2;
+    if (skip) r();
+    else if (r() < round) roundTree(ctx, x, b, ht, r); else { pine(ctx, x, b, ht, r); tips.push([x, b, ht]); }
     x += gap * (0.45 + r() * 0.9);
   }
   ctx.fill();
-  ctx.fillRect(-0.01, base, W + 0.02, S.H - base + 0.01);
+  if (!clear) ctx.fillRect(-0.01, base, W + 0.02, S.H - base + 0.01);
   if (snow && false) {
     ctx.fillStyle = css(mixc(WHITE, P.light, 0.3), 0.75);
     ctx.beginPath();
@@ -732,24 +734,29 @@ function palm(ctx, x, gy, hh, lean, r, col) {
     const len = hh * (0.32 + r() * 0.16);
     const ex = tx + Math.cos(ang) * len, ey = ty + Math.sin(ang) * len * 0.35 + len * 0.42;
     const qx = tx + Math.cos(ang) * len * 0.6, qy = ty + Math.sin(ang) * len * 0.55 - len * 0.12;
-    ctx.lineWidth = hh * 0.008;
-    ctx.beginPath(); ctx.moveTo(tx, ty); ctx.quadraticCurveTo(qx, qy, ex, ey); ctx.stroke();
-    ctx.lineWidth = hh * 0.0055;
-    ctx.beginPath();
-    for (let s = 1; s <= 14; s++) {
-      const t = s / 15, u = 1 - t;
+    // frond: tapered blade with saw-tooth leaflets drooping under gravity
+    const steps = 26, left = [], right = [];
+    for (let k = 0; k <= steps; k++) {
+      const t = k / steps, u = 1 - t;
       const px = u * u * tx + 2 * u * t * qx + t * t * ex, py = u * u * ty + 2 * u * t * qy + t * t * ey;
       const dx = 2 * u * (qx - tx) + 2 * t * (ex - qx), dy = 2 * u * (qy - ty) + 2 * t * (ey - qy);
       const dl = Math.hypot(dx, dy) || 1;
       const nx = -dy / dl, ny = dx / dl;
-      const L = hh * 0.1 * Math.sin(Math.PI * Math.min(1, t * 1.05 + 0.05));
-      for (const sgn of [-1, 1]) {
-        ctx.moveTo(px, py);
-        ctx.lineTo(px + (nx * sgn * 0.8 + dx / dl * 0.45) * L, py + (ny * sgn * 0.8 + dy / dl * 0.45) * L + L * 0.35);
-      }
+      const wd = hh * 0.085 * Math.pow(Math.sin(Math.PI * Math.min(1, t * 0.92 + 0.08)), 0.8) * (k % 2 ? 0.3 : 1);
+      const droop = wd * 0.55;
+      left.push([px + nx * wd + (dx / dl) * wd * 0.4, py + ny * wd + droop]);
+      right.push([px - nx * wd + (dx / dl) * wd * 0.4, py - ny * wd + droop]);
     }
-    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    for (const [px, py] of left) ctx.lineTo(px, py);
+    for (let k = right.length - 1; k >= 0; k--) ctx.lineTo(right[k][0], right[k][1]);
+    ctx.closePath();
+    ctx.fill();
   }
+  ctx.beginPath();
+  for (let k = 0; k < 3; k++) { ctx.moveTo(tx + hh * 0.03, ty + hh * 0.02); ctx.arc(tx + (k - 1) * hh * 0.022, ty + hh * 0.025, hh * 0.016, 0, TAU); }
+  ctx.fill();
 }
 
 function birds(S, x0, y0, n, size) {
@@ -890,14 +897,14 @@ function island(S, hz, r, side) {
   const { ctx, W, P } = S;
   const N = S.noise('isl');
   const x0 = side < 0 ? -0.05 : W * (0.45 + r() * 0.2), x1 = side < 0 ? W * (0.3 + r() * 0.25) : W + 0.05;
-  const amp = 0.025 + r() * 0.05;
-  ctx.fillStyle = css(mixc(mixc(P.shadow, P.mid, 0.55), P.hor, 0.25));
+  const amp = 0.012 + r() * 0.03;
+  ctx.fillStyle = css(mixc(mixc(P.shadow, P.mid, 0.5), P.hor, 0.2));
   ctx.beginPath();
   ctx.moveTo(x0, hz + 0.002);
   for (let i = 0; i <= 60; i++) {
     const t = i / 60, x = lerp(x0, x1, t);
-    const env = Math.sin(Math.PI * t);
-    ctx.lineTo(x, hz - amp * Math.pow(env, 0.6) * (0.6 + 0.7 * N.fbm(x * 9, 0, 4)));
+    const env = Math.min(1, Math.sin(Math.PI * t) * 3);
+    ctx.lineTo(x, hz - amp * env * (0.3 + 1.2 * N.ridged(x * 7, 0, 5)));
   }
   ctx.lineTo(x1, hz + 0.002);
   ctx.fill();
@@ -1040,20 +1047,29 @@ function sceneForest(S, o = {}) {
     fillRidge(S, ys, mixc(far, P.land, 0.15 + k * 0.15), { sx, light: 0.1, rim: 0.15 });
     fogBand(S, hz + 0.02 + k * 0.03, H * 0.08, fog, 0.4);
   }
-  const deep = mixc(mixc(P.shadow, P.land, 0.55), BLACK, 0.1);
-  const round = /autumn|oak|jungle|rainforest/.test(a.keywords.join(' ')) ? 0.6 : 0.08;
-  let lastBase = hz;
-  for (let k = 0; k < 4; k++) {
-    const base = hz + H * (0.04 + k * 0.085);
-    const col = mixc(mixc(fog, P.land, 0.35), deep, 0.25 + k * 0.25);
-    treeLine(S, base, { hMin: H * (0.06 + k * 0.05), hMax: H * (0.16 + k * 0.12), gap: 0.018 + k * 0.016, col, key: 'tl' + k, round, snow });
-    if (k === 1) rays(S, sx, sy, 9, H * 1.1, night ? 0.06 : 0.14);
-    if (k < 3) fogBand(S, base + 0.01, H * 0.09, fog, (a.weather === 'fog' ? 0.6 : 0.42) - k * 0.08);
-    lastBase = base;
-  }
-  if (has(a, 'cabin')) cabin(S, W * (0.3 + r() * 0.4), H * 0.9, H * 0.08, mul(deep, 0.9));
-  if (a.figure) person(S.ctx, W * (0.35 + r() * 0.3), H * 0.94, H * 0.13, mul(deep, 0.8));
-  void lastBase;
+  const deep = mixc(mixc(P.shadow, P.land, 0.5), BLACK, 0.15);
+  const round = /autumn|oak|jungle|rainforest/.test(a.keywords.join(' ')) ? 0.5 : 0;
+  const foggy = a.weather === 'fog' ? 0.62 : 0.5;
+  const layers = [
+    { base: 0.05, hMin: 0.07, hMax: 0.15, gap: 0.016, mix: 0.18 },
+    { base: 0.12, hMin: 0.1, hMax: 0.22, gap: 0.024, mix: 0.4 },
+    { base: 0.21, hMin: 0.16, hMax: 0.34, gap: 0.04, mix: 0.62 },
+    { base: 0.33, hMin: 0.3, hMax: 0.62, gap: 0.07, mix: 0.92, clear: 0.42 },
+  ];
+  layers.forEach((L, k) => {
+    const base = hz + H * L.base;
+    const col = mixc(mixc(fog, P.land, 0.3), deep, L.mix);
+    if (k === 3) {
+      const gy = Math.min(H - 0.01, base);
+      S.ctx.fillStyle = grad(S.ctx, 0, gy - 0.1, 0, H, [[0, css(mixc(col, fog, 0.3))], [1, css(col)]]);
+      S.ctx.fillRect(0, gy - 0.06, W, H);
+      if (has(a, 'cabin')) cabin(S, W * (0.35 + r() * 0.3), gy - 0.04, H * 0.08, mul(deep, 0.9));
+      if (a.figure) person(S.ctx, W * (0.4 + r() * 0.2), gy - 0.02, H * 0.14, mul(deep, 0.8));
+    }
+    treeLine(S, base, { hMin: H * L.hMin, hMax: H * L.hMax, gap: L.gap, col, key: 'tl' + k, round, snow, clear: L.clear || 0 });
+    if (k === 1) rays(S, sx, sy, 11, H * 1.2, night ? 0.07 : 0.18);
+    if (k < 3) fogBand(S, base + 0.005, H * (0.1 + k * 0.03), fog, foggy - k * 0.1);
+  });
 }
 
 function sceneDesert(S, o = {}) {
@@ -1095,8 +1111,8 @@ function sceneDesert(S, o = {}) {
       const v = 0.5 + 0.35 * Math.sin(xx * fq + ph + N.fbm(xx * 1.5, 0, 3) * 3) + 0.3 * (N.fbm(xx * 3, 1, 3) - 0.5);
       ys[i] = base - amp * Math.pow(clamp(v), 1.3);
     }
-    const lit = mixc(mixc(sand, P.light, 0.25), P.hor, 0.4 * (1 - t));
-    const dark = mixc(mixc(sand, P.shadow, 0.35 + t * 0.2), P.mid, 0.3 * (1 - t));
+    const lit = mixc(mixc(sand, P.light, 0.38), P.hor, 0.35 * (1 - t));
+    const dark = mixc(mixc(sand, P.shadow, 0.3 + t * 0.15), P.mid, 0.3 * (1 - t));
     let top = Infinity; for (const y of ys) top = Math.min(top, y);
     ridgePath(S, ys);
     ctx.fillStyle = grad(ctx, 0, top, 0, base + 0.15, [[0, css(lit)], [1, css(dark)]]);
@@ -1108,9 +1124,9 @@ function sceneDesert(S, o = {}) {
     for (let i = 0; i <= n; i++) ctx.lineTo(i * dx, ys[i]);
     for (let i = n; i >= 0; i--) {
       const s = (ys[Math.min(n, i + 1)] - ys[Math.max(0, i - 1)]) / (2 * dx) * (sunLeft ? 1 : -1);
-      ctx.lineTo(i * dx, ys[i] + clamp(s * 1.6) * amp * 1.2);
+      ctx.lineTo(i * dx, ys[i] + Math.pow(clamp(s * 2.2), 0.7) * amp * 1.6);
     }
-    ctx.fillStyle = css(mul(dark, 0.8), 0.5);
+    ctx.fillStyle = css(mixc(mul(dark, 0.7), P.mid, 0.25), 0.72);
     ctx.fill();
     ctx.strokeStyle = css(mixc(P.light, WHITE, 0.3), 0.35 * (1 - t * 0.5));
     ctx.lineWidth = 0.0015;
