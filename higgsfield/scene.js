@@ -146,7 +146,7 @@ const LEX = {
     'race car', 'drift', 'drifting', 'muscle car', 'convertible', 'sedan', 'coupe', 'roadster', 'tesla', 'bmw', 'audi',
     'jeep', 'taxi', 'motorsport', 'road trip', 'driving'],
   cyberpunk: ['cyberpunk', 'blade runner', 'cyber', 'synthwave', 'hologram', 'holographic', 'dystopian', 'futuristic city',
-    'neon city', 'sci-fi city', 'megacity', 'neo tokyo'],
+    'sci-fi city', 'megacity', 'neo tokyo'],
   city: ['city', 'skyline', 'downtown', 'street', 'tokyo', 'new york', 'manhattan', 'skyscraper', 'urban', 'metropolis',
     'alley', 'rooftop', 'building', 'highway', 'bridge', 'paris', 'london', 'hong kong', 'shanghai', 'seoul', 'traffic',
     'cityscape', 'times square', 'chicago', 'dubai'],
@@ -1014,8 +1014,12 @@ function sceneMountain(S, o = {}) {
     const ly = base - H * 0.03;
     water(S, ly, sx, { glitter: 0.5 });
     const sil = mixc(P.shadow, P.land, 0.3);
-    treeLine(S, H * 0.97, { hMin: H * 0.08, hMax: H * 0.2, gap: 0.03, col: sil, key: 'lt', snow: snowy });
-    if (a.figure) person(ctx, W * (0.3 + r() * 0.4), H * 0.97, H * 0.1, sil);
+    treeLine(S, H * 0.97, { hMin: H * 0.08, hMax: H * 0.2, gap: 0.03, col: sil, key: 'lt', snow: snowy, clear: a.figure ? 0.3 : 0 });
+    if (a.figure) {
+      ctx.fillStyle = css(sil);
+      ctx.fillRect(0, H * 0.965, W, H);
+      person(ctx, W / 2 + (r() - 0.5) * 0.1, H * 0.97, H * 0.13, sil);
+    }
   } else {
     const sil = mixc(P.shadow, P.land, 0.3);
     if (r() < 0.6 || snowy) treeLine(S, H * 0.95, { hMin: H * 0.05, hMax: H * 0.16, gap: 0.028, col: sil, key: 'mt', snow: snowy });
@@ -1119,15 +1123,22 @@ function sceneDesert(S, o = {}) {
     ctx.fill();
     // lee-side shadow
     const sunLeft = sx < W / 2;
-    ctx.beginPath();
     const dx = W / n;
-    for (let i = 0; i <= n; i++) ctx.lineTo(i * dx, ys[i]);
-    for (let i = n; i >= 0; i--) {
-      const s = (ys[Math.min(n, i + 1)] - ys[Math.max(0, i - 1)]) / (2 * dx) * (sunLeft ? 1 : -1);
-      ctx.lineTo(i * dx, ys[i] + Math.pow(clamp(s * 2.2), 0.7) * amp * 1.6);
+    const slope = new Float32Array(n + 1);
+    for (let i = 0; i <= n; i++) {
+      let acc = 0, c = 0;
+      for (let k = -6; k <= 6; k++) { const j = Math.min(n, Math.max(0, i + k)); acc += ys[Math.min(n, j + 1)] - ys[Math.max(0, j - 1)]; c++; }
+      slope[i] = (acc / c / (2 * dx)) * (sunLeft ? 1 : -1);
     }
-    ctx.fillStyle = css(mixc(mul(dark, 0.7), P.mid, 0.25), 0.72);
+    ctx.save();
+    ridgePath(S, ys);
+    ctx.clip();
+    ctx.beginPath();
+    for (let i = 0; i <= n; i++) ctx.lineTo(i * dx, ys[i] - 0.002);
+    for (let i = n; i >= 0; i--) ctx.lineTo(i * dx, ys[i] + smooth(0, 0.35, slope[i]) * amp * 0.9);
+    ctx.fillStyle = css(mixc(mul(dark, 0.7), P.mid, 0.25), 0.7);
     ctx.fill();
+    ctx.restore();
     ctx.strokeStyle = css(mixc(P.light, WHITE, 0.3), 0.35 * (1 - t * 0.5));
     ctx.lineWidth = 0.0015;
     ctx.beginPath();
@@ -1294,9 +1305,16 @@ function sceneCity(S, o = {}) {
   ctx.fillStyle = grad(ctx, 0, hz, 0, H, [[0, css(P.shadow, 0)], [1, css(P.shadow, 0.6)]]);
   ctx.fillRect(0, hz, W, H - hz);
   if (a.figure) {
-    const fx = W * (0.3 + r() * 0.4);
-    person(ctx, fx, H * 0.93, H * 0.2, mul(P.shadow, 0.6));
-    if (rainy || has(a, 'umbrella')) umbrella(ctx, fx, H * 0.93, H * 0.2, mul(P.shadow, 0.6));
+    const fx = W * (0.3 + r() * 0.4), fy = hz + (H - hz) * 0.7, fh = H * 0.24;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.translate(fx, fy - fh * 0.5); ctx.scale(1, 1.6);
+    glowDot(ctx, 0, 0, fh * 0.9, mixc(P.hor, P.light, 0.3), 0.55);
+    ctx.restore();
+    ctx.fillStyle = rgrad(ctx, fx, fy, fh * 0.5, [[0, css(mixc(P.hor, P.light, 0.5), 0.5)], [1, css(P.hor, 0)]]);
+    ctx.fillRect(fx - fh * 0.5, fy - fh * 0.1, fh, fh * 0.2);
+    person(ctx, fx, fy, fh, mul(P.shadow, 0.5));
+    if (rainy || has(a, 'umbrella')) umbrella(ctx, fx, fy, fh, mul(P.shadow, 0.5));
   }
   if (cyber || a.weather === 'fog') fogLayer(S, hz - H * 0.15, hz + H * 0.08, 0.35, 'cfog');
 }
@@ -1378,11 +1396,11 @@ function sceneSpace(S) {
     ctx.beginPath(); ctx.arc(px, py, pr, 0, TAU); ctx.clip();
     ctx.fillStyle = css(pc); ctx.fillRect(px - pr, py - pr, pr * 2, pr * 2);
     const B = S.noise('bands');
-    for (let i = 0; i < 40; i++) {
-      const y = py - pr + (i / 40) * pr * 2;
-      const v = B.fbm(i * 0.18, 0, 3);
-      ctx.fillStyle = css(v > 0.5 ? mixc(pc, P.light, 0.5) : mul(pc, 0.6), 0.35);
-      ctx.fillRect(px - pr, y, pr * 2, pr * 0.06);
+    for (let i = 0; i < 90; i++) {
+      const y = py - pr + (i / 90) * pr * 2;
+      const v = B.fbm(i * 0.09, 0, 4);
+      ctx.fillStyle = css(v > 0.5 ? mixc(pc, P.light, 0.45) : mul(pc, 0.55), Math.abs(v - 0.5) * 1.6);
+      ctx.fillRect(px - pr, y, pr * 2, pr * 0.025);
     }
     ctx.fillStyle = rgrad(ctx, lx, ly, pr * 2.1, [[0, css(WHITE, 0.25)], [0.35, css(BLACK, 0)], [0.62, css(BLACK, 0.7)], [1, css(BLACK, 0.95)]]);
     ctx.fillRect(px - pr, py - pr, pr * 2, pr * 2);
@@ -1416,7 +1434,7 @@ function subState(S, w, h) {
   const ctx = c.getContext('2d');
   const U = Math.min(c.width, c.height);
   ctx.setTransform(U, 0, 0, U, 0, 0);
-  ctx.imageSmoothingQuality = 'high';
+  ctx.imageSmoothingQuality = 'medium';
   return { c, S2: { ...S, ctx, w: c.width, h: c.height, U, W: c.width / U, H: c.height / U } };
 }
 
@@ -1989,7 +2007,7 @@ const LOOKS = {
   realistic: { contrast: 1.06, sat: 1.04, grain: 0.016, vignette: 0.3, bloom: 0.14 },
   cinematic: { contrast: 1.12, sat: 1.06, shadows: [-14, 6, 18], highs: [18, 5, -14], grain: 0.022, vignette: 0.5, bloom: 0.34 },
   editorial: { contrast: 0.95, sat: 0.78, lift: 16, highs: [10, 4, -4], shadows: [4, 0, 6], grain: 0.02, vignette: 0.22, bloom: 0.1 },
-  anime: { contrast: 1.08, sat: 1.38, gamma: 0.9, posterize: 9, ink: 0.85, inkT: 26, vignette: 0.08, bloom: 0.25 },
+  anime: { contrast: 1.08, sat: 1.38, gamma: 0.9, posterize: 9, ink: 0.85, inkT: 44, vignette: 0.08, bloom: 0.25 },
   'film-noir': { mono: true, contrast: 1.45, gamma: 0.95, levels: 1, grain: 0.05, vignette: 0.6, blinds: true, bloom: 0.2 },
   vaporwave: { contrast: 1.04, sat: 1.2, shadows: [34, -8, 46], highs: [24, -6, 22], scan: 0.16, chroma: 3, grain: 0.012, vignette: 0.3, overlay: 'vapor', bloom: 0.3 },
   'analog-film': { contrast: 0.9, sat: 0.86, lift: 22, shadows: [6, 4, -4], highs: [20, 8, -20], grain: 0.06, vignette: 0.45, leaks: true, stamp: true, bloom: 0.22 },
@@ -2049,7 +2067,7 @@ function preLook(S, L, r) {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
+  ctx.imageSmoothingQuality = 'medium';
   if (L.pixel) {
     const k = Math.max(1, U / L.pixel);
     const small = makeCanvas(w / k, h / k);
@@ -2154,7 +2172,7 @@ function grade(S, L) {
   const vx = new Float32Array(w), vy = new Float32Array(h);
   for (let x = 0; x < w; x++) vx[x] = Math.pow(((x + 0.5) / w) * 2 - 1, 2);
   for (let y = 0; y < h; y++) vy[y] = Math.pow(((y + 0.5) / h) * 2 - 1, 2);
-  const grain = (L.grain ?? 0) * 255 * 2;
+  const grain = Math.max(L.pixel || L.posterize ? 0 : 5, (L.grain ?? 0) * 255 * 2);
   const paper = !!L.paper;
   let seed = (S.base | 1) >>> 0;
   const chroma = L.chroma ? Math.max(1, Math.round((L.chroma * U) / 900)) : 0;
@@ -2290,7 +2308,7 @@ export function paintScene(ctx, width, height, { prompt = '', seed = 1, style = 
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'source-over';
   ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
+  ctx.imageSmoothingQuality = 'medium';
   ctx.beginPath();
   ctx.rect(0, 0, S.W, S.H);
   ctx.clip();

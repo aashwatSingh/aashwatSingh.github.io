@@ -20,6 +20,18 @@ function fmtBytes(n) {
   return `${(n / 1024 ** i).toFixed(i < 2 ? 0 : 1)} ${u[i]}`;
 }
 
+async function watermarked(blob) {
+  const [{ drawWatermark }, bmp] = await Promise.all([import('../scene.js'), createImageBitmap(blob)]);
+  const c = document.createElement('canvas');
+  c.width = bmp.width;
+  c.height = bmp.height;
+  const g = c.getContext('2d');
+  g.drawImage(bmp, 0, 0);
+  bmp.close?.();
+  drawWatermark(g, c.width, c.height);
+  return new Promise((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png'));
+}
+
 function ago(ts) {
   const s = Math.max(0, (Date.now() - ts) / 1000);
   if (s < 60) return 'just now';
@@ -266,6 +278,10 @@ export async function mount(root, ctx) {
       let blob = rec.blob instanceof Blob ? rec.blob : null;
       if (!blob && rec.thumb) { try { blob = await (await fetch(rec.thumb)).blob(); } catch {} }
       if (!blob) { ctx.toast('Nothing to download for this asset', 'bad'); return; }
+      // Stored images are clean (so Animate doesn't stack watermarks); Free downloads get one here.
+      if (rec.type === 'image' && ctx.store.getPlan().id === 'free') {
+        try { blob = await watermarked(blob); } catch {}
+      }
       download(blob, `higgsfield-${rec.type}-${rec.id}.${extFor(blob, rec.type)}`);
     });
 
