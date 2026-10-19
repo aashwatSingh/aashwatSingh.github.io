@@ -83,7 +83,8 @@ export async function mount(root, ctx) {
 
   function choose(p) {
     store.setPlan(p.id);
-    ctx.toast(`Switched to ${p.name}. ${p.credits.toLocaleString()} credits added. Demo checkout: no payment was taken.`, 'good');
+    const added = p.price ? ` ${p.credits.toLocaleString()} credits added.` : '';
+    ctx.toast(`Switched to ${p.name}.${added} Demo checkout: no payment was taken.`, 'good');
   }
 
   const topups = h('div', { class: 'pg-topups' }, TOPUPS.map((t) => h('article', { class: 'pg-topup' },

@@ -1458,7 +1458,7 @@ function figurePaths(S, cx, s, r) {
   head.ellipse(cx + rx * 0.97, cy + ry * 0.12, rx * 0.13, ry * 0.2, 0, 0, TAU);
   head.ellipse(cx - rx * 0.97, cy + ry * 0.12, rx * 0.13, ry * 0.2, 0, 0, TAU);
   const hair = new Path2D();
-  const kind = r() < 0.55 ? 'long' : r() < 0.6 ? 'short' : 'bun';
+  const kind = r() < 0.7 ? 'long' : r() < 0.5 ? 'short' : 'bun';
   if (kind === 'long') {
     const fall = H - s * (0.12 + r() * 0.12);
     hair.moveTo(cx, cy - ry * 1.22);
@@ -1504,25 +1504,26 @@ function scenePortrait(S) {
   const F = figurePaths(S, cx, s, r);
   const rimL = mixc(P.accent, WHITE, 0.15), rimR = mixc(P.hor, P.light, 0.35);
   const bodyC = mixc(P.shadow, P.mid, 0.18);
-  const skin = mixc(mixc([205, 150, 120], P.shadow, 0.72), P.mid, 0.1);
+  const skin = mixc(mixc([205, 150, 120], P.shadow, 0.8), P.mid, 0.08);
   const hairC = mul(P.shadow, 0.6);
   // mask of the whole silhouette in pixel space
-  const mask = makeCanvas(w, h);
+  const mw = Math.ceil(w / 2), mh = Math.ceil(h / 2), mU = S.U / 2;
+  const mask = makeCanvas(mw, mh);
   const m = mask.getContext('2d');
-  m.setTransform(S.U, 0, 0, S.U, 0, 0);
+  m.setTransform(mU, 0, 0, mU, 0, 0);
   m.fillStyle = '#fff';
   m.fill(F.body); m.fill(F.head); m.fill(F.hair);
   const rimBand = (d) => {
-    const dp = d * S.U;
-    const inner = makeCanvas(w, h);
+    const dp = d * mU;
+    const inner = makeCanvas(mw, mh);
     const ic = inner.getContext('2d');
     ic.drawImage(mask, dp, 0);
     ic.globalCompositeOperation = 'destination-in'; ic.drawImage(mask, -dp, 0);
     ic.drawImage(mask, 0, dp * 0.8);
-    const band = makeCanvas(w, h);
+    const band = makeCanvas(mw, mh);
     const bc = band.getContext('2d');
-    bc.fillStyle = grad(bc, 0, 0, w, 0, [[0, css(rimL)], [0.44, css(rimL)], [0.56, css(rimR)], [1, css(rimR)]]);
-    bc.fillRect(0, 0, w, h);
+    bc.fillStyle = grad(bc, 0, 0, mw, 0, [[0, css(rimL)], [0.44, css(rimL)], [0.56, css(rimR)], [1, css(rimR)]]);
+    bc.fillRect(0, 0, mw, mh);
     bc.globalCompositeOperation = 'destination-in'; bc.drawImage(mask, 0, 0);
     bc.globalCompositeOperation = 'destination-out'; bc.drawImage(inner, 0, 0);
     return band;
@@ -1550,8 +1551,6 @@ function scenePortrait(S) {
   ctx.fillRect(F.cx - F.rx * 2, F.cy - F.ry * 2, F.rx * 4, F.ry * 4);
   ctx.fillStyle = rgrad(ctx, F.cx + F.rx * 0.9, F.cy, F.rx * 1.2, [[0, css(mixc(skin, rimR, 0.5), 0.4)], [1, css(rimR, 0)]]);
   ctx.fillRect(F.cx - F.rx * 2, F.cy - F.ry * 2, F.rx * 4, F.ry * 4);
-  ctx.fillStyle = css(mul(skin, 0.55), 0.6);
-  ctx.beginPath(); ctx.ellipse(F.cx, F.cy + F.ry * 0.62, F.rx * 0.55, F.ry * 0.18, 0, 0, Math.PI); ctx.fill();
   ctx.restore();
   ctx.fillStyle = grad(ctx, F.cx - F.rx * 2, 0, F.cx + F.rx * 2, 0, [[0, css(mixc(hairC, rimL, 0.18))], [0.5, css(hairC)], [1, css(mixc(hairC, rimR, 0.15))]]);
   ctx.fill(F.hair);
@@ -1559,9 +1558,9 @@ function scenePortrait(S) {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha = 0.35;
-  ctx.drawImage(rimBand(0.02), 0, 0);
+  ctx.drawImage(rimBand(0.02), 0, 0, w, h);
   ctx.globalAlpha = 1;
-  ctx.drawImage(rimBand(0.0055), 0, 0);
+  ctx.drawImage(rimBand(0.006), 0, 0, w, h);
   ctx.restore();
   // dust in the light
   ctx.save();
@@ -1648,8 +1647,9 @@ function drawCar(S, x0, gy, L, paint, { reflection = false } = {}) {
     ctx.beginPath();
     for (let k = 0; k < 5; k++) { const an = k * TAU / 5 + wx; ctx.moveTo(cx + Math.cos(an) * rr * 0.15, cy + Math.sin(an) * rr * 0.15); ctx.lineTo(cx + Math.cos(an) * rr * 0.62, cy + Math.sin(an) * rr * 0.62); }
     ctx.stroke();
-    ctx.fillStyle = css([200, 30, 30], 0.9);
-    ctx.beginPath(); ctx.arc(cx, cy, rr * 0.45, -2.4, -1.4); ctx.lineTo(cx, cy); ctx.fill();
+    ctx.strokeStyle = css([190, 30, 30], 0.85);
+    ctx.lineWidth = rr * 0.1;
+    ctx.beginPath(); ctx.arc(cx, cy, rr * 0.5, -2.3, -1.5); ctx.stroke();
     ctx.fillStyle = '#111';
     ctx.beginPath(); ctx.arc(cx, cy, rr * 0.12, 0, TAU); ctx.fill();
   }
@@ -1679,7 +1679,7 @@ function sceneCar(S) {
   copy.getContext('2d').drawImage(ctx.canvas, 0, 0, w, h, 0, 0, w, h);
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  for (let i = 1; i <= 6; i++) { ctx.globalAlpha = 0.5 / i + 0.05; ctx.drawImage(copy, (i % 2 ? 1 : -1) * i * S.U * 0.006, 0); }
+  for (let i = 1; i <= 4; i++) { ctx.globalAlpha = 0.35 / i + 0.05; ctx.drawImage(copy, (i % 2 ? 1 : -1) * i * S.U * 0.0035, 0); }
   ctx.restore();
   const roadY = hz + (H - hz) * 0.12;
   ctx.fillStyle = grad(ctx, 0, roadY, 0, H, [[0, css(mixc(P.shadow, P.mid, 0.25))], [1, css(mul(P.shadow, 0.5))]]);
@@ -1721,23 +1721,24 @@ function sceneCar(S) {
 function sceneAbstract(S) {
   const { ctx, W, H, P } = S;
   const r = S.rng('abs');
-  ctx.fillStyle = grad(ctx, 0, 0, W, H, [[0, css(P.top)], [0.55, css(mixc(P.mid, P.shadow, 0.4))], [1, css(P.shadow)]]);
+  ctx.fillStyle = grad(ctx, 0, 0, W, H, [[0, css(mul(P.top, 0.8))], [0.55, css(mixc(P.mid, P.shadow, 0.65))], [1, css(mul(P.shadow, 0.8))]]);
   ctx.fillRect(0, 0, W, H);
   ctx.save();
   ctx.globalCompositeOperation = 'screen';
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 5; i++) {
     const c = [P.accent, P.hor, P.mid, P.light][i % 4];
-    glowDot(ctx, r() * W, r() * H, 0.3 + r() * 0.5, c, 0.35 + r() * 0.25);
+    glowDot(ctx, r() * W, r() * H, 0.3 + r() * 0.5, c, 0.18 + r() * 0.16);
   }
+  ctx.globalCompositeOperation = 'lighter';
   const ribbons = 3 + ((r() * 2) | 0);
   for (let k = 0; k < ribbons; k++) {
     const cy = H * (0.2 + r() * 0.6), A = H * (0.1 + r() * 0.25), f = 1.5 + r() * 3, ph = r() * TAU;
     const A2 = H * (0.03 + r() * 0.08), f2 = 4 + r() * 5, ph2 = r() * TAU;
     const thick = 0.06 + r() * 0.14, twist = 1 + r() * 3, tph = r() * TAU;
     const cols = [P.accent, P.hor, P.light, mixc(P.accent, P.mid, 0.5)];
-    const ca = cols[(r() * 4) | 0], cb = cols[(r() * 4) | 0];
-    ctx.strokeStyle = grad(ctx, 0, 0, W, 0, [[0, css(ca, 0)], [0.25, css(ca, 0.14)], [0.6, css(cb, 0.16)], [1, css(cb, 0.02)]]);
-    ctx.lineWidth = 0.0016;
+    const ci = (r() * 4) | 0, ca = cols[ci], cb = cols[(ci + 1 + ((r() * 3) | 0)) % 4];
+    ctx.strokeStyle = grad(ctx, 0, 0, W, 0, [[0, css(ca, 0.02)], [0.3, css(ca, 0.13)], [0.65, css(cb, 0.15)], [1, css(cb, 0.03)]]);
+    ctx.lineWidth = 0.0018;
     const strands = 56;
     for (let j = 0; j < strands; j++) {
       const o = j / (strands - 1) - 0.5;
@@ -1800,10 +1801,10 @@ function blossom(S, x, y, R, col, kind, r) {
       for (let i = 0; i < n; i++) {
         ctx.save(); ctx.rotate((i / n) * TAU + ring * 0.7);
         ctx.beginPath(); petal(ctx, len, wid);
-        ctx.fillStyle = rgrad(ctx, 0, 0, len, [[0, css(mul(col, 0.3 + ring * 0.05))], [0.6, css(mul(col, 0.85 + ring * 0.05))], [1, css(mixc(col, WHITE, 0.25))]]);
+        ctx.fillStyle = rgrad(ctx, 0, 0, len, [[0, css(mul(col, 0.22 + ring * 0.06))], [0.55, css(mul(col, 0.8 + ring * 0.04))], [0.9, css(col)], [1, css(mixc(col, WHITE, 0.35))]]);
         ctx.fill();
-        ctx.strokeStyle = css(mixc(col, WHITE, 0.45), 0.5);
-        ctx.lineWidth = R * 0.012;
+        ctx.strokeStyle = css(mul(col, 0.45), 0.55);
+        ctx.lineWidth = R * 0.01;
         ctx.stroke();
         ctx.restore();
       }
@@ -1811,7 +1812,7 @@ function blossom(S, x, y, R, col, kind, r) {
     ctx.strokeStyle = css(mul(col, 0.3), 0.8);
     ctx.lineWidth = R * 0.02;
     ctx.beginPath();
-    for (let i = 0; i < 60; i++) { const t = i / 60, an = t * 12, d = t * R * 0.22; i ? ctx.lineTo(Math.cos(an) * d, Math.sin(an) * d) : ctx.moveTo(0, 0); }
+    for (let i = 0; i < 40; i++) { const t = i / 40, an = t * 7, d = t * R * 0.16; i ? ctx.lineTo(Math.cos(an) * d, Math.sin(an) * d) : ctx.moveTo(0, 0); }
     ctx.stroke();
   } else {
     const n = kind === 'sakura' ? 5 : 6 + ((r() * 3) | 0);
@@ -1868,15 +1869,16 @@ function sceneFlowerBg(S) {
   const green = mixc(P.land, [60, 120, 60], 0.4);
   ctx.fillStyle = grad(ctx, 0, 0, 0, H, [[0, css(mixc(P.mid, P.light, 0.3))], [0.5, css(mixc(P.hor, green, 0.45))], [1, css(mul(green, 0.55))]]);
   ctx.fillRect(0, 0, W, H);
-  const N = S.noise('fbg');
-  const tex = texture(120, Math.round(120 * H / W), (u, v, out) => {
-    const n = N.fbm(u * W * 3, v * H * 3, 4);
-    const c = n > 0.55 ? mixc(green, P.light, 0.3) : mul(green, 0.7);
-    out[0] = c[0]; out[1] = c[1]; out[2] = c[2]; out[3] = 140 * smooth(0.3, 0.7, n) + 40;
-  });
-  ctx.drawImage(tex, 0, 0, W, H);
-  bokeh(S, 30, 'fbok');
-  void r;
+  const { c, S2 } = subState(S, W * 36, H * 36);
+  const g = S2.ctx;
+  for (let i = 0; i < 46; i++) {
+    const x = r() * W, y = H * (0.25 + r() * 0.8), rad = 0.06 + r() * 0.16;
+    const col = r() < 0.7 ? mixc(green, P.light, r() * 0.45) : mixc(P.accent, P.light, 0.3);
+    g.fillStyle = css(r() < 0.5 ? col : mul(col, 0.6), 0.35 + r() * 0.4);
+    g.beginPath(); g.arc(x, y, rad, 0, TAU); g.fill();
+  }
+  ctx.drawImage(c, 0, 0, W, H);
+  bokeh(S, 22, 'fbok');
 }
 
 function sceneFlower(S) {
@@ -2127,15 +2129,15 @@ function grade(S, L) {
   const hist = new Uint32Array(256);
   let cnt = 0;
   for (let i = 0; i < d.length; i += 4 * 13) { hist[(d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8]++; cnt++; }
-  let lo = 0, hi = 255, acc = 0;
+  let lo = 0, top = 255, acc = 0;
   for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc > cnt * 0.01) { lo = v; break; } }
   acc = 0;
-  for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc > cnt * 0.01) { hi = v; break; } }
-  if (hi - lo < 90) { const mid = (hi + lo) / 2; lo = Math.max(0, mid - 45); hi = Math.min(255, mid + 45); }
+  for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc > cnt * 0.01) { top = v; break; } }
+  if (top - lo < 90) { const mid = (top + lo) / 2; lo = Math.max(0, mid - 45); top = Math.min(255, mid + 45); }
   const lv = L.levels ?? 0.45;
   const lut = new Float32Array(256);
   for (let v = 0; v < 256; v++) {
-    let x = lerp(v / 255, clamp((v - lo) / (hi - lo)), lv);
+    let x = lerp(v / 255, clamp((v - lo) / (top - lo)), lv);
     if (gamma !== 1) x = Math.pow(x, gamma);
     x = (x - 0.5) * contrast + 0.5;
     lut[v] = clamp(lift + x * (1 - lift)) * 255;

@@ -53,12 +53,12 @@ export function spendCredits(n) {
 
 export function addCredits(n) { settings.credits += Math.max(0, Math.round(n)); save(); }
 
-/** Switch plan and top up with that plan's monthly credits. */
+/** Switch plan and top up with a paid plan's monthly credits (Free's starter credits come once, on first visit). */
 export function setPlan(id) {
   const plan = PLANS.find((p) => p.id === id);
-  if (!plan) return;
+  if (!plan || plan.id === settings.plan) return;
   settings.plan = id;
-  settings.credits += plan.credits;
+  if (plan.price > 0) settings.credits += plan.credits;
   save();
 }
 

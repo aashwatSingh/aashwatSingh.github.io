@@ -1023,7 +1023,7 @@ export async function mount(root, ctx) {
   const S = {
     face: 'avatar',
     avatar: avatarById(ctx.params.get('avatar')).id,
-    script: store.getLastPrompt('speak') || DEFAULT_SCRIPT,
+    script: ctx.params.get('prompt') || store.getLastPrompt('speak') || DEFAULT_SCRIPT,
     voiceURI: '',
     rate: 1,
     pitch: 1,
