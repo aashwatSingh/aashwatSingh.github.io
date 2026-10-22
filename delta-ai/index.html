@@ -698,6 +698,14 @@ flowchart LR
 })();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
-<script>mermaid.initialize({ startOnLoad: true, theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default" });</script>
+<script>
+mermaid.initialize({ startOnLoad: false, theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default" });
+(function () {
+  let drawn = false;
+  const draw = () => { if (drawn || document.getElementById("view-architecture").hidden) return; drawn = true; mermaid.run({ querySelector: ".mermaid" }); };
+  document.getElementById("tab-architecture").addEventListener("click", () => setTimeout(draw, 0));
+  draw();
+})();
+</script>
 </body>
 </html>
