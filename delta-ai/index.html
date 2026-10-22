@@ -1,0 +1,703 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>DELTA-AI Demo</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one app shell, tab bar on top; kiosk is a tablet-shaped panel, staff views are dense work surfaces. */
+:root {
+  --bg: #f3f5f4;
+  --surface: #ffffff;
+  --sunk: #e8ecea;
+  --line: #d3dad7;
+  --fg: #142320;
+  --muted: #56645f;
+  --accent: #1d6b5a;
+  --accent-ink: #ffffff;
+  --accent-soft: #d8ebe5;
+  --crit: #b42318;
+  --crit-soft: #fbe5e2;
+  --warn: #a8510a;
+  --warn-soft: #fcefd9;
+  --ok: #2f7a3a;
+  --ok-soft: #e1f0e2;
+  --paper: #fffef8;
+  --font-ui: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1716; --surface: #172220; --sunk: #1e2b29; --line: #2d3d3a;
+    --fg: #e4ece9; --muted: #9aaba6; --accent: #5cc0a6; --accent-ink: #0b1513; --accent-soft: #1d3a33;
+    --crit: #f2867a; --crit-soft: #3d1d1a; --warn: #f0b062; --warn-soft: #3a2a14;
+    --ok: #7fcf8a; --ok-soft: #1c3320; --paper: #1b2421; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1716; --surface: #172220; --sunk: #1e2b29; --line: #2d3d3a;
+  --fg: #e4ece9; --muted: #9aaba6; --accent: #5cc0a6; --accent-ink: #0b1513; --accent-soft: #1d3a33;
+  --crit: #f2867a; --crit-soft: #3d1d1a; --warn: #f0b062; --warn-soft: #3a2a14;
+  --ok: #7fcf8a; --ok-soft: #1c3320; --paper: #1b2421; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-ui); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 48px;
+}
+.shell { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+h1, h2, h3 { margin: 0; line-height: 1.2; text-wrap: balance; }
+h1 { font-size: 1.6rem; letter-spacing: -0.01em; }
+h2 { font-size: 1.25rem; }
+h3 { font-size: 1rem; }
+p { margin: 0; }
+.mono { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 700; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+header.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.brand { display: flex; flex-direction: column; gap: 4px; }
+.fake { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-weight: 700; font-size: 0.82rem; }
+
+nav.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+nav.tabs button { background: none; border: 0; padding: 10px 14px; font-weight: 700; color: var(--muted); border-bottom: 3px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+nav.tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+.tabnote { font-size: 0.9rem; }
+
+/* ---------- Kiosk ---------- */
+.kiosk-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 20px; align-items: start; }
+@media (max-width: 820px) { .kiosk-wrap { grid-template-columns: minmax(0, 1fr); } }
+.kiosk { background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 24px; display: flex; flex-direction: column; gap: 22px; min-height: 520px; box-shadow: 0 0 0 10px var(--sunk); }
+.kiosk.large { font-size: 1.2rem; }
+.k-bar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.k-tools { display: flex; gap: 8px; }
+.chip-btn { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 12px; font-size: 0.85rem; font-weight: 700; }
+.chip-btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.stepper { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.stepper span { height: 6px; border-radius: 3px; background: var(--sunk); }
+.stepper span.on { background: var(--accent); }
+.k-body { flex: 1; display: flex; flex-direction: column; gap: 18px; }
+.k-title { font-size: 1.6em; font-weight: 700; line-height: 1.2; text-wrap: balance; }
+.k-actions { display: flex; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
+.big { min-height: 56px; padding: 0 26px; border-radius: 12px; border: 2px solid var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 1.05em; }
+.big.ghost { background: transparent; color: var(--fg); border-color: var(--line); }
+.big:disabled { opacity: 0.4; cursor: not-allowed; }
+.lang-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.lang-grid button { min-height: 110px; border-radius: 16px; border: 2px solid var(--line); background: var(--surface); font-size: 1.5em; font-weight: 700; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+.lang-grid button small { font-size: 0.55em; font-weight: 400; color: var(--muted); }
+.lang-grid button:hover { border-color: var(--accent); }
+.idcard { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; padding: 16px; border-radius: 12px; background: var(--sunk); }
+.idcard dt { color: var(--muted); }
+.idcard dd { margin: 0; font-weight: 700; }
+.check { display: flex; gap: 12px; align-items: flex-start; padding: 14px; border: 2px solid var(--line); border-radius: 12px; cursor: pointer; }
+.check input { width: 26px; height: 26px; accent-color: var(--accent); flex: none; margin: 0; }
+.q { display: flex; flex-direction: column; gap: 10px; }
+.q-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.q-opts button { min-height: 52px; border: 2px solid var(--line); background: var(--surface); border-radius: 10px; padding: 8px 10px; font-weight: 700; font-size: 0.95em; }
+.q-opts button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.readings { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.reading { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
+.reading .v { font-family: var(--font-data); font-size: 1.6em; font-weight: 500; font-variant-numeric: tabular-nums; }
+.reading.flag { border-color: var(--crit); background: var(--crit-soft); }
+.reading.flag .v { color: var(--crit); }
+.instr { display: flex; flex-direction: column; gap: 8px; padding-left: 1.2em; margin: 0; }
+.measuring { display: flex; align-items: center; gap: 12px; color: var(--muted); }
+.pulse { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); animation: pulse 0.9s ease-in-out infinite; }
+@keyframes pulse { 50% { transform: scale(1.6); opacity: 0.4; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+.notice { padding: 12px 14px; border-radius: 10px; font-weight: 700; }
+.notice.crit { background: var(--crit-soft); color: var(--crit); }
+.notice.ok { background: var(--ok-soft); color: var(--ok); }
+.plan { display: flex; flex-direction: column; gap: 8px; }
+.plan-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.plan-row.skip { opacity: 0.6; border-style: dashed; }
+.role { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; font-weight: 700; font-family: var(--font-data); background: var(--sunk); }
+.role.S { background: var(--accent-soft); color: var(--accent); }
+.role.A { background: var(--warn-soft); color: var(--warn); }
+.role.C { background: var(--crit-soft); color: var(--crit); }
+.cite { font-family: var(--font-data); font-size: 0.72rem; color: var(--muted); }
+.slip { align-self: center; width: min(100%, 360px); background: var(--paper); color: var(--fg); border: 1px dashed var(--line); padding: 18px 20px; font-family: var(--font-data); font-size: 0.82rem; line-height: 1.55; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 6px 18px rgba(0,0,0,0.08); }
+.slip hr { border: 0; border-top: 1px dashed var(--line); margin: 0; width: 100%; }
+.slip .row { display: flex; justify-content: space-between; gap: 10px; }
+.side { display: flex; flex-direction: column; gap: 14px; }
+.side-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+.side-card ol { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; }
+.side-card li.cur { font-weight: 700; color: var(--accent); }
+.legend { display: flex; flex-direction: column; gap: 6px; font-size: 0.88rem; }
+.legend div { display: flex; gap: 8px; align-items: center; }
+.legend .role { width: 24px; height: 24px; font-size: 0.75rem; }
+
+/* ---------- Worklist ---------- */
+.wl-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
+.counts { display: flex; gap: 18px; flex-wrap: wrap; }
+.counts b { font-family: var(--font-data); font-size: 1.3rem; display: block; }
+.filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.tasks { display: flex; flex-direction: column; gap: 8px; }
+.task { display: grid; grid-template-columns: 6px 150px minmax(0, 1fr) 110px 200px 120px; align-items: center; gap: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px 12px 0; overflow: hidden; }
+.task .stripe { align-self: stretch; margin: -12px 0; background: var(--line); }
+.task.crit .stripe { background: var(--crit); }
+.task.warn .stripe { background: var(--warn); }
+.task.done .stripe { background: var(--ok); }
+.task.new { animation: flash 2.4s ease-out; }
+@keyframes flash { 0%, 40% { background: var(--accent-soft); } }
+@media (prefers-reduced-motion: reduce) { .task.new { animation: none; outline: 2px solid var(--accent); } }
+.task .pid { font-family: var(--font-data); font-weight: 500; }
+.task .find { min-width: 0; }
+.task .find strong { display: block; }
+.dots { display: flex; flex-direction: column; gap: 4px; }
+.dots .track { display: flex; gap: 4px; }
+.dots .track i { flex: 1; height: 6px; border-radius: 3px; background: var(--sunk); }
+.dots .track i.on { background: var(--accent); }
+.dots small { color: var(--muted); font-size: 0.78rem; }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; background: var(--sunk); color: var(--muted); }
+.pill.crit { background: var(--crit-soft); color: var(--crit); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.adv { border: 1px solid var(--accent); background: transparent; color: var(--accent); border-radius: 8px; padding: 8px 10px; font-weight: 700; font-size: 0.85rem; }
+.adv:disabled { border-color: var(--line); color: var(--muted); cursor: default; }
+@media (max-width: 860px) {
+  .task { grid-template-columns: 6px minmax(0, 1fr) auto; grid-template-areas: "s p o" "s f f" "s d d" "s a a"; padding: 12px 14px 12px 0; }
+  .task .stripe { grid-area: s; }
+  .task .pid { grid-area: p; }
+  .task .find { grid-area: f; }
+  .task .own { grid-area: o; }
+  .task .dots { grid-area: d; }
+  .task .act { grid-area: a; }
+}
+
+/* ---------- Dashboard ---------- */
+.illus { font-weight: 700; color: var(--warn); }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.kpi { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.kpi .n { font-family: var(--font-data); font-size: 1.7rem; font-weight: 500; font-variant-numeric: tabular-nums; }
+.kpi .d { font-size: 0.82rem; color: var(--muted); }
+.panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 16px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+select { font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); }
+.bars { display: flex; flex-direction: column; gap: 10px; position: relative; }
+.bar { display: grid; grid-template-columns: 120px minmax(0, 1fr) 52px; gap: 10px; align-items: center; font-size: 0.9rem; }
+.bar .t { position: relative; height: 18px; background: var(--sunk); border-radius: 4px; }
+.bar .f { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 4px; }
+.bar.behind .f { background: var(--crit); }
+.bar .target { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--fg); }
+.bar .num { font-family: var(--font-data); text-align: right; font-variant-numeric: tabular-nums; }
+.axis { display: grid; grid-template-columns: 120px minmax(0, 1fr) 52px; gap: 10px; font-family: var(--font-data); font-size: 0.72rem; color: var(--muted); }
+.axis div { display: flex; justify-content: space-between; }
+.calc { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.calc label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted); }
+.calc input[type="number"] { font: inherit; font-family: var(--font-data); padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); width: 100%; }
+.calc input[type="range"] { width: 100%; accent-color: var(--accent); }
+.result { display: flex; gap: 18px; flex-wrap: wrap; align-items: baseline; padding: 14px; border-radius: 10px; background: var(--sunk); }
+.result .big-n { font-family: var(--font-data); font-size: 2rem; font-weight: 500; }
+.cap { height: 12px; border-radius: 6px; background: var(--sunk); position: relative; overflow: hidden; }
+.cap i { position: absolute; inset: 0 auto 0 0; background: var(--ok); border-radius: 6px; }
+.cap.over i { background: var(--crit); }
+
+/* ---------- Architecture ---------- */
+.arch { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; overflow-x: auto; }
+.arch pre { margin: 0; }
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.rule { border-left: 3px solid var(--accent); padding: 4px 0 4px 12px; display: flex; flex-direction: column; gap: 2px; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <header class="top">
+    <div class="brand">
+      <span class="label">Project DELTA-AI · tracking layer prototype</span>
+      <h1>Checkup kiosk and follow-up tracker</h1>
+    </div>
+    <span class="fake">Demo · all patients and numbers are fake</span>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Demo views">
+    <button role="tab" id="tab-kiosk" data-view="kiosk">1. Patient kiosk</button>
+    <button role="tab" id="tab-worklist" data-view="worklist">2. Staff worklist</button>
+    <button role="tab" id="tab-dashboard" data-view="dashboard">3. Dashboard</button>
+    <button role="tab" id="tab-architecture" data-view="architecture">4. How it fits</button>
+  </nav>
+
+  <!-- KIOSK -->
+  <section id="view-kiosk" class="kiosk-wrap" role="tabpanel" aria-labelledby="tab-kiosk">
+    <div class="kiosk" id="kiosk" aria-live="polite"></div>
+    <aside class="side">
+      <div class="side-card">
+        <span class="label">Kiosk flow</span>
+        <ol id="flow"></ol>
+      </div>
+      <div class="side-card">
+        <span class="label">Who does each step</span>
+        <div class="legend">
+          <div><span class="role S">S</span> Self-service at the kiosk</div>
+          <div><span class="role A">A</span> Medical assistant or CHW</div>
+          <div><span class="role C">C</span> Clinician</div>
+        </div>
+      </div>
+      <div class="side-card">
+        <span class="label">Built in</span>
+        <p class="tabnote muted">Each step saves as it goes, so a dropped connection loses nothing. The screen clears on timeout and nothing sensitive stays on the device.</p>
+      </div>
+    </aside>
+  </section>
+
+  <!-- WORKLIST -->
+  <section id="view-worklist" role="tabpanel" aria-labelledby="tab-worklist" hidden>
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="wl-head">
+        <div class="counts" id="counts"></div>
+        <div class="filters" id="filters"></div>
+      </div>
+      <p class="tabnote muted">Every abnormal result and kit has an owner, a due date and a loop to close. Missed deadlines escalate from MA to clinic manager to medical director.</p>
+      <div class="tasks" id="tasks"></div>
+    </div>
+  </section>
+
+  <!-- DASHBOARD -->
+  <section id="view-dashboard" role="tabpanel" aria-labelledby="tab-dashboard" hidden>
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <p class="tabnote"><span class="illus">Illustrative numbers.</span> <span class="muted">Sample month, 4 kiosks in Bolivar, Sunflower, Washington and Coahoma counties.</span></p>
+      <div class="kpis">
+        <div class="kpi"><span class="label">Sessions / kiosk / day</span><span class="n">3.4</span><span class="d">Break-even needs 1.9</span></div>
+        <div class="kpi"><span class="label">Session completion</span><span class="n">81%</span><span class="d">Most drop-off at BP step</span></div>
+        <div class="kpi"><span class="label">Loops closed ≤ 30 days</span><span class="n">74%</span><span class="d">Of abnormal results</span></div>
+        <div class="kpi"><span class="label">FIT kit return</span><span class="n">62%</span><span class="d">After day 3 and 10 reminders</span></div>
+        <div class="kpi"><span class="label">Device uptime</span><span class="n">98.6%</span><span class="d">1 cuff due for calibration</span></div>
+      </div>
+      <div class="panels">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Equity: loops closed within 30 days</h3>
+            <select id="eq-split" aria-label="Split by">
+              <option value="race">by race</option>
+              <option value="age">by age</option>
+              <option value="language">by language</option>
+              <option value="county">by county</option>
+            </select>
+          </div>
+          <div class="bars" id="eq-bars"></div>
+          <div class="axis"><span></span><div><span>0%</span><span>50%</span><span>100%</span></div><span></span></div>
+          <p class="tabnote muted" id="eq-note"></p>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>Where patients stop</h3><span class="label">Kiosk funnel</span></div>
+          <div class="bars" id="funnel"></div>
+          <div class="axis"><span></span><div><span>0%</span><span>50%</span><span>100%</span></div><span></span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>Cost per use against the $100 cap</h3><span class="mono muted">fixed ÷ (1,250 × N) + variable</span></div>
+        <div class="calc">
+          <label for="c-fixed">Fixed cost per kiosk, 5 yrs ($)<input type="number" id="c-fixed" value="120000" min="0" step="1000"></label>
+          <label for="c-var">Variable cost per use ($)<input type="number" id="c-var" value="48" min="0" max="99" step="1"></label>
+          <label for="c-n">Uses per day: <b class="mono" id="c-n-out">3</b><input type="range" id="c-n" min="0.5" max="10" step="0.5" value="3"></label>
+        </div>
+        <div class="result">
+          <div><span class="label">Cost per use</span><div class="big-n" id="c-out">$80</div></div>
+          <div><span class="label">Break-even uses/day</span><div class="big-n" id="c-be">1.9</div></div>
+          <div><span class="label">Uses per kiosk, 5 yrs</span><div class="big-n" id="c-uses">3,750</div></div>
+        </div>
+        <div class="cap" id="cap" aria-hidden="true"><i id="cap-fill"></i></div>
+        <p class="tabnote muted">1,250 = 250 clinic days × 5 years. Bar shows cost per use as a share of the $100 cap.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ARCHITECTURE -->
+  <section id="view-architecture" role="tabpanel" aria-labelledby="tab-architecture" hidden>
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <p class="tabnote">The clinic's EHR stays the medical record. DELTA-AI is a tracking layer on top of it, talking FHIR R4.</p>
+      <div class="arch">
+<pre class="mermaid">
+flowchart LR
+  subgraph Clinic
+    K[Kiosk app<br/>offline-first] --> D[Devices<br/>BP cuff, scale, height]
+    W[Staff worklist<br/>MA / CHW / clinician]
+  end
+  K --> API
+  W --> API
+  subgraph Platform
+    API[Backend API] --> R[Rules engine<br/>eligibility]
+    API --> DB[(Postgres)]
+    API --> Q[Task and follow-up engine]
+    API --> N[SMS / call reminders]
+    DB --> A[Analytics]
+  end
+  API <--> F[FHIR gateway] <--> EHR[(FQHC EHR)]
+  A --> DASH[Dashboards<br/>ops, equity, finance]
+</pre>
+      </div>
+      <div class="rules">
+        <div class="rule"><strong>EHR is the record</strong><span class="muted">Results post as FHIR Observations where clinicians already look.</span></div>
+        <div class="rule"><strong>Rules are data</strong><span class="muted">Versioned JSON with a guideline citation and a clinician approver. Not machine learning.</span></div>
+        <div class="rule"><strong>Humans decide</strong><span class="muted">The software flags and routes. A clinician reviews every abnormal result.</span></div>
+        <div class="rule"><strong>Equity is audited</strong><span class="muted">Every metric splits by race, age, language and county, with an alert when a group falls behind.</span></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  /* ---------------- Tabs ---------------- */
+  const views = ["kiosk", "worklist", "dashboard", "architecture"];
+  function show(v) {
+    if (!views.includes(v)) v = "kiosk";
+    views.forEach(n => {
+      document.getElementById("view-" + n).hidden = n !== v;
+      document.getElementById("tab-" + n).setAttribute("aria-selected", String(n === v));
+    });
+    try { history.replaceState(null, "", "#" + v); } catch (e) {}
+  }
+  document.querySelectorAll("nav.tabs button").forEach(b => b.addEventListener("click", () => show(b.dataset.view)));
+
+  /* ---------------- Kiosk ---------------- */
+  const T = {
+    en: {
+      steps: ["Language", "Check in", "Questions", "Measurements", "Your list", "Summary"],
+      next: "Continue", back: "Back", large: "A+ Large text", listen: "Read aloud",
+      checkinTitle: "Check in", checkinHelp: "Scanned QR card. Please confirm this is you.",
+      name: "Patient", age: "Age", county: "County", clinic: "Clinic",
+      consent: "I agree to share today's results with my clinic's care team.",
+      qTitle: "A few questions",
+      q1: "Over the last 2 weeks, how often have you had little interest or pleasure in doing things?",
+      q2: "Over the last 2 weeks, how often have you felt down, depressed, or hopeless?",
+      q3: "Have you ever smoked cigarettes regularly?",
+      freq: ["Not at all", "Several days", "More than half the days", "Nearly every day"],
+      yn: ["No", "Yes"],
+      mTitle: "Blood pressure, weight and height",
+      mSteps: ["Sit with both feet flat on the floor.", "Rest quietly. The kiosk waits 5 minutes for you.", "Put the cuff on your left arm at heart level.", "Stand on the scale under the height rod."],
+      measure: "Start measurement", measuring: "Measuring… please stay still",
+      bp: "Blood pressure", hr: "Heart rate", wt: "Weight", ht: "Height", bmi: "BMI",
+      flag: "Your blood pressure is above the normal range. A clinician will look at it today.",
+      okMsg: "Readings saved.",
+      planTitle: "Your checkup list for today",
+      planHelp: "Picked for you based on your age, answers and readings.",
+      done: "Done", here: "Here today", home: "Take home", ref: "Referral",
+      notOffered: "Not needed today",
+      sumTitle: "All done. Please take your printout.",
+      send: "Finish and send to care team", sent: "Sent. See the staff worklist.",
+      restart: "Start a new session"
+    },
+    es: {
+      steps: ["Idioma", "Registro", "Preguntas", "Mediciones", "Su lista", "Resumen"],
+      next: "Continuar", back: "Atrás", large: "A+ Letra grande", listen: "Escuchar",
+      checkinTitle: "Registro", checkinHelp: "Tarjeta QR escaneada. Confirme que es usted.",
+      name: "Paciente", age: "Edad", county: "Condado", clinic: "Clínica",
+      consent: "Acepto compartir los resultados de hoy con el equipo de mi clínica.",
+      qTitle: "Unas preguntas",
+      q1: "En las últimas 2 semanas, ¿con qué frecuencia ha tenido poco interés o placer en hacer cosas?",
+      q2: "En las últimas 2 semanas, ¿con qué frecuencia se ha sentido decaído, deprimido o sin esperanza?",
+      q3: "¿Ha fumado cigarrillos con regularidad alguna vez?",
+      freq: ["Nunca", "Varios días", "Más de la mitad de los días", "Casi todos los días"],
+      yn: ["No", "Sí"],
+      mTitle: "Presión arterial, peso y estatura",
+      mSteps: ["Siéntese con los pies planos en el piso.", "Descanse en silencio. El quiosco espera 5 minutos.", "Póngase el brazalete en el brazo izquierdo a la altura del corazón.", "Párese en la báscula bajo la regla de estatura."],
+      measure: "Empezar medición", measuring: "Midiendo… no se mueva",
+      bp: "Presión arterial", hr: "Pulso", wt: "Peso", ht: "Estatura", bmi: "IMC",
+      flag: "Su presión arterial está por encima del rango normal. Un médico la revisará hoy.",
+      okMsg: "Mediciones guardadas.",
+      planTitle: "Su lista de chequeo para hoy",
+      planHelp: "Elegida según su edad, sus respuestas y sus mediciones.",
+      done: "Hecho", here: "Hoy aquí", home: "Para casa", ref: "Referido",
+      notOffered: "No hace falta hoy",
+      sumTitle: "Listo. Por favor tome su hoja impresa.",
+      send: "Terminar y enviar al equipo", sent: "Enviado. Vea la lista del personal.",
+      restart: "Nueva sesión"
+    }
+  };
+  const ITEMS = {
+    bp:    { en: "Blood pressure", es: "Presión arterial", role: "S", where: "done", cite: "LOINC 85354-9 · USPSTF hypertension, adults 18+", cost: 0 },
+    a1c:   { en: "HbA1c fingerstick (diabetes)", es: "HbA1c por punción (diabetes)", role: "A", where: "here", cite: "Rule v2 · USPSTF ages 35–70 with BMI ≥ 25", cost: 9 },
+    lipid: { en: "Cholesterol fingerstick", es: "Colesterol por punción", role: "A", where: "here", cite: "Rule v1 · USPSTF statin use, ages 40–75", cost: 12 },
+    fit:   { en: "Stool test kit (colon cancer)", es: "Prueba de heces (cáncer de colon)", role: "S", where: "home", cite: "Rule v3 · USPSTF ages 45–75, none in 12 mo", cost: 18 },
+    mammo: { en: "Mammogram", es: "Mamografía", role: "C", where: "ref", cite: "Rule v2 · USPSTF ages 40–74, every 2 yrs", cost: 0 },
+    flu:   { en: "Flu shot", es: "Vacuna contra la gripe", role: "A", where: "here", cite: "Rule v1 · CDC yearly, 6 mo+", cost: 14 },
+    phq9:  { en: "Talk with a nurse about mood", es: "Hablar con una enfermera sobre el ánimo", role: "C", where: "here", cite: "Rule v1 · PHQ-2 score ≥ 3 → PHQ-9", cost: 0 },
+    lung:  { en: "Lung cancer CT scan", es: "Tomografía de pulmón", role: "C", where: "ref", cite: "Rule v1 · USPSTF ages 50–80, 20 pack-yrs", cost: 0 }
+  };
+  const PATIENT = { id: "DEMO-0417", age: 58, sex: "F", county: "Sunflower", clinic: "Delta FQHC · Kiosk K2" };
+  const R = { sys: 148, dia: 94, hr: 78, kg: 84.0, cm: 164 };
+
+  const k = { step: 0, lang: "en", consent: false, ans: [null, null, null], measured: false, measuring: false, large: false, sent: false };
+  const kiosk = document.getElementById("kiosk");
+  const t = () => T[k.lang];
+  const bmi = () => (R.kg / Math.pow(R.cm / 100, 2)).toFixed(1);
+  const bpHigh = () => R.sys >= 140 || R.dia >= 90;
+  const phq2 = () => (k.ans[0] || 0) + (k.ans[1] || 0);
+
+  function plan() {
+    const smoker = k.ans[2] === 1;
+    const list = ["bp", "a1c", "lipid", "fit", "mammo", "flu"];
+    if (phq2() >= 3) list.push("phq9");
+    const skip = [];
+    if (smoker) list.push("lung"); else skip.push("lung");
+    return { list, skip };
+  }
+
+  function canNext() {
+    if (k.step === 1) return k.consent;
+    if (k.step === 2) return k.ans.every(a => a !== null);
+    if (k.step === 3) return k.measured;
+    return true;
+  }
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+  function body() {
+    const L = t();
+    switch (k.step) {
+      case 0:
+        return `<div class="k-title">Welcome · Bienvenidos</div>
+          <p class="muted">Choose your language · Elija su idioma</p>
+          <div class="lang-grid">
+            <button data-lang="en">English<small>Tap to start</small></button>
+            <button data-lang="es">Español<small>Toque para empezar</small></button>
+          </div>`;
+      case 1:
+        return `<div class="k-title">${L.checkinTitle}</div>
+          <p class="muted">${L.checkinHelp}</p>
+          <dl class="idcard">
+            <dt>${L.name}</dt><dd class="mono">${PATIENT.id} (demo)</dd>
+            <dt>${L.age}</dt><dd>${PATIENT.age}</dd>
+            <dt>${L.county}</dt><dd>${PATIENT.county}</dd>
+            <dt>${L.clinic}</dt><dd>${PATIENT.clinic}</dd>
+          </dl>
+          <label class="check" for="consent"><input type="checkbox" id="consent" ${k.consent ? "checked" : ""}><span>${L.consent}</span></label>`;
+      case 2:
+        return `<div class="k-title">${L.qTitle}</div>
+          ${[L.q1, L.q2].map((q, i) => `<div class="q"><strong>${q}</strong><div class="q-opts">
+            ${L.freq.map((f, v) => `<button data-q="${i}" data-v="${v}" aria-pressed="${k.ans[i] === v}">${f}</button>`).join("")}
+          </div></div>`).join("")}
+          <div class="q"><strong>${L.q3}</strong><div class="q-opts">
+            ${L.yn.map((f, v) => `<button data-q="2" data-v="${v}" aria-pressed="${k.ans[2] === v}">${f}</button>`).join("")}
+          </div></div>`;
+      case 3: {
+        let inner;
+        if (k.measuring) inner = `<div class="measuring"><span class="pulse"></span>${L.measuring}</div>`;
+        else if (!k.measured) inner = `<ol class="instr">${L.mSteps.map(s => `<li>${s}</li>`).join("")}</ol>
+            <div><button class="big" id="measure">${L.measure}</button></div>`;
+        else inner = `<div class="readings">
+              <div class="reading ${bpHigh() ? "flag" : ""}"><span class="label">${L.bp}</span><span class="v">${R.sys}/${R.dia}</span><span class="muted">mmHg</span></div>
+              <div class="reading"><span class="label">${L.hr}</span><span class="v">${R.hr}</span><span class="muted">bpm</span></div>
+              <div class="reading"><span class="label">${L.wt}</span><span class="v">${R.kg.toFixed(1)}</span><span class="muted">kg</span></div>
+              <div class="reading"><span class="label">${L.ht}</span><span class="v">${R.cm}</span><span class="muted">cm</span></div>
+              <div class="reading"><span class="label">${L.bmi}</span><span class="v">${bmi()}</span><span class="muted">kg/m²</span></div>
+            </div>
+            <div class="notice ${bpHigh() ? "crit" : "ok"}">${bpHigh() ? L.flag : L.okMsg}</div>
+            <p class="cite">Cuff K2-BP-01 · size L · rest 5:00 ✓ · calibrated 2026-09-14 · scale K2-SC-01</p>`;
+        return `<div class="k-title">${L.mTitle}</div>${inner}`;
+      }
+      case 4: {
+        const p = plan();
+        const tag = w => ({ done: L.done, here: L.here, home: L.home, ref: L.ref }[w]);
+        const cost = p.list.reduce((s, id) => s + ITEMS[id].cost, 0);
+        return `<div class="k-title">${L.planTitle}</div>
+          <p class="muted">${L.planHelp}</p>
+          <div class="plan">
+            ${p.list.map(id => { const it = ITEMS[id]; return `<div class="plan-row"><span class="role ${it.role}">${it.role}</span>
+              <div><strong>${it[k.lang]}</strong><div class="cite">${it.cite}</div></div>
+              <span class="pill ${it.where === "done" ? "ok" : it.where === "ref" ? "warn" : ""}">${tag(it.where)}</span></div>`; }).join("")}
+            ${p.skip.map(id => { const it = ITEMS[id]; return `<div class="plan-row skip"><span class="role">–</span>
+              <div><strong>${it[k.lang]}</strong><div class="cite">${it.cite} · not met</div></div>
+              <span class="pill">${L.notOffered}</span></div>`; }).join("")}
+          </div>
+          <p class="cite">Staff view: supplies for this list ≈ $${cost} (illustrative) vs $107–116 if every test were given.</p>`;
+      }
+      case 5: {
+        const p = plan();
+        return `<div class="k-title">${L.sumTitle}</div>
+          <div class="slip">
+            <div><strong>DELTA-AI CHECKUP SUMMARY</strong><br>*** DEMO · NOT A REAL PATIENT ***</div>
+            <hr>
+            <div class="row"><span>${PATIENT.id}</span><span>2026-10-25 09:42</span></div>
+            <div class="row"><span>${L.bp}</span><span>${R.sys}/${R.dia} ${bpHigh() ? "▲" : ""}</span></div>
+            <div class="row"><span>${L.hr}</span><span>${R.hr} bpm</span></div>
+            <div class="row"><span>${L.bmi}</span><span>${bmi()}</span></div>
+            <div class="row"><span>PHQ-2</span><span>${phq2()} / 6</span></div>
+            <hr>
+            ${p.list.filter(id => id !== "bp").map(id => `<div class="row"><span>□ ${ITEMS[id][k.lang]}</span><span>${ITEMS[id].role}</span></div>`).join("")}
+            <hr>
+            <div>${bpHigh() ? "▲ " + L.flag : L.okMsg}</div>
+          </div>
+          ${k.sent ? `<div class="notice ok">${L.sent}</div>` : ""}`;
+      }
+    }
+  }
+
+  function renderKiosk() {
+    const L = t();
+    const isLast = k.step === 5;
+    kiosk.classList.toggle("large", k.large);
+    kiosk.innerHTML = `
+      <div class="k-bar">
+        <span class="label">${k.step > 0 ? L.steps[k.step] : "DELTA-AI"} · ${k.step + 1}/6</span>
+        <div class="k-tools">
+          <button class="chip-btn" id="k-large" aria-pressed="${k.large}">${L.large}</button>
+          <button class="chip-btn" id="k-listen">${L.listen}</button>
+        </div>
+      </div>
+      <div class="stepper" aria-hidden="true">${L.steps.map((_, i) => `<span class="${i <= k.step ? "on" : ""}"></span>`).join("")}</div>
+      <div class="k-body">${body()}</div>
+      ${k.step === 0 ? "" : `<div class="k-actions">
+        <button class="big ghost" id="k-back">${isLast ? L.restart : L.back}</button>
+        ${isLast
+          ? `<button class="big" id="k-send" ${k.sent ? "disabled" : ""}>${L.send}</button>`
+          : `<button class="big" id="k-next" ${canNext() ? "" : "disabled"}>${L.next}</button>`}
+      </div>`}`;
+    document.getElementById("flow").innerHTML = T.en.steps.map((s, i) => `<li class="${i === k.step ? "cur" : ""}">${s}</li>`).join("");
+  }
+
+  function resetKiosk() { Object.assign(k, { step: 0, lang: "en", consent: false, ans: [null, null, null], measured: false, measuring: false, sent: false }); }
+
+  kiosk.addEventListener("click", e => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.lang) { k.lang = b.dataset.lang; k.step = 1; }
+    else if (b.dataset.q) { k.ans[+b.dataset.q] = +b.dataset.v; }
+    else if (b.id === "k-next" && canNext()) { k.step++; }
+    else if (b.id === "k-back") { if (k.step === 5) resetKiosk(); else k.step--; }
+    else if (b.id === "k-large") { k.large = !k.large; }
+    else if (b.id === "k-listen") { speak(); return; }
+    else if (b.id === "measure") {
+      k.measuring = true; renderKiosk();
+      setTimeout(() => { k.measuring = false; k.measured = true; renderKiosk(); }, 1800);
+      return;
+    }
+    else if (b.id === "k-send") { k.sent = true; addKioskTask(); renderKiosk(); setTimeout(() => show("worklist"), 900); return; }
+    renderKiosk();
+  });
+  kiosk.addEventListener("change", e => { if (e.target.id === "consent") { k.consent = e.target.checked; renderKiosk(); } });
+
+  function speak() {
+    try {
+      const text = kiosk.querySelector(".k-body").innerText;
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = k.lang === "es" ? "es-US" : "en-US";
+      speechSynthesis.cancel(); speechSynthesis.speak(u);
+    } catch (e) {}
+  }
+
+  /* ---------------- Worklist ---------------- */
+  const LOOP = ["Flagged", "Reviewed", "Ordered", "Reminded", "Appt kept", "Closed"];
+  const KIT = ["Dispensed", "Day 3 text", "Day 10 call", "Returned", "Resulted", "Closed"];
+  const tasks = [
+    { id: "DEMO-0388", find: "BP 172/104 mmHg", note: "Kiosk K1 · 2 days ago", own: "C", due: "Overdue 1 day", sev: "crit", stage: 0, stages: LOOP, esc: "Escalated to clinic manager" },
+    { id: "DEMO-0277", find: "PHQ-9 score 16", note: "Kiosk K3 · today", own: "C", due: "Today", sev: "crit", stage: 0, stages: LOOP },
+    { id: "DEMO-0291", find: "HbA1c 9.4%", note: "Fingerstick · yesterday", own: "C", due: "Oct 26", sev: "warn", stage: 1, stages: LOOP },
+    { id: "DEMO-0350", find: "FIT kit positive", note: "GI referral for colonoscopy", own: "A", due: "Oct 28", sev: "warn", stage: 2, stages: LOOP },
+    { id: "DEMO-0145", find: "LDL 196 mg/dL", note: "Appt booked Oct 30", own: "A", due: "Oct 30", sev: "warn", stage: 3, stages: LOOP },
+    { id: "DEMO-0102", find: "FIT kit not returned", note: "Dispensed 10 days ago", own: "H", due: "Today", sev: "warn", stage: 2, stages: KIT },
+    { id: "DEMO-0063", find: "Needs a ride to mammogram", note: "Sign-up at church health fair", own: "H", due: "Oct 27", sev: "", stage: 1, stages: ["Signed up", "Called", "Ride booked", "Visit kept", "Closed"] }
+  ];
+  const OWN = { C: "Clinician", A: "MA", H: "CHW" };
+  let filter = "all";
+  let newId = null;
+
+  function addKioskTask() {
+    if (tasks.some(x => x.id === PATIENT.id)) return;
+    const high = bpHigh();
+    tasks.unshift({ id: PATIENT.id, find: `BP ${R.sys}/${R.dia} mmHg`, note: "Kiosk K2 · just now · from your demo session", own: "C", due: "2 business days", sev: high ? "crit" : "", stage: 0, stages: LOOP });
+    if (phq2() >= 3) tasks.splice(1, 0, { id: PATIENT.id, find: `PHQ-2 score ${phq2()}`, note: "Needs PHQ-9 today", own: "C", due: "Today", sev: "crit", stage: 0, stages: LOOP });
+    tasks.splice(phq2() >= 3 ? 2 : 1, 0, { id: PATIENT.id, find: "FIT kit dispensed", note: "Take-home stool test", own: "H", due: "Day 3 text", sev: "", stage: 0, stages: KIT });
+    newId = PATIENT.id;
+    renderTasks();
+  }
+
+  function renderTasks() {
+    const open = tasks.filter(x => x.stage < x.stages.length - 1);
+    const today = open.filter(x => /Today|Overdue/.test(x.due)).length;
+    const escd = open.filter(x => x.esc).length;
+    document.getElementById("counts").innerHTML = `
+      <div><b>${open.length}</b><span class="muted">open loops</span></div>
+      <div><b>${today}</b><span class="muted">due today or late</span></div>
+      <div><b>${escd}</b><span class="muted">escalated</span></div>`;
+    document.getElementById("filters").innerHTML = [["all", "Everyone"], ["C", "Clinician"], ["A", "MA"], ["H", "CHW"]]
+      .map(([v, l]) => `<button class="chip-btn" data-f="${v}" aria-pressed="${filter === v}">${l}</button>`).join("");
+    const rows = tasks.map((x, i) => ({ x, i })).filter(({ x }) => filter === "all" || x.own === filter);
+    document.getElementById("tasks").innerHTML = rows.map(({ x, i }) => {
+      const closed = x.stage >= x.stages.length - 1;
+      const cls = closed ? "done" : x.sev;
+      return `<div class="task ${cls} ${x.id === newId ? "new" : ""}">
+        <span class="stripe"></span>
+        <span class="pid">${esc(x.id)}</span>
+        <div class="find"><strong>${esc(x.find)}</strong><span class="muted">${esc(x.note)}</span>${x.esc && !closed ? ` <span class="pill crit">${esc(x.esc)}</span>` : ""}</div>
+        <div class="own"><span class="role ${x.own === "H" ? "A" : x.own}" style="width:auto;padding:0 8px;height:26px;font-size:0.78rem">${OWN[x.own]}</span></div>
+        <div class="dots"><div class="track">${x.stages.map((_, s) => `<i class="${s <= x.stage ? "on" : ""}"></i>`).join("")}</div>
+          <small>${esc(x.stages[x.stage])}${closed ? "" : " · due " + esc(x.due)}</small></div>
+        <div class="act"><button class="adv" data-i="${i}" ${closed ? "disabled" : ""}>${closed ? "Loop closed" : "Mark: " + esc(x.stages[x.stage + 1])}</button></div>
+      </div>`;
+    }).join("");
+  }
+  document.getElementById("view-worklist").addEventListener("click", e => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.f) { filter = b.dataset.f; }
+    else if (b.dataset.i) { const x = tasks[+b.dataset.i]; if (x.stage < x.stages.length - 1) x.stage++; newId = null; }
+    renderTasks();
+  });
+
+  /* ---------------- Dashboard ---------------- */
+  const TARGET = 75;
+  const EQ = {
+    race: [["Black", 71], ["White", 78], ["Hispanic", 66], ["Other", 74]],
+    age: [["18–39", 69], ["40–64", 75], ["65+", 79]],
+    language: [["English", 75], ["Spanish", 64]],
+    county: [["Bolivar", 77], ["Sunflower", 72], ["Washington", 76], ["Coahoma", 68]]
+  };
+  function bars(el, rows, opts = {}) {
+    el.innerHTML = rows.map(([l, v]) => {
+      const behind = opts.target != null && v < opts.target - 5;
+      return `<div class="bar ${behind ? "behind" : ""}"><span>${l}</span>
+        <div class="t"><div class="f" style="width:${v}%"></div>${opts.target != null ? `<div class="target" style="left:calc(${opts.target}% - 1px)" title="Target ${opts.target}%"></div>` : ""}</div>
+        <span class="num">${v}%</span></div>`;
+    }).join("");
+  }
+  function renderEq() {
+    const key = document.getElementById("eq-split").value;
+    const rows = EQ[key];
+    bars(document.getElementById("eq-bars"), rows, { target: TARGET });
+    const behind = rows.filter(([, v]) => v < TARGET - 5).map(([l]) => l);
+    document.getElementById("eq-note").innerHTML = behind.length
+      ? `<span style="color:var(--crit);font-weight:700">Alert:</span> ${behind.join(", ")} more than 5 points below the ${TARGET}% target (marker line).`
+      : `All groups within 5 points of the ${TARGET}% target (marker line).`;
+  }
+  document.getElementById("eq-split").addEventListener("change", renderEq);
+  bars(document.getElementById("funnel"), [["Language", 100], ["Check in", 96], ["Questions", 91], ["Measurements", 83], ["Your list", 82], ["Summary", 81]]);
+
+  const fmt = n => n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  function renderCost() {
+    const F = Math.max(0, +document.getElementById("c-fixed").value || 0);
+    const V = Math.max(0, +document.getElementById("c-var").value || 0);
+    const N = +document.getElementById("c-n").value;
+    document.getElementById("c-n-out").textContent = N;
+    const cpu = F / (1250 * N) + V;
+    document.getElementById("c-out").textContent = "$" + cpu.toFixed(0);
+    document.getElementById("c-out").style.color = cpu > 100 ? "var(--crit)" : "var(--ok)";
+    document.getElementById("c-be").textContent = V >= 100 ? "never" : (F / (1250 * (100 - V))).toFixed(1);
+    document.getElementById("c-uses").textContent = fmt(1250 * N);
+    document.getElementById("cap-fill").style.width = Math.min(100, cpu) + "%";
+    document.getElementById("cap").classList.toggle("over", cpu > 100);
+  }
+  ["c-fixed", "c-var", "c-n"].forEach(id => document.getElementById(id).addEventListener("input", renderCost));
+
+  /* ---------------- Boot ---------------- */
+  renderKiosk(); renderTasks(); renderEq(); renderCost();
+  show((location.hash || "").slice(1));
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default" });</script>
+</body>
+</html>
