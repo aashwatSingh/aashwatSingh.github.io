@@ -32,6 +32,23 @@ planning are not the work, and one bad day shouldn't turn into a lost week.
 
 When Lock In is set up and today isn't kept yet, Hamza Lessons shows a banner: lessons are the reward, not the work.
 
+## Higgsfield Clone (`/higgsfield/`)
+
+An unofficial, browser-only clone of the [Higgsfield AI](https://higgsfield.ai) video studio. Nothing is uploaded
+and there is no AI model: the "generations" are made on your device with Canvas, MediaRecorder and the Web Speech
+API, but they are real files you can download.
+
+- **Video:** upload a photo (or write a prompt), pick one of 60+ camera-motion presets (dolly, crash zoom,
+  dolly zoom, orbit, bullet time, FPV drone, whip pan, glitch...), choose model, duration and aspect ratio, and
+  render a WebM. Camera maths lives in `higgsfield/presets.js`, the renderer in `higgsfield/render.js`.
+- **Image (Soul):** prompt-driven procedural scenes in 10+ styles, batches, seeds, upscale and "Animate" into a video.
+  The painter is `higgsfield/scene.js`.
+- **Speak:** a talking avatar lip-synced to your script. The voice plays in preview; exported video is silent,
+  with optional burned-in captions. Timing maths lives in `higgsfield/speak-logic.js`.
+- **Assets, Explore, Pricing:** your library (IndexedDB, this browser only), a community-style feed, and demo
+  plans and credits (no payment is ever taken).
+- Run the tests with `node --test higgsfield/*.test.mjs`.
+
 ## Hamza Lessons (`/hamza/`)
 
 A tracker for every lesson on the [@Hamza97](https://www.youtube.com/@Hamza97) YouTube channel.

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Higgsfield Clone</title>
+  <meta name="description" content="An unofficial, browser-only clone of the Higgsfield AI video studio: camera-motion presets, image generation, talking avatars and an asset library.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0a0a0b">
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles/video.css">
+  <link rel="stylesheet" href="styles/image.css">
+  <link rel="stylesheet" href="styles/speak.css">
+  <link rel="stylesheet" href="styles/pages.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#view">Skip to content</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#/explore" aria-label="Higgsfield Clone home">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M9 8v16M23 8v16M9 16h14" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round"/></svg>
+        <span class="brand-name">higgsfield<span class="brand-tag">clone</span></span>
+      </a>
+      <nav class="nav" aria-label="Main">
+        <a href="#/explore" data-route="explore">Explore</a>
+        <a href="#/video" data-route="video">Video</a>
+        <a href="#/image" data-route="image">Image</a>
+        <a href="#/speak" data-route="speak">Speak</a>
+        <a href="#/library" data-route="library">Assets</a>
+        <a href="#/pricing" data-route="pricing">Pricing</a>
+      </nav>
+      <div class="topbar-actions">
+        <a class="credits-pill" href="#/pricing" title="Credits left">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z" fill="currentColor" stroke="none"/></svg>
+          <span id="credit-count">0</span>
+        </a>
+        <span class="plan-badge" id="plan-badge">Free</span>
+      </div>
+    </div>
+  </header>
+
+  <main id="view" class="view" tabindex="-1"></main>
+
+  <footer class="site-footer">
+    <p>Unofficial UI study inspired by <a href="https://higgsfield.ai" rel="noopener" target="_blank">Higgsfield AI</a>. Not affiliated with or endorsed by Higgsfield.
+      Nothing is uploaded: every image, video and voice is made on your device, and your assets stay in this browser.</p>
+    <p><a href="../">← aashwatsingh.github.io</a></p>
+  </footer>
+
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+</body>
+</html>
