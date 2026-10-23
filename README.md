@@ -20,6 +20,15 @@ planning are not the work, and one bad day shouldn't turn into a lost week.
 - **Messages** live in `lockin/truths.js`; add your own. The maths lives in `lockin/logic.js`; run its tests
   with `node --test lockin/logic.test.mjs`.
 - Add it to your phone's home screen (Share → Add to Home Screen); it has its own icon and opens full screen.
+- **Daily emails:** the **Lock In email** GitHub Action (`.github/workflows/lockin-email.yml`) sends a morning
+  email at 7:43 am Central (the weekday's focus, a message from `truths.js` and one challenge) and a night-review
+  nudge at 10:13 pm. GitHub often starts scheduled runs 5 to 30 minutes late. `scripts/lockin_email.mjs` writes
+  the email and `scripts/send_email.py` sends it through Gmail. It needs two repository secrets (**Settings →
+  Secrets and variables → Actions**): `LOCKIN_GMAIL_ADDRESS`, and `LOCKIN_GMAIL_APP_PASSWORD`, a
+  [Google app password](https://myaccount.google.com/apppasswords) rather than your normal password. It mails that
+  same address unless a `LOCKIN_EMAIL_TO` secret says otherwise. To send one now: **Actions → Lock In email → Run
+  workflow**. Run its tests with `node --test scripts/lockin_email.test.mjs` and
+  `python -m unittest scripts/test_send_email.py`.
 
 When Lock In is set up and today isn't kept yet, Hamza Lessons shows a banner: lessons are the reward, not the work.
 

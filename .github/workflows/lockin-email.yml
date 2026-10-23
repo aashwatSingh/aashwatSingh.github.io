@@ -1,0 +1,56 @@
+name: Lock In email
+
+on:
+  schedule:
+    # 7:43 am and 10:13 pm Central, off the busy top of the hour. GitHub schedules in UTC,
+    # so each time is listed for both CDT and CST; scripts/lockin_email.mjs sends from
+    # whichever one matches the season and skips the other.
+    - cron: '43 12 * * *'
+    - cron: '43 13 * * *'
+    - cron: '13 3 * * *'
+    - cron: '13 4 * * *'
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: Which email to send now
+        type: choice
+        options:
+          - morning
+          - night
+        default: morning
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lockin-email
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Write the email
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          SLOT: ${{ inputs.slot }}
+        run: node scripts/lockin_email.mjs > "$RUNNER_TEMP/email.json"
+
+      - name: Send it
+        env:
+          LOCKIN_GMAIL_ADDRESS: ${{ secrets.LOCKIN_GMAIL_ADDRESS }}
+          LOCKIN_GMAIL_APP_PASSWORD: ${{ secrets.LOCKIN_GMAIL_APP_PASSWORD }}
+          LOCKIN_EMAIL_TO: ${{ secrets.LOCKIN_EMAIL_TO }}
+        run: |
+          if [ ! -s "$RUNNER_TEMP/email.json" ]; then
+            echo "Not a send time in Central time today; the other schedule sends it."
+            exit 0
+          fi
+          python3 scripts/send_email.py "$RUNNER_TEMP/email.json"
