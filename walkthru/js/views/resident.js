@@ -242,6 +242,7 @@ export function capture(main, { sid, query }, ctx) {
   const move = (i) => { index = Math.max(0, Math.min(items.length - 1, i)); retaking = false; draw(); window.scrollTo(0, 0); };
 
   async function store(c, { blob, width, height }, source, capturedAt, serverAt, report) {
+    if (isLocked(insp, ctx.now())) throw new Error('The 48-hour window has closed, so no more photos can be added.');
     const hash = await sha256Hex(new Uint8Array(await blob.arrayBuffer()));
     await putPhoto(hash, { type: blob.type || 'image/jpeg', blob });
     const prev = entryFor(c.key);

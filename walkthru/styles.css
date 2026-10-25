@@ -177,7 +177,7 @@ p { margin: 0 0 12px; }
 .callout.caution { border-color: var(--yellow); }
 .callout.caution > b { background: var(--yellow); color: var(--on-yellow); }
 .callout.warning { border-color: var(--red); }
-.callout.warning > b { background: var(--red); color: #fff; }
+.callout.warning > b { background: var(--red); color: var(--surface); }
 .callout.note { border-color: var(--blue); }
 .callout.note > b { background: var(--blue); color: var(--surface); }
 .callout.tip { border-color: var(--green); }

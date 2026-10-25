@@ -361,7 +361,7 @@ export const isDemoUnit = (unit) => Boolean(unit && PLANTED[unit.id]) || unit?.i
 
 // ---------------------------------------------------------------- building the demo property
 
-async function capture(state, { unit, sub, kind, start, keys }) {
+async function capture({ unit, sub, kind, start, keys }) {
   let t = start;
   for (const key of keys) {
     const { blob, width, height } = await demoShotFor(unit, key, kind, kind === 'move-out' ? `out-${key}` : null);
@@ -379,7 +379,7 @@ async function capture(state, { unit, sub, kind, start, keys }) {
 
 async function walk(state, { unit, kind, resident, inspection, keys, start }) {
   const sub = startSubmission(state, { id: `s_${inspection.id}_${resident.id}`, inspection, resident, now: start });
-  const end = await capture(state, { unit, sub, kind, start, keys });
+  const end = await capture({ unit, sub, kind, start, keys });
   state.submissions[sub.id] = await sealSubmission(sub, new Date(end + 60e3).toISOString());
 }
 

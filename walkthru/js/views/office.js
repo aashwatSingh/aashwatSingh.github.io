@@ -3,7 +3,7 @@
 import { html, raw, $, $$, toast, fmtDate, fmtDateTime, plural, confirmBox, countdown, localDay } from '../ui.js';
 import { TEMPLATES, bedroomsOf } from '../core/templates.js';
 import { DEFAULT_RATES, cleanRates } from '../core/rates.js';
-import { money, parseMoney } from '../core/charges.js';
+import { parseMoney } from '../core/charges.js';
 import { shortHash } from '../core/integrity.js';
 import { encodeDoor } from '../core/payload.js';
 import { refundStatus } from '../core/texas.js';
