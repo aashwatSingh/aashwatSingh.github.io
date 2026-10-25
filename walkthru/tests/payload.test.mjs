@@ -13,6 +13,11 @@ test('door payload round-trips and rejects junk', () => {
   assert.equal(d.property.name, 'Maple Court (demo)');
   assert.equal(d.unit.template, '2x2');
   assert.equal(d.unit.propertyId, 'p_demo');
+  assert.equal(d.inspection, null);
+  const inv = decodeDoor(encodeDoor({ property, unit, inspection: { id: 'i_1', kind: 'move-out', openedAt: '2027-05-14T14:00:00.000Z', lockAt: '2027-05-16T14:00:00.000Z' } }));
+  assert.deepEqual(inv.inspection, { id: 'i_1', unitId: 'u_204', kind: 'move-out', openedAt: '2027-05-14T14:00:00.000Z', lockAt: '2027-05-16T14:00:00.000Z' });
+  const badInv = decodeDoor(encodeDoor({ property, unit, inspection: { id: 'i 1', kind: 'move-out', openedAt: 'x', lockAt: 'y' } }));
+  assert.equal(badInv.inspection, null); // a bad invite part is dropped, the unit still opens
   assert.equal(decodeDoor('not base64!'), null);
   assert.equal(decodeDoor('e30'), null); // {}
   const bad = Buffer.from(JSON.stringify({ v: 1, pid: 'p', pn: 'x', uid: 'u', ul: '1', t: 'castle' })).toString('base64url');

@@ -6,7 +6,8 @@
 // Steps: grayscale → light blur → normalize brightness and contrast (handles lighting changes) →
 // search a small shift that best lines the two up (handles a slightly different camera position;
 // the ghost overlay keeps the shift small) → mean difference per block → flag blocks that stand out
-// from the photo's own noise → join neighbouring blocks into regions.
+// from the photo's own noise (each pixel matched within a 3×3 neighbourhood, which absorbs
+// sub-pixel shifts) → join neighbouring blocks into regions.
 //
 // This is a stand-in for the production plan (feature matching plus a vision model). It finds
 // "something here looks different", not "this is a scratch".
@@ -17,8 +18,9 @@ export const BLOCK = 8;
 const MAX_SHIFT = 5;
 
 // A block counts as changed when its mean difference (in standard deviations of the photo) is
-// above both a floor and the photo's own noise level. Tuned on the demo set; see diff.test.mjs.
-export const BLOCK_FLOOR = 0.55;
+// above both a floor and the photo's own noise level. On the demo set, unchanged items peak at
+// 0.52 and the weakest planted change scores 1.62; the floor sits between with room both ways.
+export const BLOCK_FLOOR = 0.75;
 const NOISE_K = 6;
 
 /** RGBA bytes → luminance (0–255) as a Float32Array. */
@@ -86,6 +88,28 @@ export function bestShift(a, b, w, h, max = MAX_SHIFT) {
   return best;
 }
 
+/**
+ * Difference at one pixel that forgives sub-pixel misalignment: each image's pixel is matched to
+ * the closest value in a 3×3 neighbourhood of the other, and the larger of the two mismatches is
+ * kept. A thin edge (a blind slat, a mirror frame) that moved half a pixel finds its match next
+ * door; a new mark has nothing like it nearby in the baseline, so it still stands out.
+ */
+function pixelDiff(a, b, w, h, x, y, dx, dy) {
+  const av = a[y * w + x];
+  const bx = x + dx, by = y + dy;
+  const bv = b[by * w + bx];
+  let toB = Infinity, toA = Infinity;
+  for (let j = -1; j <= 1; j++) {
+    for (let i = -1; i <= 1; i++) {
+      const yb = Math.min(h - 1, Math.max(0, by + j)), xb = Math.min(w - 1, Math.max(0, bx + i));
+      const ya = Math.min(h - 1, Math.max(0, y + j)), xa = Math.min(w - 1, Math.max(0, x + i));
+      toB = Math.min(toB, Math.abs(av - b[yb * w + xb]));
+      toA = Math.min(toA, Math.abs(bv - a[ya * w + xa]));
+    }
+  }
+  return Math.max(toB, toA);
+}
+
 const median = (arr) => {
   if (!arr.length) return 0;
   const s = [...arr].sort((x, y) => x - y);
@@ -115,7 +139,7 @@ export function compare(before, after) {
         const yy = MAX_SHIFT + by * BLOCK + y;
         for (let x = 0; x < BLOCK; x++) {
           const xx = MAX_SHIFT + bx * BLOCK + x;
-          s += Math.abs(a[yy * w + xx] - b[(yy + shift.dy) * w + xx + shift.dx]);
+          s += pixelDiff(a, b, w, h, xx, yy, shift.dx, shift.dy);
         }
       }
       blocks[by * cols + bx] = s / (BLOCK * BLOCK);

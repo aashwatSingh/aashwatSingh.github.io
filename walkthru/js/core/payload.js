@@ -37,13 +37,20 @@ const fromUrl = (s) => s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 -
 
 // ---------------------------------------------------------------- door QR payload
 
-/** Encode a unit's door details for the QR code URL. */
-export function encodeDoor({ property, unit }) {
+/**
+ * Encode a unit's door details for the QR code URL. With `inspection`, the link also names one
+ * open walkthrough, so roommates scanning on different phones all join the same one.
+ */
+export function encodeDoor({ property, unit, inspection = null }) {
   const data = { v: 1, pid: property.id, pn: property.name, pc: property.city || '', st: property.state || 'TX', uid: unit.id, ul: unit.label, t: unit.template };
+  if (inspection) Object.assign(data, { iid: inspection.id, ik: inspection.kind, io: inspection.openedAt, il: inspection.lockAt });
   return toUrl(bytesToBase64(new TextEncoder().encode(JSON.stringify(data))));
 }
 
-/** Decode a door payload. Returns { property, unit } or null if it is not a valid payload. */
+/**
+ * Decode a door payload. Returns { property, unit, inspection } (inspection may be null), or
+ * null if it is not a valid payload.
+ */
 export function decodeDoor(s) {
   if (typeof s !== 'string' || s.length > 2000 || !/^[\w-]+$/.test(s)) return null;
   let d;
@@ -56,9 +63,13 @@ export function decodeDoor(s) {
   const pn = text(d.pn, 80);
   const ul = text(d.ul, 20);
   if (!pn || !ul) return null;
+  const inspection = ID_RE.test(d.iid) && KINDS.includes(d.ik) && ISO_RE.test(d.io) && ISO_RE.test(d.il)
+    ? { id: d.iid, unitId: d.uid, kind: d.ik, openedAt: d.io, lockAt: d.il }
+    : null;
   return {
     property: { id: d.pid, name: pn, city: text(d.pc, 60), state: /^[A-Z]{2}$/.test(d.st) ? d.st : 'TX' },
     unit: { id: d.uid, propertyId: d.pid, label: ul, template: d.t },
+    inspection,
   };
 }
 

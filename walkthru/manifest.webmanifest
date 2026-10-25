@@ -1,0 +1,13 @@
+{
+  "name": "Walkthru",
+  "short_name": "Walkthru",
+  "description": "Move-in and move-out inspections for student housing.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F4F6FA",
+  "theme_color": "#0B1F3A",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
