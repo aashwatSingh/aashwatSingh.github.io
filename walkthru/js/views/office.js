@@ -96,7 +96,7 @@ export function property(main, { pid }, ctx) {
       <p class="muted" style="margin: 0">${p.city}${p.city ? ', ' : ''}${p.state}${p.demo ? ' · demo data' : ''}</p>
     </div>
 
-    <div class="grid" style="margin-top: 16px">
+    <div class="grid stats" style="margin-top: 16px">
       <div class="stat"><b>${units.length}</b><span>units</span></div>
       <div class="stat"><b>${ready}</b><span>ready to review</span></div>
       <div class="stat"><b>${collecting}</b><span>walkthroughs open</span></div>

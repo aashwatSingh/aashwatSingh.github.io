@@ -17,7 +17,16 @@ import { exportSubmission, shareOrDownload } from '../records.js';
 import { notFound, kindLabel, callout } from './common.js';
 
 const GHOST_KEY = 'walkthru:ghost';
-const readGhost = () => { try { const v = Number(localStorage.getItem(GHOST_KEY)); return v >= 0 && v <= 0.8 ? v : 0.3; } catch { return 0.3; } };
+// The ghost overlay's opacity: 30% by default, as in the roadmap; remembered once changed.
+const readGhost = () => {
+  try {
+    const saved = localStorage.getItem(GHOST_KEY);
+    const v = saved == null ? NaN : Number(saved);
+    return v >= 0 && v <= 0.8 ? v : 0.3;
+  } catch {
+    return 0.3;
+  }
+};
 const writeGhost = (v) => { try { localStorage.setItem(GHOST_KEY, String(v)); } catch { /* not saved; fine */ } };
 
 // ---------------------------------------------------------------- door QR landing

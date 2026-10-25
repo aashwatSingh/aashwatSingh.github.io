@@ -4,8 +4,10 @@
 
 import { rateById } from './rates.js';
 
-// A region at least this strong, or covering this share of the photo, counts as major damage.
-const MAJOR_STRENGTH = 1.6;
+// A region covering this share of the photo, or one this far out of line, counts as major damage.
+// Contrast alone is a weak sign of severity (a dark scuff on a pale wall is high contrast), so the
+// strength bar is high and size does most of the work.
+const MAJOR_STRENGTH = 3;
 const MAJOR_AREA = 0.06;
 
 const regionArea = (diff) => (diff?.regions || []).reduce((s, r) => s + r.w * r.h, 0);

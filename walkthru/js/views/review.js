@@ -63,7 +63,7 @@ export async function render(main, { iid, query }, ctx) {
     main.innerHTML = String(html`
       ${head}
       <p class="lede">Compared with the ${kindLabel(base.kind).toLowerCase()} of ${fmtDateTime(base.openedAt)}. ${plural(compared, 'photo pair')} checked; <b>${plural(flagged.length, 'item')}</b> need a look.</p>
-      <div class="grid">
+      <div class="grid stats">
         <div class="stat"><b>${flagged.length}</b><span>flagged of ${rows.length} items</span></div>
         <div class="stat"><b>${decided}/${flagged.length}</b><span>decided</span></div>
         <div class="stat"><b>${money(total)}</b><span>approved charges</span></div>

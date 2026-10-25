@@ -108,10 +108,13 @@ test('draft: minor change uses the first rate, major the second', () => {
   const minor = draftItem({ item: wallItem, before: { condition: 'ok' }, after: { condition: 'damage' }, diff: changed(0.9), rates: DEFAULT_RATES });
   assert.equal(minor.suggestion.rateId, 'paint-touchup');
   assert.equal(minor.confidence, 'high');
-  const major = draftItem({ item: wallItem, before: { condition: 'ok' }, after: { condition: 'ok' }, diff: changed(2.2), rates: DEFAULT_RATES });
+  const major = draftItem({ item: wallItem, before: { condition: 'ok' }, after: { condition: 'ok' }, diff: changed(3.4), rates: DEFAULT_RATES });
   assert.equal(major.suggestion.rateId, 'drywall-small');
   assert.equal(major.suggestion.cents, 7500);
   assert.equal(major.confidence, 'medium');
+  // A strong but small mark (a scuff) stays minor; a large one is major.
+  assert.equal(draftItem({ item: wallItem, before: { condition: 'ok' }, after: { condition: 'damage' }, diff: changed(2.2), rates: DEFAULT_RATES }).severity, 'minor');
+  assert.equal(draftItem({ item: wallItem, before: { condition: 'ok' }, after: { condition: 'damage' }, diff: changed(1, 0.08), rates: DEFAULT_RATES }).severity, 'major');
 });
 
 test('draft: reported wear with a faint change is wear and tear, not a charge', () => {
