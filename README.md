@@ -1,5 +1,24 @@
 # aashwatsingh.github.io
 
+## Comet HQ (`/hq/`)
+
+A dashboard for school and the internship hunt. It syncs your UTD Canvas work (assignments, quizzes, exams,
+grades and assignment-group weights) and ranks it together with your own to-dos, internship next steps and
+today's DSA practice, so the top of the list is what to do next. An exam worth 20% of the grade two days out
+outranks a 2% homework due tomorrow, and each row says why.
+
+- **Canvas:** drag the **Sync to HQ** bookmark (⋯ → Connect Canvas) to your bookmarks bar and click it on any
+  Canvas page. It uses your existing login, with no token. For automatic sync there's a token mode through a
+  small Cloudflare Worker (`hq/proxy/worker.js`).
+- **Tabs:** Today (priorities, tasks, the week ahead, interview countdown, Lock In's One Thing), School
+  (grades and coursework by due date), Internships (pipeline board and stats), DSA (150 problems by pattern
+  with spaced-repetition reviews, streak, heatmap and readiness).
+- **Privacy:** data stays in your browser (`localStorage`, key `hq:v1`); the Canvas token is stored separately
+  and never exported. Export and import from the **⋯** menu.
+
+Setup, the scoring and the code: `hq/README.md`. Run its tests with `node --test hq/tests/*.test.mjs`, and the
+browser test (Playwright, mock Canvas) with `node hq/tests/browser-smoke.mjs`.
+
 ## Lock In (`/lockin/`)
 
 A daily standard you open every morning and close every night. It's built around one idea: watching and
