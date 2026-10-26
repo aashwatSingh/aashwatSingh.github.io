@@ -1,0 +1,13 @@
+{
+  "name": "Comet HQ",
+  "short_name": "Comet HQ",
+  "description": "School, internship hunt and DSA prep in one ranked list.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f5f2",
+  "theme_color": "#c2410c",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

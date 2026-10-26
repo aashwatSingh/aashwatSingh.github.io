@@ -25,7 +25,9 @@ const int = (v, lo, hi, dflt) => {
 const day = (v) => (DAY_RE.test(v || '') ? v : '');
 const time = (v) => (TIME_RE.test(v || '') ? v : '');
 const iso = (v) => (typeof v === 'string' && Number.isFinite(Date.parse(v)) ? v.slice(0, 40) : '');
-const https = (v) => (typeof v === 'string' && /^https:\/\/[^\s"'<>]+$/.test(v) ? v.slice(0, 500) : '');
+// https only, plus a local test server (the browser smoke test runs a mock Canvas on 127.0.0.1).
+const https = (v) => (typeof v === 'string' && (/^https:\/\/[^\s"'<>]+$/.test(v) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/[^\s"'<>]*)?$/.test(v))
+  ? v.slice(0, 500) : '');
 const list = (v, max) => (Array.isArray(v) ? v.slice(0, max) : []);
 
 export function defaultSettings() {

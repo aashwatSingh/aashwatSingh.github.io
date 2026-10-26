@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Comet HQ</title>
+  <meta name="description" content="School, internship hunt and DSA prep in one ranked list, with Canvas sync.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#c2410c">
+  <meta name="robots" content="noindex">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Comet HQ">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    try { const t = localStorage.getItem('hq:theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
+  </script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="./">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <h1>Comet HQ</h1>
+      </a>
+      <nav class="tabs" role="tablist" aria-label="Views">
+        <button type="button" class="tab" role="tab" data-tab="today" aria-selected="true">Today</button>
+        <button type="button" class="tab" role="tab" data-tab="school" aria-selected="false">School <span class="count" id="count-school" hidden></span></button>
+        <button type="button" class="tab" role="tab" data-tab="intern" aria-selected="false">Internships</button>
+        <button type="button" class="tab" role="tab" data-tab="dsa" aria-selected="false">DSA <span class="count" id="count-dsa" hidden></span></button>
+      </nav>
+      <div class="topbar-actions">
+        <button type="button" id="sync-btn" class="icon-btn" aria-label="Sync Canvas" title="Sync Canvas">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 0 1-14.3 4.9M4 12A8 8 0 0 1 18.3 7.1"/><path d="M18.5 3v4.3h-4.3M5.5 21v-4.3h4.3"/></svg>
+        </button>
+        <button type="button" id="theme-toggle" class="icon-btn" aria-label="Theme: auto" title="Theme: auto"></button>
+        <details class="menu">
+          <summary class="icon-btn" aria-label="Menu" title="Settings and backup">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+          </summary>
+          <div class="menu-panel">
+            <button type="button" data-open="connect">Connect Canvas</button>
+            <button type="button" id="name-btn">Set your name</button>
+            <hr>
+            <button type="button" id="sample-btn">Load sample data</button>
+            <button type="button" id="export-btn">Export data</button>
+            <button type="button" id="import-btn">Import data</button>
+            <input type="file" id="import-input" accept="application/json,.json" hidden>
+            <hr>
+            <a class="menu-link" href="../lockin/">Lock In ↗</a>
+            <a class="menu-link" href="../hamza/">Hamza Lessons ↗</a>
+            <hr>
+            <button type="button" id="reset-btn" class="danger">Erase everything</button>
+          </div>
+        </details>
+      </div>
+    </div>
+  </header>
+
+  <div id="sample-banner" class="banner" hidden>
+    <div class="wrap">
+      <span>You’re looking at <strong>sample data</strong>. Your first Canvas sync replaces it.</span>
+      <button type="button" class="btn small" id="clear-sample">Clear sample data</button>
+    </div>
+  </div>
+  <div id="storage-warning" class="banner" hidden>
+    <div class="wrap">This browser is blocking storage, so nothing will be kept after you close the tab. Use <strong>Export data</strong> to save it.</div>
+  </div>
+
+  <main class="wrap">
+    <section id="view-today" role="tabpanel" aria-label="Today"></section>
+    <section id="view-school" role="tabpanel" aria-label="School" hidden></section>
+    <section id="view-intern" role="tabpanel" aria-label="Internships" hidden></section>
+    <section id="view-dsa" role="tabpanel" aria-label="DSA" hidden></section>
+    <p class="footer">Everything stays in this browser. Use <strong>⋯ → Export data</strong> to move it to another device.</p>
+  </main>
+
+  <!-- Connect Canvas -->
+  <dialog id="connect" aria-labelledby="connect-title">
+    <div class="dlg">
+      <form method="dialog" class="dialog-close"><button class="icon-btn" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></form>
+      <h2 id="connect-title">Connect Canvas</h2>
+      <p class="muted small">Canvas doesn’t let other websites read its data directly, so HQ connects one of two ways. Either way your data stays in this browser.</p>
+      <p id="connect-status" class="small"></p>
+
+      <div class="option recommended">
+        <h3>1. Sync button <span class="pill accent">Recommended · no setup</span></h3>
+        <ol class="small">
+          <li>Show your bookmarks bar (<kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>).</li>
+          <li>Drag this button onto it: <a class="bookmarklet" id="bookmarklet" href="#">⟳ Sync to HQ</a></li>
+          <li>Open UTD’s Canvas (eLearning), log in, and click the bookmark on any Canvas page.</li>
+        </ol>
+        <p class="small muted">It reads your planner, grades and assignment weights using the login you already have (no password or token), then opens HQ with the data. Click it again whenever you want fresh data.</p>
+        <div class="row">
+          <button type="button" class="btn small" id="copy-bookmarklet">Copy bookmark code</button>
+          <span class="small muted">For phones: bookmark any page, edit the bookmark, and paste this as its address.</span>
+        </div>
+      </div>
+
+      <div class="option">
+        <h3>2. Access token <span class="pill">Auto-syncs every time you open HQ</span></h3>
+        <p class="small muted">Needs a Canvas access token (Canvas → Account → Settings → <em>New access token</em>) and a small free proxy you deploy once, because Canvas blocks direct requests from other sites. Setup steps: <code>hq/README.md</code>.</p>
+        <form id="token-form">
+          <label class="field"><span>Canvas address <em>copy it from your browser bar</em></span>
+            <input type="url" id="canvas-url" placeholder="https://elearning.utdallas.edu" autocomplete="off" spellcheck="false"></label>
+          <label class="field"><span>Proxy address <em>your Cloudflare Worker, from hq/proxy/worker.js</em></span>
+            <input type="url" id="proxy-url" placeholder="https://hq-canvas.your-name.workers.dev" autocomplete="off" spellcheck="false"></label>
+          <label class="field"><span>Access token <em>kept in this browser only, never exported</em></span>
+            <input type="password" id="canvas-token" placeholder="Paste a token" autocomplete="off" spellcheck="false"></label>
+          <div class="row">
+            <button type="submit" class="btn primary">Save and sync</button>
+            <button type="button" class="btn ghost" id="forget-token">Forget token</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Task editor -->
+  <dialog id="task-dlg" aria-labelledby="task-title-h">
+    <form class="dlg" id="task-form" method="dialog">
+      <h2 id="task-title-h">Edit task</h2>
+      <label class="field"><span>Task</span><input type="text" name="title" maxlength="200" required autocomplete="off"></label>
+      <div class="three">
+        <label class="field"><span>Category</span><select name="cat"></select></label>
+        <label class="field"><span>Priority</span><select name="pri"><option value="1">P1 · must</option><option value="2">P2 · should</option><option value="3">P3 · could</option></select></label>
+        <label class="field"><span>Due</span><input type="date" name="due"></label>
+      </div>
+      <div class="two">
+        <label class="field"><span>Time <em>optional</em></span><input type="time" name="time"></label>
+      </div>
+      <label class="field"><span>Notes</span><textarea name="notes" rows="3" maxlength="1000"></textarea></label>
+      <div class="dlg-foot">
+        <button type="button" class="btn danger" id="task-delete">Delete</button>
+        <div class="right">
+          <button type="button" class="btn ghost" data-close>Cancel</button>
+          <button type="submit" class="btn primary" value="save">Save</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Application editor -->
+  <dialog id="app-dlg" aria-labelledby="app-title-h">
+    <form class="dlg" id="app-form" method="dialog">
+      <h2 id="app-title-h">Application</h2>
+      <div class="two">
+        <label class="field"><span>Company</span><input type="text" name="company" maxlength="80" required autocomplete="off"></label>
+        <label class="field"><span>Role</span><input type="text" name="role" maxlength="120" autocomplete="off" placeholder="Software Engineering Intern"></label>
+      </div>
+      <label class="field"><span>Posting link <em>optional</em></span><input type="url" name="url" placeholder="https://" autocomplete="off"></label>
+      <div class="three">
+        <label class="field"><span>Stage</span><select name="stage"></select></label>
+        <label class="field" id="outcome-field"><span>Outcome</span><select name="outcome"><option value="">—</option></select></label>
+        <label class="field"><span>Applied on</span><input type="date" name="applied"></label>
+      </div>
+      <label class="field"><span>Next step <em>leave blank for the default</em></span><input type="text" name="next" maxlength="160" autocomplete="off" placeholder="e.g. HackerRank OA, Final round with the team"></label>
+      <div class="two">
+        <label class="field"><span>Next step due</span><input type="date" name="nextDue"></label>
+        <label class="field"><span>Time <em>optional</em></span><input type="time" name="nextTime"></label>
+      </div>
+      <label class="field"><span>Notes <em>recruiter, referral, questions they asked</em></span><textarea name="notes" rows="3" maxlength="2000"></textarea></label>
+      <div class="dlg-foot">
+        <button type="button" class="btn danger" id="app-delete">Delete</button>
+        <div class="right">
+          <button type="button" class="btn ghost" data-close>Cancel</button>
+          <button type="submit" class="btn primary" value="save">Save</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Custom problem -->
+  <dialog id="prob-dlg" aria-labelledby="prob-title-h">
+    <form class="dlg" id="prob-form" method="dialog">
+      <h2 id="prob-title-h">Add a problem</h2>
+      <p class="small muted">For problems outside the core 150, like ones from an OA or a company’s tagged list.</p>
+      <label class="field"><span>Link <em>LeetCode or anywhere</em></span><input type="url" name="url" placeholder="https://leetcode.com/problems/…" autocomplete="off"></label>
+      <label class="field"><span>Title</span><input type="text" name="title" maxlength="120" required autocomplete="off"></label>
+      <div class="two">
+        <label class="field"><span>Pattern</span><select name="pattern"></select></label>
+        <label class="field"><span>Difficulty</span><select name="diff"><option value="E">Easy</option><option value="M" selected>Medium</option><option value="H">Hard</option></select></label>
+      </div>
+      <div class="dlg-foot">
+        <span></span>
+        <div class="right">
+          <button type="button" class="btn ghost" data-close>Cancel</button>
+          <button type="submit" class="btn primary" value="save">Add</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"><span id="toast-text"></span><button type="button" id="toast-action" hidden></button></div>
+</body>
+</html>
