@@ -66,7 +66,9 @@ A working prototype of Walkthru, the move-in and move-out inspection startup. Re
 door and film each room in the phone's browser (no app, no login); every photo is SHA-256 fingerprinted and the
 record is sealed on submit. Staff review only what changed since the last record, and charges come from a rate
 sheet, split among roommates, with the Texas deposit deadline. A demo property with five planted changes is
-built in the browser so it can be tried without a real apartment. Data stays in the browser (IndexedDB).
+built in the browser so it can be tried without a real apartment. Data stays in the browser (IndexedDB) unless
+you turn on sync, which shares records between phones and office devices through your own Supabase project
+(setup in `walkthru/README.md`).
 
 Details, the demo tour and limits: `walkthru/README.md`. Design: `walkthru/docs/ARCHITECTURE.md`. Run its tests
 with `node --test 'walkthru/tests/*.test.mjs'`.

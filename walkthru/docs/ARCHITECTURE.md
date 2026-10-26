@@ -10,6 +10,7 @@ views/*.js ──► core/*.js           pure logic, no DOM, unit tested in Node
     ├──► store.js                  IndexedDB: one state document + photo blobs by hash
     ├──► camera.js, imaging.js     getUserMedia, canvas, downscaling, diff cache
     ├──► records.js                record files: export, check, import, verify all
+    ├──► sync.js ──► core/syncdocs.js   Supabase sync (network) and its merge rules (pure)
     ├──► demo.js                   synthetic demo property and photos
     └──► ui.js                     safe HTML templating, formatting, toasts, photo URLs
 app.js                             boot, hash router, cleanup between screens
@@ -40,6 +41,7 @@ Rules the code keeps:
 | `#/door/:payload` → `#/start/:uid[?i=iid]` | QR landing, start | `views/resident.js` |
 | `#/capture/:sid[?i=n]`, `#/submit/:sid`, `#/receipt/:sid` | Capture, seal, receipt | `views/resident.js` |
 | `#/verify` | Verify and tamper demo | `views/verify.js` |
+| `#/office/sync`, `#/connect/:payload` | Sync settings, join an office device | `views/syncview.js` |
 
 A view is `(main, params, ctx) => cleanup?`. `ctx` holds the state, `save()`, `go()`, `now()` and
 `rerender()`. The capture screen returns a cleanup that stops the camera when you leave.
@@ -131,16 +133,66 @@ layout differs, or a different submission under an existing id.
 The door payload is base64url JSON: property and unit details, plus an optional open inspection
 (`iid, ik, io, il`) for invite links.
 
+## Sync (`sync.js`, `core/syncdocs.js`, `supabase/schema.sql`)
+
+The browser calls Postgres functions through Supabase's REST endpoint (`POST /rest/v1/rpc/<fn>`) with plain
+`fetch`; there's no SDK. All tables have row level security on and no policies, so the public key can't read or
+write them directly. Every function is `security definer` and resolves its first argument, a sync key or a door
+code, to a space (and a unit, for a door code) by its SHA-256 before doing anything.
+
+| Function | Does |
+| --- | --- |
+| `wt_create_space(key, name)` | Register a new space for a client-made random key |
+| `wt_add_unit_token(key, unit, token)` | Register a door code for one unit (sync key only) |
+| `wt_push(secret, docs)` | Upsert documents; sealed submissions add-only; door codes limited to their unit |
+| `wt_pull(secret, since)` | Documents with a sequence number after `since`, 300 per page; redacted for door codes |
+| `wt_missing_photos(secret, hashes)` | Which photos the server lacks |
+| `wt_put_photo(secret, hash, type, b64)` | Store a photo after re-hashing it |
+| `wt_get_photo(secret, hash)` | Fetch a photo; door codes only get their unit's |
+
+Documents are whole records: `{ kind, id, body }` for properties, units, inspections and sealed submissions.
+Each change gets the next value of one sequence, so a device pulls with a single cursor and never misses a
+write regardless of clocks.
+
+A **channel** is one secret plus its progress: `{ url, anon, key | token, meta: { cursor, synced, rejected } }`.
+An office device has one channel for its sync key; a phone has one per door code it has scanned.
+`meta.synced` maps each document to the hash it last had in agreement with the server.
+
+One sync of a channel:
+
+1. **Pull** pages after the cursor. For a sealed submission, download missing photos, check each against its
+   fingerprint, and verify the chain and seal; a failure is recorded in `meta.rejected` and the record is not
+   used. Each document is applied by `applyDoc`: added if new, replaced if unchanged here since the last sync,
+   otherwise merged by `mergeDoc` (residents unioned, staff decisions per item keep the later one, forwarding
+   addresses unioned, single fields take the server's). Records are updated in place so open screens keep
+   editing the live object. A pulled submission also adds its resident to the unit. The cursor moves only after
+   a page is fully applied.
+2. **Push** documents whose hash differs from `meta.synced` (a door channel only considers its unit's
+   inspections and sealed submissions). Photos go first, so a record never arrives without them.
+
+`startAutoSync` runs a sync when the app opens, every 30 s while visible, on returning to the tab or going back
+online, and 1.5 s after any save (`ctx.save`). Saves made by the sync itself use `ctx.persist`, so they don't
+schedule another sync. It also lets `store.getPhoto` fetch a photo it doesn't have from any channel (checked
+against its hash before it is kept), which is how a phone gets the baseline photos for the ghost overlay.
+
+Door QR payloads gain `s: { u, a, k }` (project URL, public key, door code). The connect link
+(`#/connect/<payload>`) carries the sync key and is shown only on the Sync page, with a staff-only warning.
+
 ## Storage (`store.js`)
 
 IndexedDB database `walkthru`, version 1, with stores `state` (one document under `main`) and `photos`
 (`{ type, blob }` by hash). If IndexedDB is unavailable, it falls back to memory and the footer says so.
-`ghost` overlay opacity is the only `localStorage` value (`walkthru:ghost`).
+`ghost` overlay opacity is the only `localStorage` value (`walkthru:ghost`). Sync settings and per-channel
+progress live in the state document under `sync`; they are never pushed.
 
 ## Testing
 
 - `node --test 'walkthru/tests/*.test.mjs'`: unit tests for every `core/` module.
 - `node walkthru/tests/browser-smoke.mjs`: Playwright run of the gate and both flows with a fake camera
   (setup in the README).
+- `tests/supabase.test.mjs`: the schema in PGlite as the `anon` role: tables closed, keys checked, sealed
+  records immutable, photo hashes enforced, door codes confined to their unit, paging.
+- `tests/syncdocs.test.mjs`: which documents each channel owns, pending detection and the merge rules.
+- `node walkthru/tests/sync-browser.mjs`: two phones and two office devices through the local stand-in.
 - Checked during the build but not committed: axe-core accessibility scans of every screen in light and dark
   (no WCAG A/AA violations), and decoding the door QR code back to its URL with jsQR.
