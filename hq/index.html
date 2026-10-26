@@ -26,6 +26,7 @@
         <h1>Comet HQ</h1>
       </a>
       <nav class="tabs" role="tablist" aria-label="Views">
+        <span class="tab-glider" aria-hidden="true"></span>
         <button type="button" class="tab" role="tab" data-tab="today" aria-selected="true">Today</button>
         <button type="button" class="tab" role="tab" data-tab="school" aria-selected="false">School <span class="count" id="count-school" hidden></span></button>
         <button type="button" class="tab" role="tab" data-tab="intern" aria-selected="false">Internships</button>
@@ -82,39 +83,65 @@
     <div class="dlg">
       <form method="dialog" class="dialog-close"><button class="icon-btn" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></form>
       <h2 id="connect-title">Connect Canvas</h2>
-      <p class="muted small">Canvas doesn’t let other websites read its data directly, so HQ connects one of two ways. Either way your data stays in this browser.</p>
-      <p id="connect-status" class="small"></p>
+      <p class="muted small">HQ reads your assignments, grades and grade weights from UT Dallas’s Canvas. Your data stays in this browser.</p>
+      <p id="connect-status" class="small" hidden></p>
+
+      <form id="address-form" class="field" autocomplete="off">
+        <label for="canvas-url"><span class="label">Your Canvas address</span> <em>copy it from the address bar while you’re on Canvas</em></label>
+        <div class="inline">
+          <input type="url" id="canvas-url" placeholder="https://elearning.utdallas.edu" spellcheck="false">
+          <button type="submit" class="btn">Save</button>
+        </div>
+      </form>
 
       <div class="option recommended">
-        <h3>1. Sync button <span class="pill accent">Recommended · no setup</span></h3>
-        <ol class="small">
-          <li>Show your bookmarks bar (<kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>).</li>
-          <li>Drag this button onto it: <a class="bookmarklet" id="bookmarklet" href="#">⟳ Sync to HQ</a></li>
-          <li>Open UTD’s Canvas (eLearning), log in, and click the bookmark on any Canvas page.</li>
-        </ol>
-        <p class="small muted">It reads your planner, grades and assignment weights using the login you already have (no password or token), then opens HQ with the data. Click it again whenever you want fresh data.</p>
-        <div class="row">
-          <button type="button" class="btn small" id="copy-bookmarklet">Copy bookmark code</button>
-          <span class="small muted">For phones: bookmark any page, edit the bookmark, and paste this as its address.</span>
+        <h3>Auto-sync extension <span class="pill accent">Recommended</span></h3>
+        <div id="ext-ready" hidden>
+          <p class="small"><span class="status-ok">Installed.</span> HQ refreshes from Canvas by itself every time you open it, using the Canvas login you already have. Nothing to repeat.</p>
+          <p id="ext-update" class="small" hidden>A newer version is available. <button type="button" class="btn small" data-act="download-ext">Download it</button>, then in <code>chrome://extensions</code> remove the old one and load the new folder.</p>
+          <button type="button" class="btn primary small" data-act="sync">Sync now</button>
+        </div>
+        <div id="ext-setup">
+          <p class="small muted">A one-time install for Chrome, Edge, Brave or Arc on your laptop. After it, you never sync by hand: HQ refreshes from Canvas every time you open it.</p>
+          <ol class="steps small">
+            <li><button type="button" class="btn primary small" data-act="download-ext">Download the extension</button> and unzip it somewhere it can stay (like Documents).</li>
+            <li>Open <code>chrome://extensions</code> <button type="button" class="btn ghost small" id="copy-ext-url">Copy</button> in a new tab and turn on <strong>Developer mode</strong> (top right).</li>
+            <li>Click <strong>Load unpacked</strong> and choose the <code>comet-hq-sync</code> folder.</li>
+            <li>Come back and reload this page. HQ takes it from there.</li>
+          </ol>
+          <p class="small muted">It can only read Canvas (on instructure.com and utdallas.edu) and only talks to this page. No password, no token.</p>
         </div>
       </div>
 
-      <div class="option">
-        <h3>2. Access token <span class="pill">Auto-syncs every time you open HQ</span></h3>
-        <p class="small muted">Needs a Canvas access token (Canvas → Account → Settings → <em>New access token</em>) and a small free proxy you deploy once, because Canvas blocks direct requests from other sites. Setup steps: <code>hq/README.md</code>.</p>
-        <form id="token-form">
-          <label class="field"><span>Canvas address <em>copy it from your browser bar</em></span>
-            <input type="url" id="canvas-url" placeholder="https://elearning.utdallas.edu" autocomplete="off" spellcheck="false"></label>
-          <label class="field"><span>Proxy address <em>your Cloudflare Worker, from hq/proxy/worker.js</em></span>
-            <input type="url" id="proxy-url" placeholder="https://hq-canvas.your-name.workers.dev" autocomplete="off" spellcheck="false"></label>
-          <label class="field"><span>Access token <em>kept in this browser only, never exported</em></span>
-            <input type="password" id="canvas-token" placeholder="Paste a token" autocomplete="off" spellcheck="false"></label>
+      <details class="more-ways">
+        <summary>Other ways to connect</summary>
+        <div class="option">
+          <h3>Sync bookmark</h3>
+          <ol class="small">
+            <li>Show your bookmarks bar (<kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>).</li>
+            <li>Drag this button onto it: <a class="bookmarklet" id="bookmarklet" href="#">⟳ Sync to HQ</a></li>
+            <li>On any Canvas page, click the bookmark. Click it again whenever you want fresh data.</li>
+          </ol>
           <div class="row">
-            <button type="submit" class="btn primary">Save and sync</button>
-            <button type="button" class="btn ghost" id="forget-token">Forget token</button>
+            <button type="button" class="btn small" id="copy-bookmarklet">Copy bookmark code</button>
+            <span class="small muted">For phones: bookmark any page, edit it, and paste this as its address.</span>
           </div>
-        </form>
-      </div>
+        </div>
+        <div class="option">
+          <h3>Access token + proxy</h3>
+          <p class="small muted">Works on any browser, including phones. Needs a Canvas access token (Account → Settings → <em>New access token</em>) and a free Cloudflare Worker you deploy once. Steps: <code>hq/README.md</code>.</p>
+          <form id="token-form">
+            <label class="field"><span>Proxy address <em>your Worker, from hq/proxy/worker.js</em></span>
+              <input type="url" id="proxy-url" placeholder="https://hq-canvas.your-name.workers.dev" autocomplete="off" spellcheck="false"></label>
+            <label class="field"><span>Access token <em>kept in this browser only, never exported</em></span>
+              <input type="password" id="canvas-token" placeholder="Paste a token" autocomplete="off" spellcheck="false"></label>
+            <div class="row">
+              <button type="submit" class="btn primary">Save and sync</button>
+              <button type="button" class="btn ghost" id="forget-token">Forget token</button>
+            </div>
+          </form>
+        </div>
+      </details>
     </div>
   </dialog>
 

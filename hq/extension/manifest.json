@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Comet HQ Sync",
+  "version": "1.0.0",
+  "description": "Keeps Comet HQ in sync with your Canvas every time you open it, using the Canvas login you already have.",
+  "icons": { "48": "icon-48.png", "128": "icon-128.png" },
+  "background": { "service_worker": "background.js", "type": "module" },
+  "host_permissions": ["https://*.instructure.com/*", "https://*.utdallas.edu/*"],
+  "content_scripts": [
+    { "matches": ["https://aashwatsingh.github.io/hq/*"], "js": ["content.js"], "run_at": "document_start" }
+  ]
+}
