@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Walkthru</title>
+  <meta name="description" content="Walkthru prototype: move-in and move-out inspections for student housing, filmed by residents from a QR code and reviewed by staff.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#0B1F3A">
+  <meta name="robots" content="noindex">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Walkthru">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="hazard" aria-hidden="true"></div>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="#/">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">Walkthru</span>
+        <span class="brand-tag">Prototype</span>
+      </a>
+      <nav class="nav" aria-label="Main">
+        <a href="#/office" data-nav="office">Office</a>
+        <a href="#/verify" data-nav="verify">Verify</a>
+        <a href="#/about" data-nav="about">How it works</a>
+      </nav>
+    </div>
+  </header>
+  <main id="main" class="wrap" tabindex="-1">
+    <p class="loading">Loading…</p>
+  </main>
+  <footer class="foot wrap">
+    <span>Walkthru prototype. Data stays in this browser. Not legal advice.</span>
+    <span id="storage-note"></span>
+  </footer>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <noscript><p class="wrap">Walkthru needs JavaScript.</p></noscript>
+</body>
+</html>

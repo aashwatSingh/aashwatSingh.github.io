@@ -59,3 +59,14 @@ topic, and can copy them all out as Markdown.
   `/hamza/demo/`; rebuild it with `node scripts/build_demo.mjs` after changing `insights.js`.
 
 Run the sync tests locally with `python -m unittest scripts/test_fetch_videos.py`.
+
+## Walkthru (`/walkthru/`)
+
+A working prototype of Walkthru, the move-in and move-out inspection startup. Residents scan a QR code on the
+door and film each room in the phone's browser (no app, no login); every photo is SHA-256 fingerprinted and the
+record is sealed on submit. Staff review only what changed since the last record, and charges come from a rate
+sheet, split among roommates, with the Texas deposit deadline. A demo property with five planted changes is
+built in the browser so it can be tried without a real apartment. Data stays in the browser (IndexedDB).
+
+Details, the demo tour and limits: `walkthru/README.md`. Design: `walkthru/docs/ARCHITECTURE.md`. Run its tests
+with `node --test 'walkthru/tests/*.test.mjs'`.
