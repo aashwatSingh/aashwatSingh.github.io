@@ -14,6 +14,7 @@ import { cameraSupported, openCamera, attach, stopCamera, grabFrame, serverTime,
 import { normalizeUpload } from '../imaging.js';
 import { demoShotFor, demoReport, isDemoUnit } from '../demo.js';
 import { exportSubmission, shareOrDownload } from '../records.js';
+import { addDoor, syncNow, isSent, officeOn, status as syncStatus } from '../sync.js';
 import { notFound, kindLabel, callout } from './common.js';
 
 const GHOST_KEY = 'walkthru:ghost';
@@ -45,6 +46,14 @@ export async function door(main, { payload }, ctx) {
     return;
   }
   if (!existing) addUnit(s, d.unit);
+  // A door code means this phone can send that unit's records to the office. Fetch the unit's
+  // latest records now so the ghost overlay has the last report to line up with.
+  if (d.sync) {
+    addDoor(s, d.unit.id, d.sync);
+    await ctx.save();
+    main.innerHTML = String(html`<div class="capture"><h1>Unit ${d.unit.label}</h1><p class="lede">Getting the last report for this unit…</p></div>`);
+    await syncNow(ctx); // offline is fine: the walkthrough still works, and sending retries later
+  }
   let q = '';
   if (d.inspection) {
     if (!s.inspections[d.inspection.id]) {
@@ -380,6 +389,11 @@ export function receipt(main, { sid }, ctx) {
   const unit = s.units[sub.unitId];
   const prop = s.properties[unit.propertyId];
   const items = new Map(checklistFor(unit.template, null).map((c) => [c.key, c]));
+  const syncable = Boolean(s.sync?.doors?.[unit.id] || officeOn(s));
+  const sentBox = () => (isSent(s, s.submissions[sid])
+    ? callout('tip', 'Sent to the office', html`<p>Your sealed record and its photos reached the leasing office. Nothing else to do.</p>`)
+    : callout('caution', 'Not sent yet', html`<p>${syncStatus.state === 'syncing' ? 'Sending…' : syncStatus.error ? `${syncStatus.error} It will retry when you're back online.` : 'Sending when the connection allows.'}</p>
+      <button class="btn primary small" id="send-now">Send now</button>`));
 
   main.innerHTML = String(html`
     <div class="capture">
@@ -394,9 +408,9 @@ export function receipt(main, { sid }, ctx) {
         <div><dt>Seal</dt><dd class="mono">${shortHash(sub.seal)}</dd></div>
       </dl>
       <p class="hashline" style="margin-top: 8px" title="Full seal">${sub.seal}</p>
-      <p>Send this record to your leasing office. It's a single file with your photos inside; they check the seal when they open it. Keep a copy for yourself too.</p>
+      ${syncable ? html`<div id="sync-box" aria-live="polite">${sentBox()}</div>` : html`<p>Send this record to your leasing office. It's a single file with your photos inside; they check the seal when they open it. Keep a copy for yourself too.</p>`}
       <div class="row">
-        <button class="btn primary" id="send">Send to leasing office</button>
+        <button class="btn ${syncable ? 'ghost' : 'primary'}" id="send">${syncable ? 'Save a copy as a file' : 'Send to leasing office'}</button>
         <button class="btn ghost" id="verify">Check the seal</button>
         <a class="btn ghost" href="#/report/${insp.id}">Full report</a>
       </div>
@@ -411,6 +425,16 @@ export function receipt(main, { sid }, ctx) {
     </div>
   `);
   hydratePhotos(main);
+  const refreshSent = () => {
+    const box = $('#sync-box');
+    if (!box) return;
+    box.innerHTML = String(sentBox());
+    $('#send-now')?.addEventListener('click', async () => { box.innerHTML = String(callout('caution', 'Not sent yet', html`<p>Sending…</p>`)); await syncNow(ctx); refreshSent(); });
+  };
+  if (syncable) {
+    refreshSent();
+    if (!isSent(s, sub)) syncNow(ctx).then(refreshSent);
+  }
   $('#send').addEventListener('click', async () => {
     try {
       const { blob, filename } = await exportSubmission(s, sid);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { encodeDoor, decodeDoor, buildRecord, readRecord, bytesToBase64, base64ToBytes } from '../js/core/payload.js';
+import { encodeDoor, decodeDoor, buildRecord, readRecord, bytesToBase64, base64ToBytes, cleanSyncUrl, encodeConnect, decodeConnect } from '../js/core/payload.js';
 import { sealSubmission, sha256Hex, verifySubmission } from '../js/core/integrity.js';
 
 const property = { id: 'p_demo', name: 'Maple Court (demo)', city: 'Richardson', state: 'TX' };
@@ -79,4 +79,32 @@ test('readRecord rejects malformed or tampered files', async () => {
   assert.equal(res.ok, true);
   const v = await verifySubmission(res.record.submission, async (h) => res.record.photos[h]?.bytes || null);
   assert.equal(v.ok, false);
+});
+
+const TOKEN = 'k'.repeat(43);
+
+test('door payload can carry sync details; bad ones are dropped', () => {
+  const sync = { url: 'https://abc.supabase.co', anon: 'sb_publishable_' + 'x'.repeat(30), token: TOKEN };
+  assert.deepEqual(decodeDoor(encodeDoor({ property, unit, sync })).sync, sync);
+  assert.equal(decodeDoor(encodeDoor({ property, unit })).sync, null);
+  for (const bad of [{ ...sync, url: 'http://evil.example' }, { ...sync, url: 'javascript:alert(1)' }, { ...sync, token: 'short' }, { ...sync, anon: 'has spaces in it but long enough' }]) {
+    const d = decodeDoor(encodeDoor({ property, unit, sync: bad }));
+    assert.equal(d.sync, null, JSON.stringify(bad));
+    assert.equal(d.unit.id, 'u_204');
+  }
+});
+
+test('cleanSyncUrl accepts HTTPS project roots and local testing only', () => {
+  assert.equal(cleanSyncUrl(' https://abc.supabase.co/ '), 'https://abc.supabase.co');
+  assert.equal(cleanSyncUrl('http://127.0.0.1:54321'), 'http://127.0.0.1:54321');
+  for (const bad of ['http://abc.supabase.co', 'https://abc.supabase.co/rest/v1', 'https://u:p@abc.supabase.co', 'ftp://x', 'nope', '', null]) {
+    assert.equal(cleanSyncUrl(bad), null, String(bad));
+  }
+});
+
+test('connect links round-trip and reject junk', () => {
+  const cfg = { url: 'https://abc.supabase.co', anon: 'eyJ' + 'a'.repeat(100), key: TOKEN };
+  assert.deepEqual(decodeConnect(encodeConnect(cfg)), cfg);
+  assert.equal(decodeConnect('garbage!'), null);
+  assert.equal(decodeConnect(encodeConnect({ ...cfg, key: 'short' })), null);
 });

@@ -15,6 +15,7 @@ import { clearAll } from '../store.js';
 import { DEMO_PROPERTY_ID, removeDemo } from '../demo.js';
 import { checkRecordFile, importRecord } from '../records.js';
 import { qrSvg } from '../qr.js';
+import { officeOn, doorCode, status as syncStatus } from '../sync.js';
 import { notFound, statusChip, latestOf, kindLabel, crumbs, callout } from './common.js';
 
 const appBase = () => `${location.origin}${location.pathname}`;
@@ -40,6 +41,14 @@ export function dashboard(main, params, ctx) {
       <a class="btn primary" href="#/demo">${ctx.state.properties[DEMO_PROPERTY_ID] ? 'Reset the demo property' : 'Load the demo property'}</a>
     </div>
 
+    <h2>Sync</h2>
+    <a class="card-link" href="#/office/sync"><div class="card" style="max-width: 560px">
+      ${officeOn(ctx.state)
+        ? html`<div class="row between"><b>Connected to Supabase</b><span class="chip ${syncStatus.state === 'error' ? 'bad' : 'verified'}">${syncStatus.state === 'error' ? 'Problem' : 'On'}</span></div>
+          <p class="muted small" style="margin: 4px 0 0">Phones send sealed records here on their own. Open to sync now or add another office device.</p>`
+        : html`<b>Off: records stay on each device</b><p class="muted small" style="margin: 4px 0 0">Connect a Supabase project so residents' phones and every office device share records.</p>`}
+    </div></a>
+
     <h2>Add a property</h2>
     <form id="add-prop" class="card" style="max-width: 560px">
       <label class="field"><span>Name</span><input type="text" name="name" required maxlength="80" placeholder="e.g. The Quad at Campbell"></label>
@@ -49,7 +58,7 @@ export function dashboard(main, params, ctx) {
     </form>
 
     <h2>This browser</h2>
-    <p class="muted">Walkthru keeps everything here, on this device. Erasing removes every property, record and photo.</p>
+    <p class="muted">Walkthru keeps everything here, on this device. Erasing removes every property, record and photo from this device and disconnects sync. Records already on the sync server stay there.</p>
     <button class="btn danger" id="erase">Erase all Walkthru data</button>
   `);
 
@@ -66,6 +75,7 @@ export function dashboard(main, params, ctx) {
     if (!(await confirmBox('Erase every property, record and photo stored by Walkthru in this browser? This cannot be undone.', 'Erase'))) return;
     await clearAll();
     for (const k of ['properties', 'units', 'inspections', 'submissions']) ctx.state[k] = {};
+    delete ctx.state.sync; // otherwise the next sync would bring everything back
     await ctx.save();
     toast('All Walkthru data erased.');
     ctx.rerender();
@@ -323,13 +333,25 @@ export function rates(main, { pid }, ctx) {
 
 // ---------------------------------------------------------------- door sign
 
-export function doorSign(main, { uid, query }, ctx) {
+export async function doorSign(main, { uid, query }, ctx) {
   const u = ctx.state.units[uid];
   if (!u) return notFound(main, 'unit');
   const p = ctx.state.properties[u.propertyId];
   const insp = query.get('i') ? ctx.state.inspections[query.get('i')] : null;
   const live = insp && insp.unitId === uid && !isLocked(insp, ctx.now()) ? insp : null;
-  const url = `${appBase()}#/door/${encodeDoor({ property: p, unit: u, inspection: live })}`;
+  // With sync on, the code also carries this unit's door code so phones can send records here.
+  let sync = null;
+  let syncProblem = null;
+  if (officeOn(ctx.state) && !p.demo) {
+    try {
+      const token = await doorCode(ctx.state, uid);
+      await ctx.persist();
+      sync = { url: ctx.state.sync.office.url, anon: ctx.state.sync.office.anon, token };
+    } catch (err) {
+      syncProblem = err.message;
+    }
+  }
+  const url = `${appBase()}#/door/${encodeDoor({ property: p, unit: u, inspection: live, sync })}`;
   main.innerHTML = String(html`
     <div class="no-print">
       ${crumbs([['Office', '#/office'], [p.name, `#/office/p/${p.id}`], [`Unit ${u.label}`, `#/office/u/${u.id}`]])}
@@ -337,6 +359,9 @@ export function doorSign(main, { uid, query }, ctx) {
       <p class="lede">${live
         ? `Share this with every resident of unit ${u.label}. It joins them to the same ${live.kind} record, open until ${fmtDateTime(live.lockAt)}.`
         : 'Print this and put it on the inside of the door. Residents scan it to start a move-in or move-out walkthrough.'}</p>
+      ${sync ? html`<p class="small"><span class="chip verified">Sync on</span> Phones that scan this send their sealed record straight to the office.</p>` : ''}
+      ${syncProblem ? callout('caution', 'Sync code not added', html`<p>${syncProblem} This code still works; residents send their record as a file instead.</p>`) : ''}
+      ${p.demo && officeOn(ctx.state) ? html`<p class="small muted">The demo property doesn't sync, so its codes don't carry a door code.</p>` : ''}
     </div>
     <div class="door-sign">
       <div class="stripe"></div>

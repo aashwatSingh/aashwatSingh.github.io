@@ -6,6 +6,7 @@
 // and `persistent` is false so the UI can say so.
 
 import { emptyState, STATE_VERSION } from './core/model.js';
+import { sha256Hex } from './core/integrity.js';
 
 const DB_NAME = 'walkthru';
 const DB_VERSION = 1;
@@ -60,6 +61,7 @@ function migrate(raw) {
   for (const k of ['properties', 'units', 'inspections', 'submissions']) {
     if (raw[k] && typeof raw[k] === 'object') s[k] = raw[k];
   }
+  if (raw.sync && typeof raw.sync === 'object') s.sync = raw.sync;
   return s;
 }
 
@@ -79,10 +81,38 @@ export async function putPhoto(hash, record) {
   await tx('photos', 'readwrite', (s) => s.put(record, hash));
 }
 
-/** The stored { type, blob } for a hash, or null. */
-export async function getPhoto(hash) {
+async function getLocal(hash) {
   if (!db) return memory.photos.get(hash) || null;
   return (await tx('photos', 'readonly', (s) => s.get(hash))) || null;
+}
+
+// Where to look when a photo isn't stored here (sync.js sets it). It must resolve to
+// { type, bytes } or null; the bytes are checked against the hash before they are kept.
+let remoteSource = null;
+const inflight = new Map();
+export function setRemotePhotoSource(fn) { remoteSource = fn; }
+
+async function fetchRemote(hash) {
+  const got = await remoteSource(hash);
+  if (!got) return null;
+  if ((await sha256Hex(got.bytes)) !== hash) {
+    console.warn('Walkthru: a downloaded photo did not match its fingerprint and was discarded', hash);
+    return null;
+  }
+  const record = { type: got.type, blob: new Blob([got.bytes], { type: got.type }) };
+  await putPhoto(hash, record);
+  return record;
+}
+
+/** The stored { type, blob } for a hash, fetched from sync if it isn't here; null if unavailable. */
+export async function getPhoto(hash) {
+  const local = await getLocal(hash);
+  if (local || !remoteSource) return local;
+  if (!inflight.has(hash)) {
+    inflight.set(hash, fetchRemote(hash).catch((err) => { console.warn('Walkthru: photo download failed', err); return null; })
+      .finally(() => inflight.delete(hash)));
+  }
+  return inflight.get(hash);
 }
 
 export async function getPhotoBytes(hash) {

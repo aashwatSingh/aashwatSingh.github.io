@@ -73,7 +73,7 @@ export function about(main) {
       <tbody>
         <tr><td>Capture</td><td>Live camera in the browser, ghost overlay, file fallback</td><td>Same, plus live prompts and recapture detection</td></tr>
         <tr><td>Fingerprints</td><td>Real SHA-256, hash chain and seal (Web Crypto)</td><td>Same, with server-signed timestamps</td></tr>
-        <tr><td>Storage</td><td>This browser only (IndexedDB). Records move as sealed files</td><td>Shared cloud record for operator and resident</td></tr>
+        <tr><td>Storage</td><td>This browser (IndexedDB), with optional sync through your own Supabase project; sealed files work offline</td><td>Same, with accounts and per-lease access</td></tr>
         <tr><td>Auto-draft</td><td>Pixel comparison with lighting and alignment correction</td><td>Feature matching plus a vision model</td></tr>
         <tr><td>Charges</td><td>Rate sheet, roommate split, Texas Ch. 92 deadline</td><td>Same, more states, export to property software</td></tr>
       </tbody>

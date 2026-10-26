@@ -27,6 +27,14 @@ export function stopCamera(stream) {
 
 /** Grab the current video frame as a JPEG. Returns { blob, width, height }. */
 export async function grabFrame(video) {
+  // Right after a screen change the preview may not have its first frame yet; give it a moment
+  // rather than failing a quick tap.
+  if (!video.videoWidth) {
+    await new Promise((resolve) => {
+      video.addEventListener('loadeddata', resolve, { once: true });
+      setTimeout(resolve, 3000);
+    });
+  }
   const { w, h } = fit(video.videoWidth, video.videoHeight);
   if (!w || !h) throw new Error('The camera is not ready yet');
   const c = document.createElement('canvas');

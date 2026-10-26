@@ -37,22 +37,44 @@ const fromUrl = (s) => s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 -
 
 // ---------------------------------------------------------------- door QR payload
 
+// ---------------------------------------------------------------- sync settings
+
+/**
+ * A Supabase project address, cleaned: "https://abc.supabase.co/" → "https://abc.supabase.co".
+ * HTTPS only, except plain http on this computer for testing. Null if it isn't one.
+ */
+export function cleanSyncUrl(raw) {
+  let u;
+  try { u = new URL(String(raw || '').trim()); } catch { return null; }
+  const local = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+  if (u.protocol !== 'https:' && !(local && u.protocol === 'http:')) return null;
+  if (u.username || u.password || u.search || u.hash || (u.pathname !== '/' && u.pathname !== '')) return null;
+  return u.origin;
+}
+
+/** A Supabase public key: a legacy anon JWT or a newer sb_publishable_ key. */
+export const isPublicKey = (k) => typeof k === 'string' && /^[\w.-]{20,600}$/.test(k);
+/** A Walkthru sync key or door code: 32+ random URL-safe characters. */
+export const isSecret = (k) => typeof k === 'string' && /^[\w-]{32,200}$/.test(k);
+
 /**
  * Encode a unit's door details for the QR code URL. With `inspection`, the link also names one
- * open walkthrough, so roommates scanning on different phones all join the same one.
+ * open walkthrough, so roommates scanning on different phones all join the same one. With `sync`
+ * ({ url, anon, token }), the phone can send its sealed record straight to the office.
  */
-export function encodeDoor({ property, unit, inspection = null }) {
+export function encodeDoor({ property, unit, inspection = null, sync = null }) {
   const data = { v: 1, pid: property.id, pn: property.name, pc: property.city || '', st: property.state || 'TX', uid: unit.id, ul: unit.label, t: unit.template };
   if (inspection) Object.assign(data, { iid: inspection.id, ik: inspection.kind, io: inspection.openedAt, il: inspection.lockAt });
+  if (sync) data.s = { u: sync.url, a: sync.anon, k: sync.token };
   return toUrl(bytesToBase64(new TextEncoder().encode(JSON.stringify(data))));
 }
 
 /**
- * Decode a door payload. Returns { property, unit, inspection } (inspection may be null), or
- * null if it is not a valid payload.
+ * Decode a door payload. Returns { property, unit, inspection, sync } (the last two may be null),
+ * or null if it is not a valid payload. A bad optional part is dropped; the unit still opens.
  */
 export function decodeDoor(s) {
-  if (typeof s !== 'string' || s.length > 2000 || !/^[\w-]+$/.test(s)) return null;
+  if (typeof s !== 'string' || s.length > 4000 || !/^[\w-]+$/.test(s)) return null;
   let d;
   try {
     d = JSON.parse(new TextDecoder().decode(base64ToBytes(fromUrl(s))));
@@ -66,10 +88,13 @@ export function decodeDoor(s) {
   const inspection = ID_RE.test(d.iid) && KINDS.includes(d.ik) && ISO_RE.test(d.io) && ISO_RE.test(d.il)
     ? { id: d.iid, unitId: d.uid, kind: d.ik, openedAt: d.io, lockAt: d.il }
     : null;
+  const url = d.s ? cleanSyncUrl(d.s.u) : null;
+  const sync = url && isPublicKey(d.s.a) && isSecret(d.s.k) ? { url, anon: d.s.a, token: d.s.k } : null;
   return {
     property: { id: d.pid, name: pn, city: text(d.pc, 60), state: /^[A-Z]{2}$/.test(d.st) ? d.st : 'TX' },
     unit: { id: d.uid, propertyId: d.pid, label: ul, template: d.t },
     inspection,
+    sync,
   };
 }
 
@@ -163,4 +188,20 @@ export function readRecord(raw) {
       photos,
     },
   };
+}
+
+// ---------------------------------------------------------------- office device link
+
+/** Encode office sync settings for a "connect another office device" link. Grants full access. */
+export function encodeConnect({ url, anon, key }) {
+  return toUrl(bytesToBase64(new TextEncoder().encode(JSON.stringify({ v: 1, u: url, a: anon, k: key }))));
+}
+
+/** Decode a connect link payload to { url, anon, key }, or null. */
+export function decodeConnect(s) {
+  if (typeof s !== 'string' || s.length > 2000 || !/^[\w-]+$/.test(s)) return null;
+  let d;
+  try { d = JSON.parse(new TextDecoder().decode(base64ToBytes(fromUrl(s)))); } catch { return null; }
+  const url = d && d.v === 1 ? cleanSyncUrl(d.u) : null;
+  return url && isPublicKey(d.a) && isSecret(d.k) ? { url, anon: d.a, key: d.k } : null;
 }
