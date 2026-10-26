@@ -7,16 +7,17 @@ grades and assignment-group weights) and ranks it together with your own to-dos,
 today's DSA practice, so the top of the list is what to do next. An exam worth 20% of the grade two days out
 outranks a 2% homework due tomorrow, and each row says why.
 
-- **Canvas:** drag the **Sync to HQ** bookmark (⋯ → Connect Canvas) to your bookmarks bar and click it on any
-  Canvas page. It uses your existing login, with no token. For automatic sync there's a token mode through a
-  small Cloudflare Worker (`hq/proxy/worker.js`).
+- **Canvas:** install the small **Comet HQ Sync** extension once (⋯ → Connect Canvas → Download the extension)
+  and HQ re-syncs from Canvas by itself every time you open it, using your existing login, with no token.
+  Without it, a **Sync to HQ** bookmark or a token mode through a small Cloudflare Worker (`hq/proxy/worker.js`)
+  also work.
 - **Tabs:** Today (priorities, tasks, the week ahead, interview countdown, Lock In's One Thing), School
   (grades and coursework by due date), Internships (pipeline board and stats), DSA (150 problems by pattern
   with spaced-repetition reviews, streak, heatmap and readiness).
 - **Privacy:** data stays in your browser (`localStorage`, key `hq:v1`); the Canvas token is stored separately
   and never exported. Export and import from the **⋯** menu.
 
-Setup, the scoring and the code: `hq/README.md`. Run its tests with `node --test hq/tests/*.test.mjs`, and the
+Setup, the scoring, the motion and the code: `hq/README.md`. Run its tests with `node --test hq/tests/*.test.mjs`, and the
 browser test (Playwright, mock Canvas) with `node hq/tests/browser-smoke.mjs`.
 
 ## Lock In (`/lockin/`)

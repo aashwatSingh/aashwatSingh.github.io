@@ -7,6 +7,7 @@ import { PATTERNS, DIFFICULTY } from './problems.js';
 import { allProblems, practice, undo, todaysSet, patternProgress, readiness, dsaItem, CONFIDENCE } from './dsa.js';
 import { STORE_KEY, TOKEN_KEY, THEME_KEY, cleanStore, emptyStore, defaultSettings, newId, cleanTask, cleanApp } from './store.js';
 import { sampleStore } from './sample.js';
+import { connectExtension, extensionZip, EXT_VERSION, olderThan } from './bridge.js';
 import { HOUR, keyOf, addDays, daysBetween, practiceDay, dateOf } from './dates.js';
 import { streaks, heatmap } from '../../hamza/insights.js';
 import { todayKey as lockinToday, dayStatus } from '../../lockin/logic.js';
@@ -15,6 +16,8 @@ const LOCKIN_KEY = 'lockin:v1';
 const TAB_KEY = 'hq:tab';
 const TABS = ['today', 'school', 'intern', 'dsa'];
 const AUTO_SYNC_MS = 30 * 60e3;
+// With the extension, opening HQ always syncs unless it synced in the last two minutes.
+const EXT_SYNC_MS = 2 * 60e3;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -39,7 +42,8 @@ const LONG = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long'
 let store = emptyStore();
 let storageOk = true;
 let tab = 'today';
-const ui = { taskFilter: 'all', course: 'all', showDone: false, showAll: false, open: new Set(), syncing: false, syncError: '' };
+const ui = { taskFilter: 'all', course: 'all', showDone: false, showAll: false, open: new Set(), syncing: false, syncError: '', loggedOut: false };
+let ext = { present: false, version: '', sync: async () => ({ ok: false }) };
 let lastItems = new Map();
 
 function load() {
@@ -118,6 +122,56 @@ function reasonHtml(r, now) {
 
 const scoreClass = (s) => (s >= 70 ? 's3' : s >= 45 ? 's2' : '');
 
+// ---------------------------------------------------------------- motion
+
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const motionOK = () => !reduceMotion.matches;
+
+/** A stable view-transition name for a row, so it glides to its new place when a list changes. */
+function vt(list, key) {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619);
+  return `style="view-transition-name:${list}-${(h >>> 0).toString(36)};view-transition-class:row"`;
+}
+
+/**
+ * Save and redraw after a change. Where the browser supports view transitions, rows glide to
+ * their new places, finished ones slip away and new ones settle in, instead of the list jumping.
+ */
+function update() {
+  save();
+  const run = () => render();
+  if (motionOK() && document.startViewTransition && !document.querySelector('dialog[open]')) {
+    try {
+      const t = document.startViewTransition(run);
+      // A quick second change skips the first animation; its redraw still happens, so that's fine.
+      for (const p of [t.ready, t.finished, t.updateCallbackDone]) p.catch(() => {});
+      return;
+    } catch { /* fall back to a plain redraw */ }
+  }
+  run();
+}
+
+/** Numbers marked data-count roll from their last value (or 0 on entrance) to the new one. */
+const counted = new Map();
+function countUp(root, fromZero) {
+  for (const el of root.querySelectorAll('[data-count]')) {
+    const key = el.dataset.count;
+    const to = Number(el.textContent);
+    const from = fromZero ? 0 : counted.get(key) ?? to;
+    counted.set(key, to);
+    if (!motionOK() || from === to || !Number.isFinite(to)) continue;
+    const t0 = performance.now();
+    el.textContent = String(from);
+    const step = (t) => {
+      const p = Math.min(1, (t - t0) / 900);
+      el.textContent = String(Math.round(from + (to - from) * (1 - (1 - p) ** 4)));
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+}
+
 // ---------------------------------------------------------------- derived state
 
 function context() {
@@ -139,7 +193,7 @@ function context() {
 
 // ---------------------------------------------------------------- shared rows
 
-function itemRow(it, now, { score = true } = {}) {
+function itemRow(it, now, { score = true, list = 'p' } = {}) {
   let lead;
   if (it.src === 'intern') lead = `<button type="button" class="go" data-act="open-app" data-id="${esc(it.appId || '')}" aria-label="Update ${esc(it.sub)}">${ICON.arrow}</button>`;
   else if (it.src === 'dsa') lead = `<button type="button" class="go" data-act="go-dsa" aria-label="Open DSA practice">${ICON.arrow}</button>`;
@@ -172,7 +226,7 @@ function itemRow(it, now, { score = true } = {}) {
   ].filter(Boolean).map((x) => (x.startsWith('<span') ? x : `<span>${x}</span>`)).join('');
   const sc = score && typeof it.score === 'number' && !it.done
     ? `<span class="score ${scoreClass(it.score)}" title="Priority ${it.score} of 100">${it.score}</span>` : '<span></span>';
-  return `<li class="pr${it.done ? ' is-done' : ''}" data-key="${esc(it.key)}">${lead}<div>${title}<div class="pr-meta">${meta}</div></div>${sc}</li>`;
+  return `<li class="pr${it.done ? ' is-done' : ''}" data-key="${esc(it.key)}" ${vt(list, it.key)}>${lead}<div>${title}<div class="pr-meta">${meta}</div></div>${sc}</li>`;
 }
 
 // ---------------------------------------------------------------- Today
@@ -233,7 +287,7 @@ function tasksPanel(c) {
   const counts = Object.fromEntries(CATEGORIES.map((cat) => [cat.id, store.tasks.filter((t) => !t.done && t.cat === cat.id).length]));
   const scored = c.ranked.filter((i) => i.src === 'task' && (ui.taskFilter === 'all' || i.cat === ui.taskFilter));
   const doneToday = store.tasks.filter((t) => t.done && keyOf(t.done) === c.today && (ui.taskFilter === 'all' || t.cat === ui.taskFilter));
-  const doneRows = doneToday.map((t) => itemRow({ key: `t:${t.id}`, src: 'task', kind: 'task', title: t.title, sub: 'Done today', done: true, due: null, taskId: t.id }, c.now)).join('');
+  const doneRows = doneToday.map((t) => itemRow({ key: `t:${t.id}`, src: 'task', kind: 'task', title: t.title, sub: 'Done today', done: true, due: null, taskId: t.id }, c.now, { list: 't' })).join('');
   const chips = [['all', 'All', store.tasks.filter((t) => !t.done).length], ...CATEGORIES.map((x) => [x.id, x.label, counts[x.id]])]
     .map(([id, label, n]) => `<button type="button" class="chip" data-act="task-filter" data-id="${id}" aria-pressed="${ui.taskFilter === id}">${label} ${n ? `· ${n}` : ''}</button>`).join('');
   return `
@@ -248,7 +302,7 @@ function tasksPanel(c) {
         <button type="submit" class="btn primary">Add</button>
       </form>
       <div class="filters" role="group" aria-label="Filter tasks">${chips}</div>
-      ${scored.length || doneRows ? `<ol class="plist">${scored.map((it) => itemRow(it, c.now)).join('')}${doneRows}</ol>` : '<p class="empty">No open tasks here.</p>'}
+      ${scored.length || doneRows ? `<ol class="plist">${scored.map((it) => itemRow(it, c.now, { list: 't' })).join('')}${doneRows}</ol>` : '<p class="empty">No open tasks here.</p>'}
     </section>`;
 }
 
@@ -258,10 +312,10 @@ function todayTiles(c, due48, overdue) {
   const stats = pipelineStats(store.apps, c.today);
   return `
     <dl class="tiles">
-      <div class="tile"><dt>Due in 48 hours</dt><dd>${due48}</dd></div>
-      <div class="tile ${overdue ? 'alert' : ''}"><dt>Overdue</dt><dd>${overdue}</dd></div>
-      <div class="tile"><dt>DSA streak</dt><dd>${streak} <small>${streak === 1 ? 'day' : 'days'}</small></dd></div>
-      <div class="tile"><dt>Active applications</dt><dd>${stats.active}</dd></div>
+      <div class="tile"><dt>Due in 48 hours</dt><dd><span data-count="due48">${due48}</span></dd></div>
+      <div class="tile ${overdue ? 'alert' : ''}"><dt>Overdue</dt><dd><span data-count="overdue">${overdue}</span></dd></div>
+      <div class="tile"><dt>DSA streak</dt><dd><span data-count="streak">${streak}</span> <small>${streak === 1 ? 'day' : 'days'}</small></dd></div>
+      <div class="tile"><dt>Active applications</dt><dd><span data-count="active">${stats.active}</span></dd></div>
     </dl>`;
 }
 
@@ -308,17 +362,46 @@ function lockinPanel(c) {
   </section>`;
 }
 
-function canvasStatusPanel(c) {
-  if (!store.canvas) {
-    return `<section class="panel"><div class="panel-head"><h3>Canvas</h3><span class="pill">Not connected</span></div>
-      <p class="small muted">Sync your assignments, quizzes, exams and grades from UTD’s Canvas.</p>
-      <button type="button" class="btn primary small" data-open="connect">Connect Canvas</button></section>`;
-  }
+/** Where HQ syncs from: the address you saved, else the one the last sync came from. */
+function canvasOrigin() {
+  return store.settings.canvasUrl || (store.canvas && !store.sample ? store.canvas.origin : '');
+}
+
+const autoSync = () => ext.present || Boolean(getToken());
+
+function syncPill(c) {
+  if (ui.syncing) return '<span class="pill accent syncing"><i aria-hidden="true"></i>Syncing…</span>';
+  if (ui.syncError) return `<span class="pill bad">${ui.loggedOut ? 'Logged out of Canvas' : 'Sync paused'}</span>`;
+  if (!store.canvas) return '<span class="pill">Not connected</span>';
+  if (store.sample) return '<span class="pill">Sample data</span>';
   const ago = c.now - Date.parse(store.canvas.at);
-  const stale = ago > 24 * HOUR;
-  return `<section class="panel"><div class="panel-head"><h3>Canvas</h3><span class="pill ${stale ? 'bad' : 'good'}">Synced ${span(ago)} ago</span></div>
-    <p class="small muted">${plural(store.canvas.courses.length, 'course')} · ${plural(c.canvas.filter(isOpen).length, 'open item')}${stale ? ' · time for a fresh sync' : ''}</p>
-    <button type="button" class="btn small" data-act="sync">${getToken() ? 'Sync now' : 'How to sync'}</button></section>`;
+  if (ago < 5 * 60e3) return '<span class="pill good">Up to date</span>';
+  return `<span class="pill ${ago > 24 * HOUR ? 'bad' : ''}">Synced ${span(ago)} ago</span>`;
+}
+
+function syncNote() {
+  if (ui.syncError) {
+    const origin = canvasOrigin();
+    return `<p class="small sync-error">${esc(ui.syncError)}</p>${ui.loggedOut && origin ? `<a class="btn small" href="${esc(origin)}" target="_blank" rel="noopener">Open Canvas</a> ` : ''}`;
+  }
+  if (ext.present) return canvasOrigin() ? '<p class="small muted">Syncs by itself every time you open HQ.</p>'
+    : '<p class="small muted">The extension is installed. Add your Canvas address to finish.</p>';
+  if (getToken()) return '<p class="small muted">Syncs by itself through your proxy.</p>';
+  return '';
+}
+
+function canvasStatusPanel(c) {
+  if (!store.canvas || store.sample) {
+    return `<section class="panel"><div class="panel-head"><h3>Canvas</h3>${syncPill(c)}</div>
+      ${syncNote() || '<p class="small muted">Sync your assignments, quizzes, exams and grades from UT Dallas’s Canvas.</p>'}
+      ${autoSync() && canvasOrigin() ? '<button type="button" class="btn primary small" data-act="sync">Sync now</button>'
+        : '<button type="button" class="btn primary small" data-open="connect">Connect Canvas</button>'}</section>`;
+  }
+  return `<section class="panel"><div class="panel-head"><h3>Canvas</h3>${syncPill(c)}</div>
+    <p class="small muted">${plural(store.canvas.courses.length, 'course')} · ${plural(c.canvas.filter(isOpen).length, 'open item')}</p>
+    ${syncNote()}
+    ${autoSync() ? '<button type="button" class="btn small" data-act="sync">Sync now</button>'
+      : '<button type="button" class="btn small" data-open="connect">Turn on auto-sync</button>'}</section>`;
 }
 
 // ---------------------------------------------------------------- School
@@ -336,9 +419,8 @@ function renderSchool(c) {
     return;
   }
   const summaries = courseSummaries(store.canvas, c.canvas, c.s.hidden);
-  const ago = c.now - Date.parse(store.canvas.at);
   const courses = summaries.map((s) => `
-    <article class="course ${s.hidden ? 'hidden-course' : ''}">
+    <article class="course ${s.hidden ? 'hidden-course' : ''}" ${vt('c', s.id)}>
       <div class="course-top">
         <span class="course-code">${esc(s.code)}</span>
         ${s.score != null ? `<span class="course-grade ${s.score < 80 ? 'low' : ''}">${+s.score.toFixed(1)}%${s.grade ? `<small>${esc(s.grade)}</small>` : ''}</span>` : '<span class="muted small">No grade yet</span>'}
@@ -362,12 +444,13 @@ function renderSchool(c) {
   view.innerHTML = `
     <section class="panel" style="margin-bottom:16px">
       <div class="sync-line">
-        <p><strong>Canvas</strong> <span class="muted">· synced ${span(ago)} ago${store.canvas.user ? ` as ${esc(store.canvas.user)}` : ''} · ${esc(store.canvas.origin.replace(/^https?:\/\//, ''))}</span></p>
+        <p><strong>Canvas</strong> ${syncPill(c)} <span class="muted">${store.canvas.user ? `${esc(store.canvas.user)} · ` : ''}${esc(store.canvas.origin.replace(/^https?:\/\//, ''))}</span></p>
         <div class="row">
-          <button type="button" class="btn small" data-act="sync">${getToken() ? 'Sync now' : 'How to sync'}</button>
+          <button type="button" class="btn small" data-act="sync">${autoSync() ? 'Sync now' : 'Turn on auto-sync'}</button>
           <button type="button" class="btn ghost small" data-open="connect">Connection</button>
         </div>
       </div>
+      ${ui.syncError ? syncNote() : ''}
       ${store.canvas.errors.length ? `<p class="small muted" style="margin:8px 0 0">Some parts didn’t load: ${esc(store.canvas.errors.join('; '))}</p>` : ''}
     </section>
     <div class="courses">${courses}</div>
@@ -376,8 +459,8 @@ function renderSchool(c) {
         <label class="small muted row" style="gap:6px"><input type="checkbox" id="show-done" ${ui.showDone ? 'checked' : ''}> Show done and past</label></div>
       <div class="filters" role="group" aria-label="Filter by course">${chips}</div>
       ${groups.length ? groups.map((g) => `<h4 class="group-h ${g.id === 'overdue' ? 'hot' : ''}">${g.label} · ${g.items.length}</h4>
-        <ol class="plist">${g.items.map((it) => itemRow(it, c.now, { score: it.kind !== 'event' })).join('')}</ol>`).join('') : '<p class="empty">Nothing open in Canvas. Nice.</p>'}
-      ${done.length ? `<h4 class="group-h">Done and past</h4><ol class="plist">${done.map((it) => itemRow(it, c.now, { score: false })).join('')}</ol>` : ''}
+        <ol class="plist">${g.items.map((it) => itemRow(it, c.now, { score: it.kind !== 'event', list: 's' })).join('')}</ol>`).join('') : '<p class="empty">Nothing open in Canvas. Nice.</p>'}
+      ${done.length ? `<h4 class="group-h">Done and past</h4><ol class="plist">${done.map((it) => itemRow(it, c.now, { score: false, list: 's' })).join('')}</ol>` : ''}
     </section>`;
 }
 
@@ -395,16 +478,16 @@ function renderIntern(c) {
     </section>`;
   }).join('');
   const closed = sortApps(store.apps.filter((a) => a.stage === 'closed'));
-  const rate = stats.responseRate == null ? '—' : `${Math.round(stats.responseRate * 100)}%`;
+  const rate = stats.responseRate == null ? '—' : `<span data-count="rate">${Math.round(stats.responseRate * 100)}</span>%`;
   $('#view-intern').innerHTML = `
     <dl class="tiles five" style="margin-bottom:16px">
-      <div class="tile"><dt>Applied</dt><dd>${stats.applied}</dd></div>
-      <div class="tile"><dt>This week</dt><dd>${stats.thisWeek}</dd></div>
+      <div class="tile"><dt>Applied</dt><dd><span data-count="applied">${stats.applied}</span></dd></div>
+      <div class="tile"><dt>This week</dt><dd><span data-count="week">${stats.thisWeek}</span></dd></div>
       <div class="tile"><dt>Response rate</dt><dd>${rate} <small>${stats.applied ? `${stats.responded}/${stats.applied}` : ''}</small></dd></div>
-      <div class="tile"><dt>Interviews</dt><dd>${stats.interviews}</dd></div>
-      <div class="tile"><dt>Offers</dt><dd>${stats.offers}</dd></div>
+      <div class="tile"><dt>Interviews</dt><dd><span data-count="interviews">${stats.interviews}</span></dd></div>
+      <div class="tile"><dt>Offers</dt><dd><span data-count="offers">${stats.offers}</span></dd></div>
     </dl>
-    <div class="row" style="margin-bottom:12px; justify-content:space-between">
+    <div class="row toolbar">
       <div class="row">
         <button type="button" class="btn primary" data-act="new-app">+ Add application</button>
         <a class="btn" href="https://app.appwing.us" target="_blank" rel="noopener">AppWing ${ICON.link}</a>
@@ -426,7 +509,7 @@ function appCard(a, c, quiet) {
   const next = nextIdx < 5 ? STAGES[nextIdx] : null;
   const due = a.nextDue ? dateOf(a.nextDue).getTime() + (a.nextTime ? (Number(a.nextTime.slice(0, 2)) * 60 + Number(a.nextTime.slice(3))) * 60e3 : 23 * HOUR + 59 * 60e3) : null;
   const overdue = due != null && due < c.now;
-  return `<article class="card" data-app="${esc(a.id)}">
+  return `<article class="card" data-app="${esc(a.id)}" ${vt('a', a.id)}>
     <div class="card-top">
       <button type="button" class="card-company" data-act="open-app" data-id="${esc(a.id)}">${esc(a.company)}</button>
       ${a.url ? `<a class="go" href="${esc(a.url)}" target="_blank" rel="noopener" aria-label="Open the ${esc(a.company)} posting">${ICON.link}</a>` : ''}
@@ -444,7 +527,7 @@ function appCard(a, c, quiet) {
 
 const PATTERN_NAME = Object.fromEntries(PATTERNS.map((p) => [p.id, p.name]));
 
-function probRow(p, c, tag = '') {
+function probRow(p, c, tag = '', list = 'q') {
   const s = store.dsa.problems[p.slug];
   const today = s?.last === c.pday;
   const conf = today ? s.conf : null;
@@ -455,7 +538,7 @@ function probRow(p, c, tag = '') {
     ...(!s || s.st === 'attempted' || (today && conf === 0) ? [{ v: 0, label: 'Tried', hint: 'Didn’t get it yet; retry tomorrow' }] : []),
     ...CONFIDENCE,
   ].map((b) => `<button type="button" data-act="practice" data-slug="${esc(p.slug)}" data-v="${b.v}" title="${esc(b.hint)}" aria-pressed="${conf === b.v}">${esc(b.label)}</button>`).join('');
-  return `<li class="prob">
+  return `<li class="prob" ${vt(list, p.slug)}>
     <div>
       <a class="prob-title" href="${esc(p.url || `https://leetcode.com/problems/${p.slug}/`)}" target="_blank" rel="noopener">${esc(p.title)}</a>
       <div class="prob-meta">
@@ -481,14 +564,14 @@ function renderDsa(c) {
   const set = c.set;
   const total = set.doneToday.length + set.left;
   const grid = heatmap(log, c.pday, 26);
-  const hm = grid.map((col) => `<div class="hm-col">${col.map((cell) => (cell
+  const hm = grid.map((col, ci) => `<div class="hm-col" style="--c:${ci}">${col.map((cell) => (cell
     ? `<span class="hm-cell ${cell.level ? `l${cell.level}` : ''} ${cell.key === c.pday ? 'today' : ''}" title="${esc(`${plural(cell.count, 'problem')} · ${SHORT.format(dateOf(cell.key))}`)}"></span>`
     : '<span class="hm-cell none"></span>')).join('')}</div>`).join('');
 
   const todayRows = [
-    ...set.reviews.map((p) => probRow(p, c, 'Review')),
-    ...set.fresh.map((p) => probRow(p, c, 'New')),
-    ...set.doneToday.map((p) => probRow(p, c, 'Done')),
+    ...set.reviews.map((p) => probRow(p, c, 'Review', 'qs')),
+    ...set.fresh.map((p) => probRow(p, c, 'New', 'qs')),
+    ...set.doneToday.map((p) => probRow(p, c, 'Done', 'qs')),
   ].join('');
 
   const patterns = progress.map((pr) => {
@@ -499,16 +582,16 @@ function renderDsa(c) {
       <summary><span>${esc(pr.name)}</span>
         <span class="bar" role="img" aria-label="${pr.solid} solid, ${pr.solved - pr.solid} shaky or needed help, of ${pr.total}"><span class="solid" style="width:${solidPct}%"></span><span class="rest" style="width:${restPct}%"></span></span>
         <span class="n">${pr.solved}/${pr.total}</span></summary>
-      ${ui.open.has(pr.id) ? `<ol class="plist pat-body">${list.map((p) => probRow(p, c)).join('')}</ol>` : ''}
+      ${ui.open.has(pr.id) ? `<ol class="plist pat-body">${list.map((p) => probRow(p, c, '', 'qp')).join('')}</ol>` : ''}
     </details>`;
   }).join('');
 
   $('#view-dsa').innerHTML = `
     <dl class="tiles four" style="margin-bottom:16px">
-      <div class="tile"><dt>Solved</dt><dd>${solved} <small>/ ${c.problems.length}</small></dd><div class="bar"><span style="width:${(solved / c.problems.length) * 100}%"></span></div></div>
-      <div class="tile"><dt>Streak</dt><dd>${st.current} <small>${st.current === 1 ? 'day' : 'days'} · best ${st.longest}</small></dd></div>
-      <div class="tile ${set.dueCount > 5 ? 'alert' : ''}"><dt>Reviews due</dt><dd>${set.dueCount}</dd></div>
-      <div class="tile"><dt>Interview readiness</dt><dd>${ready}%</dd><div class="bar"><span style="width:${ready}%"></span></div></div>
+      <div class="tile"><dt>Solved</dt><dd><span data-count="solved">${solved}</span> <small>/ ${c.problems.length}</small></dd><div class="bar"><span style="width:${(solved / c.problems.length) * 100}%"></span></div></div>
+      <div class="tile"><dt>Streak</dt><dd><span data-count="dsa-streak">${st.current}</span> <small>${st.current === 1 ? 'day' : 'days'} · best ${st.longest}</small></dd></div>
+      <div class="tile ${set.dueCount > 5 ? 'alert' : ''}"><dt>Reviews due</dt><dd><span data-count="due-reviews">${set.dueCount}</span></dd></div>
+      <div class="tile"><dt>Interview readiness</dt><dd><span data-count="ready">${ready}</span>%</dd><div class="bar"><span style="width:${ready}%"></span></div></div>
     </dl>
     <div class="grid">
       <div class="stack">
@@ -550,8 +633,17 @@ function renderDsa(c) {
 
 // ---------------------------------------------------------------- render
 
-function render() {
+let enterTimer;
+const STAGGER = '.hero, .tiles, .panel, .courses > .course, .board > .col, .toolbar';
+
+/** Redraw the open tab. `enter` plays the arrival: blocks rise in one after another. */
+function render({ enter = false } = {}) {
   const c = context();
+  const view = $(`#view-${tab}`);
+  // Keep a half-typed entry and the caret where they were across a redraw.
+  const active = document.activeElement;
+  const keep = active?.id && view.contains(active) && 'value' in active
+    ? { id: active.id, value: active.value, start: active.selectionStart, end: active.selectionEnd } : null;
   $('#sample-banner').hidden = !store.sample;
   $('#storage-warning').hidden = storageOk;
   const hot = c.canvas.filter((i) => isActionable(i) && i.due != null && i.due - c.now < 24 * HOUR).length;
@@ -561,15 +653,42 @@ function render() {
   $('#count-dsa').textContent = c.set.left;
   for (const b of $$('.tab')) b.setAttribute('aria-selected', String(b.dataset.tab === tab));
   for (const t of TABS) $(`#view-${t}`).hidden = t !== tab;
+  view.classList.remove('enter');
   ({ today: renderToday, school: renderSchool, intern: renderIntern, dsa: renderDsa })[tab](c);
+  if (keep) {
+    const el = document.getElementById(keep.id);
+    if (el) {
+      el.value = keep.value;
+      el.focus({ preventScroll: true });
+      try { el.setSelectionRange(keep.start, keep.end); } catch { /* not a text field */ }
+    }
+  }
+  placeGlider();
+  if (enter && motionOK()) {
+    $$(STAGGER, view).forEach((el, i) => el.style.setProperty('--i', Math.min(i, 8)));
+    void view.offsetWidth;
+    view.classList.add('enter');
+    clearTimeout(enterTimer);
+    enterTimer = setTimeout(() => view.classList.remove('enter'), 1600);
+  }
+  countUp(view, enter);
+}
+
+/** Slide the tab highlight under the selected tab. */
+function placeGlider() {
+  const g = $('.tab-glider');
+  const t = $(`.tab[data-tab="${tab}"]`);
+  if (!g || !t) return;
+  g.style.width = `${t.offsetWidth}px`;
+  g.style.transform = `translateX(${t.offsetLeft}px)`;
 }
 
 function setTab(t) {
   if (!TABS.includes(t)) return;
   tab = t;
   try { localStorage.setItem(TAB_KEY, t); } catch { /* fine */ }
-  render();
-  window.scrollTo({ top: 0 });
+  render({ enter: true });
+  window.scrollTo({ top: 0, behavior: motionOK() ? 'smooth' : 'auto' });
 }
 
 let toastTimer;
@@ -589,7 +708,7 @@ function toast(text, action, fn) {
 
 const hqUrl = () => location.origin + location.pathname;
 
-function applyCanvas(clean) {
+function applyCanvas(clean, { quiet = false } = {}) {
   const wasSample = store.sample;
   if (wasSample) {
     const keep = store.settings;
@@ -601,8 +720,9 @@ function applyCanvas(clean) {
   const keys = new Set(canvasItems(clean).map((i) => i.key));
   for (const k of Object.keys(store.done)) if (!keys.has(k)) delete store.done[k];
   ui.syncError = '';
-  save();
-  render();
+  ui.loggedOut = false;
+  update();
+  if (quiet && !wasSample) return;
   const open = canvasItems(clean, { hidden: store.settings.hidden }).filter(isOpen).length;
   toast(`Synced ${plural(clean.courses.length, 'course')} and ${plural(open, 'open item')} from Canvas${wasSample ? '. Sample data cleared' : ''}`);
 }
@@ -619,6 +739,41 @@ async function ingestHash() {
   } catch (e) {
     toast(`Couldn’t read that sync: ${e.message}`);
   }
+}
+
+async function syncWithExtension({ quiet = false } = {}) {
+  const origin = canvasOrigin();
+  if (!origin) { if (!quiet) openConnect(); return; }
+  if (ui.syncing) return;
+  ui.syncing = true;
+  ui.syncError = '';
+  $('#sync-btn').classList.add('spin');
+  render();
+  try {
+    const res = await ext.sync(origin);
+    if (!res.ok) throw Object.assign(new Error(res.error || 'The extension couldn’t sync.'), { status: res.status });
+    const clean = cleanCanvas(res.data);
+    if (!clean) throw new Error('Canvas sent something HQ couldn’t read.');
+    ui.syncing = false;
+    applyCanvas(clean, { quiet });
+  } catch (e) {
+    ui.loggedOut = e.status === 401;
+    ui.syncError = ui.loggedOut ? 'You’re logged out of Canvas. Log in there, then come back: HQ syncs on its own.' : e.message;
+    if (!quiet) toast(ui.syncError);
+  } finally {
+    ui.syncing = false;
+    $('#sync-btn').classList.remove('spin');
+    if ($('#connect').open) fillConnect();
+    render();
+  }
+}
+
+/** Sync the best way available: the extension, then a token, else explain how to connect. */
+function syncNow(opts) {
+  if (ext.present && canvasOrigin()) return syncWithExtension(opts);
+  if (getToken() && store.settings.canvasUrl) return syncWithToken(opts);
+  openConnect();
+  return null;
 }
 
 async function syncWithToken({ quiet = false } = {}) {
@@ -650,15 +805,33 @@ async function syncWithToken({ quiet = false } = {}) {
 function fillConnect() {
   const s = store.settings;
   $('#bookmarklet').href = bookmarklet(hqUrl());
-  $('#canvas-url').value = s.canvasUrl;
   $('#proxy-url').value = s.proxyUrl;
   $('#canvas-token').value = '';
   $('#canvas-token').placeholder = getToken() ? 'A token is saved. Paste a new one to replace it.' : 'Paste a token';
   $('#forget-token').hidden = !getToken();
+  $('#canvas-url').value = canvasOrigin();
+  $('#ext-ready').hidden = !ext.present;
+  $('#ext-setup').hidden = ext.present;
+  $('#ext-update').hidden = !ext.present || !olderThan(ext.version, EXT_VERSION);
   const st = $('#connect-status');
-  if (ui.syncError) st.innerHTML = `<span class="status-bad">Last sync failed:</span> ${esc(ui.syncError)}`;
+  st.hidden = false;
+  if (ui.syncError) st.innerHTML = `<span class="status-bad">Last sync didn’t work:</span> ${esc(ui.syncError)}`;
   else if (store.canvas && !store.sample) st.innerHTML = `<span class="status-ok">Connected.</span> Last sync ${span(Date.now() - Date.parse(store.canvas.at))} ago from ${esc(store.canvas.origin.replace(/^https?:\/\//, ''))}.`;
-  else st.textContent = '';
+  else st.hidden = true;
+}
+
+async function downloadExtension() {
+  try {
+    const bytes = await extensionZip(new URL('./', location.href).href);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' }));
+    a.download = 'comet-hq-sync.zip';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast('Downloaded. Unzip it, then load the folder in chrome://extensions.');
+  } catch (e) {
+    toast(`Couldn’t build the download: ${e.message}`);
+  }
 }
 
 function openConnect() {
@@ -710,28 +883,38 @@ function openProblem() {
 
 // ---------------------------------------------------------------- actions
 
-function toggleDone(key) {
+const settling = new Set();
+
+/** Check something off: the circle fills and the title strikes through, then the row slips away. */
+function toggleDone(key, btn) {
+  if (!key || settling.has(key)) return;
+  const row = btn?.closest('.pr');
+  if (!row || btn.getAttribute('aria-pressed') === 'true' || !motionOK()) { applyDone(key); return; }
+  settling.add(key);
+  btn.setAttribute('aria-pressed', 'true');
+  row.classList.add('checking');
+  setTimeout(() => { settling.delete(key); applyDone(key); }, 460);
+}
+
+function applyDone(key) {
   if (key?.startsWith('t:')) {
     const t = store.tasks.find((x) => x.id === key.slice(2));
     if (!t) return;
     const was = t.done;
     t.done = was ? '' : new Date().toISOString();
-    save();
-    render();
-    if (!was) toast(`Done: ${t.title}`, 'Undo', () => { t.done = ''; save(); render(); });
+    update();
+    if (!was) toast(`Done: ${t.title}`, 'Undo', () => { t.done = ''; update(); });
     return;
   }
   const it = lastItems.get(key);
   if (it?.src === 'canvas') {
     if (store.done[key]) {
       delete store.done[key];
-      save();
-      render();
+      update();
     } else if (!it.done) {
       store.done[key] = new Date().toISOString();
-      save();
-      render();
-      toast(`Checked off in HQ: ${it.title}`, 'Undo', () => { delete store.done[key]; save(); render(); });
+      update();
+      toast(`Checked off in HQ: ${it.title}`, 'Undo', () => { delete store.done[key]; update(); });
     }
   }
 }
@@ -744,8 +927,7 @@ function advanceApp(id) {
   if (!next || next.id === 'closed') return;
   const moved = { ...setStage(a, next.id), next: '', nextDue: '', nextTime: '' };
   store.apps = store.apps.map((x) => (x.id === id ? moved : x));
-  save();
-  render();
+  update();
   toast(`${a.company} → ${next.label}. Add the next date?`, 'Edit', () => openApp(id));
 }
 
@@ -757,8 +939,7 @@ function loadSample() {
   store.settings.name = keep.name;
   store.settings.canvasUrl = keep.canvasUrl;
   store.settings.proxyUrl = keep.proxyUrl;
-  save();
-  render();
+  update();
   toast('Sample data loaded. Clear it any time from the banner.');
 }
 
@@ -766,8 +947,7 @@ function clearSample() {
   const keep = store.settings;
   store = emptyStore();
   store.settings = { ...defaultSettings(), name: keep.name, canvasUrl: keep.canvasUrl, proxyUrl: keep.proxyUrl };
-  save();
-  render();
+  update();
 }
 
 function exportData() {
@@ -785,8 +965,7 @@ async function importData(file) {
     if (!data || typeof data !== 'object' || (data.app && data.app !== 'comet-hq')) throw new Error('not a Comet HQ backup');
     if (!confirm('Replace everything in HQ on this device with this backup?')) return;
     store = cleanStore(data);
-    save();
-    render();
+    update();
     toast('Backup imported.');
   } catch (e) {
     toast(`Couldn’t import: ${e.message}`);
@@ -819,7 +998,7 @@ function bindEvents() {
     const key = el.closest('[data-key]')?.dataset.key;
     const id = el.dataset.id;
     switch (el.dataset.act) {
-      case 'done': toggleDone(key); break;
+      case 'done': toggleDone(key, el); break;
       case 'edit-task': openTask(lastItems.get(key)?.taskId || key?.slice(2)); break;
       case 'open-app': if (id) openApp(id); else setTab('intern'); break;
       case 'new-app': openApp(null); break;
@@ -833,21 +1012,22 @@ function bindEvents() {
         if (h.has(id)) h.delete(id); else h.add(id);
         store.settings.hidden = [...h];
         if (ui.course === id) ui.course = 'all';
-        save(); render();
+        update();
         break;
       }
-      case 'sync': if (getToken()) syncWithToken(); else openConnect(); break;
+      case 'sync': syncNow(); break;
+      case 'download-ext': downloadExtension(); break;
       case 'load-sample': loadSample(); break;
       case 'practice': {
         const v = Number(el.dataset.v);
         const pday = practiceDay();
         store.dsa = practice(store.dsa, el.dataset.slug, v, pday);
-        save(); render();
+        update();
         const s = store.dsa.problems[el.dataset.slug];
         toast(v ? `Next review ${dayLabel(s.due)}` : 'Logged the attempt. It’ll be back tomorrow.');
         break;
       }
-      case 'undo-practice': store.dsa = undo(store.dsa, el.dataset.slug, practiceDay()); save(); render(); break;
+      case 'undo-practice': store.dsa = undo(store.dsa, el.dataset.slug, practiceDay()); update(); break;
       case 'new-prob': openProblem(); break;
       default: break;
     }
@@ -859,9 +1039,9 @@ function bindEvents() {
     const f = e.target;
     const t = cleanTask({ id: newId(), title: f.elements.title.value, cat: f.cat.value, pri: Number(f.pri.value), due: f.due.value, created: new Date().toISOString() });
     if (!t) { f.elements.title.focus(); return; }
+    f.elements.title.value = '';
     store.tasks.push(t);
-    save();
-    render();
+    update();
     $('#new-task')?.focus();
   });
 
@@ -873,8 +1053,7 @@ function bindEvents() {
       const n = (v, hi) => Math.min(hi, Math.max(0, Math.round(Number(v) || 0)));
       store.settings = { ...s, interviewLabel: form.interviewLabel.value.trim().slice(0, 80), interviewDate: form.interviewDate.value,
         dailyNew: n(form.dailyNew.value, 10), dailyReview: n(form.dailyReview.value, 20) };
-      save();
-      render();
+      update();
     }
   });
 
@@ -895,8 +1074,7 @@ function bindEvents() {
     const clean = cleanTask({ ...t, title: f.elements.title.value, cat: f.cat.value, pri: Number(f.pri.value), due: f.due.value, time: f.time.value, notes: f.notes.value });
     if (!clean) { e.preventDefault(); return; }
     Object.assign(t, clean);
-    save();
-    render();
+    update();
   });
   $('#task-delete').addEventListener('click', () => {
     const f = $('#task-form');
@@ -904,9 +1082,8 @@ function bindEvents() {
     if (i < 0) return;
     const [gone] = store.tasks.splice(i, 1);
     $('#task-dlg').close();
-    save();
-    render();
-    toast(`Deleted: ${gone.title}`, 'Undo', () => { store.tasks.splice(i, 0, gone); save(); render(); });
+    update();
+    toast(`Deleted: ${gone.title}`, 'Undo', () => { store.tasks.splice(i, 0, gone); update(); });
   });
 
   // Application dialog
@@ -925,8 +1102,7 @@ function bindEvents() {
     const clean = cleanApp(a);
     if (!clean) { e.preventDefault(); return; }
     store.apps = old ? store.apps.map((x) => (x.id === clean.id ? clean : x)) : [...store.apps, clean];
-    save();
-    render();
+    update();
   });
   $('#app-delete').addEventListener('click', () => {
     const id = $('#app-form').dataset.id;
@@ -934,9 +1110,8 @@ function bindEvents() {
     if (i < 0) return;
     const [gone] = store.apps.splice(i, 1);
     $('#app-dlg').close();
-    save();
-    render();
-    toast(`Deleted ${gone.company}`, 'Undo', () => { store.apps.splice(i, 0, gone); save(); render(); });
+    update();
+    toast(`Deleted ${gone.company}`, 'Undo', () => { store.apps.splice(i, 0, gone); update(); });
   });
 
   // Custom problem dialog
@@ -955,8 +1130,7 @@ function bindEvents() {
     if (allProblems(store.dsa.custom).some((p) => p.slug === slug)) { e.preventDefault(); toast('That problem is already in your list.'); return; }
     store.dsa.custom.push({ slug, title, diff: f.diff.value, pattern: f.pattern.value, url });
     ui.open.add(f.pattern.value);
-    save();
-    render();
+    update();
     toast(`Added ${title} to ${PATTERN_NAME[f.pattern.value]}.`);
   });
 
@@ -973,6 +1147,22 @@ function bindEvents() {
       toast('Couldn’t copy here. Long-press the Sync button and copy its link instead.');
     }
   });
+  $('#address-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const url = $('#canvas-url').value.trim().replace(/\/+$/, '');
+    if (!/^https:\/\/[^\s/]+$/.test(url) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(url)) {
+      toast('Paste the address from Canvas’s address bar, like https://elearning.utdallas.edu');
+      return;
+    }
+    store.settings.canvasUrl = url;
+    ui.syncError = '';
+    save();
+    if (ext.present) { $('#connect').close(); syncWithExtension(); } else { toast('Saved.'); fillConnect(); render(); }
+  });
+  $('#copy-ext-url').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText('chrome://extensions'); toast('Copied. Paste it into a new tab’s address bar.'); } catch { toast('Type chrome://extensions into a new tab.'); }
+  });
+  window.addEventListener('resize', placeGlider);
   $('#token-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const url = $('#canvas-url').value.trim().replace(/\/+$/, '');
@@ -992,7 +1182,7 @@ function bindEvents() {
   $('#forget-token').addEventListener('click', () => { setToken(''); ui.syncError = ''; fillConnect(); render(); toast('Token removed from this browser.'); });
 
   // Top bar
-  $('#sync-btn').addEventListener('click', () => { if (getToken()) syncWithToken(); else openConnect(); });
+  $('#sync-btn').addEventListener('click', () => syncNow());
   $('#theme-toggle').addEventListener('click', () => {
     const now = document.documentElement.dataset.theme || 'auto';
     const next = THEMES[(THEMES.indexOf(now) + 1) % THEMES.length];
@@ -1005,8 +1195,7 @@ function bindEvents() {
     const n = prompt('Your name for the greeting', store.settings.name || store.canvas?.user || '');
     if (n === null) return;
     store.settings.name = n.trim().slice(0, 60);
-    save();
-    render();
+    update();
   });
   $('#sample-btn').addEventListener('click', () => { closeMenu(); loadSample(); });
   $('#clear-sample').addEventListener('click', clearSample);
@@ -1043,10 +1232,15 @@ function bindEvents() {
   });
 }
 
+/** Every time HQ opens (or you come back to it), refresh from Canvas if a helper is set up. */
 function maybeAutoSync() {
-  if (!getToken() || !store.settings.canvasUrl || ui.syncing) return;
-  if (store.canvas && !store.sample && Date.now() - Date.parse(store.canvas.at) < AUTO_SYNC_MS) return;
-  syncWithToken({ quiet: true });
+  if (ui.syncing || !canvasOrigin()) return;
+  const age = store.canvas && !store.sample ? Date.now() - Date.parse(store.canvas.at) : Infinity;
+  if (ext.present) {
+    if (age > EXT_SYNC_MS || ui.syncError) syncWithExtension({ quiet: true });
+  } else if (getToken() && store.settings.canvasUrl && age > AUTO_SYNC_MS) {
+    syncWithToken({ quiet: true });
+  }
 }
 
 function init() {
@@ -1054,7 +1248,13 @@ function init() {
   try { const t = localStorage.getItem(TAB_KEY); if (TABS.includes(t)) tab = t; } catch { /* fine */ }
   applyTheme(document.documentElement.dataset.theme || 'auto');
   bindEvents();
-  render();
+  render({ enter: true });
+  requestAnimationFrame(() => requestAnimationFrame(() => $('.tabs').classList.add('ready')));
+  ext = connectExtension(() => {
+    if ($('#connect').open) fillConnect();
+    render();
+    maybeAutoSync();
+  });
   if (location.hash.startsWith('#canvas=')) { tab = 'today'; ingestHash(); } else maybeAutoSync();
 }
 

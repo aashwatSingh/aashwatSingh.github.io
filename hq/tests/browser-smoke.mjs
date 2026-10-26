@@ -8,13 +8,17 @@
 //   2. syncs again into the already-open HQ tab (the hashchange path) and sees a submission;
 //   3. tries token mode without a proxy (blocked by CORS, as on the real Canvas) and with one;
 //   4. adds, completes and undoes a task, adds and advances an application, marks a DSA problem;
-//   5. walks every tab on a phone in dark mode and a desktop, with no console errors or sideways scroll.
+//   5. walks every tab on a phone in dark mode and a desktop, with no console errors or sideways scroll;
+//   6. downloads the Comet HQ Sync extension from HQ, loads it, connects once, then checks that simply
+//      reopening HQ later refreshes it from Canvas with no clicks, and that a logged-out Canvas is explained.
 // Set SHOTS=<dir> to save screenshots, or PLAYWRIGHT_MODULE to use a Playwright installed elsewhere.
 
 import { createRequire } from 'node:module';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import worker from '../proxy/worker.js';
 
@@ -130,7 +134,11 @@ const watch = (page, tag) => {
     errors.push(`${tag}: ${m.text()}`);
   });
 };
-const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: true }); };
+const shot = async (page, name) => {
+  if (!SHOTS) return;
+  await page.waitForTimeout(1500); // let arrivals and transitions settle
+  await page.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: true });
+};
 const titles = (page, sel = '#view-today .plist:first-of-type .pr-title') => page.$$eval(sel, (els) => els.map((e) => e.textContent.trim()));
 
 try {
@@ -184,6 +192,7 @@ try {
   await hq.click('#sync-btn');
   await hq.waitForSelector('#connect[open]');
   await hq.fill('#canvas-url', CANVAS);
+  await hq.click('.more-ways > summary');
   await hq.fill('#proxy-url', '');
   await hq.fill('#canvas-token', 'test-token');
   expectBlocked = true;
@@ -196,10 +205,13 @@ try {
   await hq.click('.menu > summary');
   await hq.click('.menu-panel [data-open="connect"]');
   await hq.waitForSelector('#connect[open]');
+  if (!(await hq.$eval('.more-ways', (d) => d.open))) await hq.click('.more-ways > summary');
   await hq.fill('#proxy-url', PROXY);
   await hq.click('#token-form button[type="submit"]');
   await hq.waitForFunction(() => /Synced 1 course/.test(document.querySelector('#toast-text').textContent));
-  check((await titles(hq)).includes('Homework 6: AVL Trees'), 'token mode syncs through the proxy Worker (with pagination)');
+  // The list redraws inside a view transition, a frame after the toast.
+  await hq.waitForSelector('#view-today .pr-title:has-text("Homework 6: AVL Trees")');
+  ok('token mode syncs through the proxy Worker (with pagination)');
   check(await hq.evaluate(() => !JSON.stringify(JSON.parse(localStorage.getItem('hq:v1'))).includes('test-token')), 'the token is not in the saved store');
 
   // 4. Tasks, applications, DSA.
@@ -212,10 +224,12 @@ try {
   await hq.waitForSelector('#toast.show #toast-action:has-text("Undo")');
   check(await hq.$eval('#view-today .panel:has(#tasks-h) .pr:has-text("Ask Prof. Lee")', (el) => el.classList.contains('is-done')), 'checking a task marks it done');
   await hq.click('#toast-action');
-  check(!(await hq.$eval('#view-today .panel:has(#tasks-h) .pr:has-text("Ask Prof. Lee")', (el) => el.classList.contains('is-done'))), 'undo brings it back');
+  await hq.waitForSelector('#view-today .panel:has(#tasks-h) .pr:not(.is-done):has-text("Ask Prof. Lee")');
+  ok('undo brings it back');
 
   await hq.click('#view-today .pr:has-text("Homework 5") .check');
-  check(!(await titles(hq)).includes('Homework 5: Heaps'), 'Canvas items can be checked off in HQ');
+  await hq.waitForFunction(() => ![...document.querySelectorAll('#view-today .pr-title')].some((e) => e.textContent.includes('Homework 5')));
+  ok('Canvas items can be checked off in HQ (the row animates out)');
 
   await hq.click('.tab[data-tab="intern"]');
   await hq.click('#view-intern [data-act="new-app"] >> nth=0');
@@ -273,6 +287,68 @@ try {
     ok(`${name}: sample data clears`);
     await ctx.close();
   }
+
+  // 6. The extension: install once, then HQ syncs by itself whenever it opens.
+  const dl = await browser.newContext({ acceptDownloads: true });
+  const dlPage = await dl.newPage();
+  watch(dlPage, 'download');
+  await dlPage.goto(HQ);
+  await dlPage.click('#view-today [data-open="connect"]');
+  const [zipDl] = await Promise.all([dlPage.waitForEvent('download'), dlPage.click('#ext-setup [data-act="download-ext"]')]);
+  check(zipDl.suggestedFilename() === 'comet-hq-sync.zip', 'HQ offers the extension as one download');
+  const extRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hq-ext-'));
+  execFileSync('python3', ['-I', '-m', 'zipfile', '-e', await zipDl.path(), extRoot]);
+  await dl.close();
+  const extDir = path.join(extRoot, 'comet-hq-sync');
+  const manifest = JSON.parse(fs.readFileSync(path.join(extDir, 'manifest.json'), 'utf8'));
+  // The shipped manifest only matches the real site; let this copy also run on the local test servers.
+  manifest.content_scripts[0].matches.push('http://127.0.0.1/hq/*');
+  manifest.host_permissions.push('http://127.0.0.1/*');
+  fs.writeFileSync(path.join(extDir, 'manifest.json'), JSON.stringify(manifest));
+
+  submittedHw6 = false;
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'hq-profile-'));
+  const withExt = await chromium.launchPersistentContext(profile, {
+    channel: 'chromium', headless: true, viewport: { width: 1280, height: 900 },
+    args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
+  });
+  await withExt.addCookies([{ name: 'canvas_session', value: 'ok', url: CANVAS }]);
+  const ep = withExt.pages()[0] || await withExt.newPage();
+  watch(ep, 'extension');
+  await ep.goto(HQ);
+  await ep.waitForSelector('#view-today .panel:has-text("extension is installed")');
+  ok('HQ notices the extension');
+  await ep.click('#view-today [data-open="connect"]');
+  check(await ep.isVisible('#ext-ready') && !(await ep.isVisible('#ext-setup')), 'the Connect dialog shows it as installed');
+  await ep.fill('#canvas-url', CANVAS);
+  await ep.click('#address-form button[type="submit"]');
+  await ep.waitForSelector('#view-today .pr-title:has-text("Exam 2")');
+  check((await titles(ep)).includes('Homework 6: AVL Trees'), 'the first sync goes through the extension with the Canvas login (no token)');
+  check(await ep.isVisible('#view-today .pill:has-text("Up to date")'), 'the Canvas card says it is up to date');
+
+  // Later: Homework 6 gets submitted on Canvas. Just reopening HQ should pick that up.
+  submittedHw6 = true;
+  await ep.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem('hq:v1'));
+    s.canvas.at = new Date(Date.now() - 3 * 36e5).toISOString();
+    localStorage.setItem('hq:v1', JSON.stringify(s));
+  });
+  await ep.reload();
+  await ep.waitForFunction(() => ![...document.querySelectorAll('#view-today .pr-title')].some((e) => e.textContent.includes('Homework 6')), null, { timeout: 15000 });
+  check(await ep.isVisible('#view-today .pill:has-text("Up to date")'), 'reopening HQ re-syncs by itself, no clicks');
+  await shot(ep, 'extension-auto-synced');
+
+  // Logged out of Canvas: HQ says so and links there instead of failing quietly.
+  await withExt.clearCookies();
+  await ep.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem('hq:v1'));
+    s.canvas.at = new Date(Date.now() - 3 * 36e5).toISOString();
+    localStorage.setItem('hq:v1', JSON.stringify(s));
+  });
+  await ep.reload();
+  await ep.waitForSelector('#view-today .pill:has-text("Logged out of Canvas")', { timeout: 15000 });
+  check(await ep.getAttribute('#view-today a.btn:has-text("Open Canvas")', 'href') === CANVAS, 'a logged-out Canvas is explained, with a link to log in');
+  await withExt.close();
 
   check(errors.length === 0, `no console errors${errors.length ? `:\n${errors.join('\n')}` : ''}`);
 } finally {
