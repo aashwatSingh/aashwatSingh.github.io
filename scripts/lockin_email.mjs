@@ -1,21 +1,15 @@
-// Writes today's Lock In email as JSON ({ subject, text }) for scripts/send_email.py.
-// Run by .github/workflows/lockin-email.yml. The messages come from lockin/truths.js, so
-// anything you add there also reaches your inbox.
+// Writes today's Lock In email as JSON ({ subject, text }). The Lock In scheduled tasks run
+// it at 7:43 am and 10:13 pm Central and send the result through Gmail (see the README);
+// .github/workflows/lockin-email.yml can also send one by hand through scripts/send_email.py.
+// The messages come from lockin/truths.js, so anything you add there also reaches your inbox.
 //
-//   node scripts/lockin_email.mjs                      morning email for right now
+//   node scripts/lockin_email.mjs                      morning email for today (Central time)
 //   node scripts/lockin_email.mjs night 2026-10-23     a given email and date
-//   SCHEDULE='43 12 * * *' node scripts/lockin_email.mjs
-//
-// With SCHEDULE (the cron that started the workflow) it prints nothing if that cron isn't
-// today's send time. GitHub schedules in UTC, so each email is scheduled at both of
-// Central time's UTC offsets and only the one that matches the season sends.
 import { pathToFileURL } from 'node:url';
 import { TRUTHS, SOCIAL_LADDER } from '../lockin/truths.js';
 
 export const SITE = 'https://aashwatsingh.github.io/lockin/';
 export const TIME_ZONE = 'America/Chicago';
-/** Local hour each email goes out (the workflow's crons, read in Central time). */
-export const SLOT_HOURS = { morning: 7, night: 22 };
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const byTag = (tag) => TRUTHS.filter((t) => t.tags.includes(tag)).map((t) => t.text);
@@ -87,20 +81,6 @@ export function centralTime(date) {
   return { dateKey: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) };
 }
 
-/**
- * Which email a scheduled run should send, from its cron ("M H * * *", in UTC) and the
- * time it actually started (runs can start late). Returns { slot, dateKey } or null.
- */
-export function slotForSchedule(cron, now) {
-  const [minute, hour] = String(cron).trim().split(/\s+/).map(Number);
-  if (!Number.isInteger(minute) || !Number.isInteger(hour)) throw new Error(`Unrecognised schedule: ${cron}`);
-  let due = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hour, minute);
-  if (due > now.getTime()) due -= 864e5; // a run delayed past midnight UTC belongs to yesterday
-  const local = centralTime(new Date(due));
-  const slot = Object.keys(SLOT_HOURS).find((s) => SLOT_HOURS[s] === local.hour);
-  return slot ? { slot, dateKey: local.dateKey } : null;
-}
-
 const dayNumber = (dateKey) => {
   const [y, m, d] = dateKey.split('-').map(Number);
   return Date.UTC(y, m - 1, d) / 864e5;
@@ -147,18 +127,8 @@ export function composeEmail(slot, dateKey) {
 }
 
 function main() {
-  const now = new Date();
-  const schedule = process.env.SCHEDULE?.trim();
-  let slot = process.argv[2] || process.env.SLOT || 'morning';
-  let dateKey = process.argv[3] || centralTime(now).dateKey;
-  if (schedule) {
-    const due = slotForSchedule(schedule, now);
-    if (!due) {
-      console.error(`"${schedule}" isn't a send time in Central time today; the other schedule sends it.`);
-      return;
-    }
-    ({ slot, dateKey } = due);
-  }
+  const slot = process.argv[2] || process.env.SLOT || 'morning';
+  const dateKey = process.argv[3] || centralTime(new Date()).dateKey;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) throw new Error(`Bad date: ${dateKey} (use YYYY-MM-DD)`);
   process.stdout.write(`${JSON.stringify(composeEmail(slot, dateKey))}\n`);
 }
