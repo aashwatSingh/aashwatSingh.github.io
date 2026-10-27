@@ -1,14 +1,10 @@
 name: Lock In email
 
+# A by-hand backup sender. The daily emails come from the Lock In scheduled tasks in Claude
+# (see the README), because GitHub started this workflow's own schedule 3.5 to 6 hours late.
+# Sending from here needs the LOCKIN_GMAIL_ADDRESS and LOCKIN_GMAIL_APP_PASSWORD repository
+# secrets.
 on:
-  schedule:
-    # 7:43 am and 10:13 pm Central, off the busy top of the hour. GitHub schedules in UTC,
-    # so each time is listed for both CDT and CST; scripts/lockin_email.mjs sends from
-    # whichever one matches the season and skips the other.
-    - cron: '43 12 * * *'
-    - cron: '43 13 * * *'
-    - cron: '13 3 * * *'
-    - cron: '13 4 * * *'
   workflow_dispatch:
     inputs:
       slot:
@@ -39,7 +35,6 @@ jobs:
 
       - name: Write the email
         env:
-          SCHEDULE: ${{ github.event.schedule }}
           SLOT: ${{ inputs.slot }}
         run: node scripts/lockin_email.mjs > "$RUNNER_TEMP/email.json"
 
@@ -48,9 +43,4 @@ jobs:
           LOCKIN_GMAIL_ADDRESS: ${{ secrets.LOCKIN_GMAIL_ADDRESS }}
           LOCKIN_GMAIL_APP_PASSWORD: ${{ secrets.LOCKIN_GMAIL_APP_PASSWORD }}
           LOCKIN_EMAIL_TO: ${{ secrets.LOCKIN_EMAIL_TO }}
-        run: |
-          if [ ! -s "$RUNNER_TEMP/email.json" ]; then
-            echo "Not a send time in Central time today; the other schedule sends it."
-            exit 0
-          fi
-          python3 scripts/send_email.py "$RUNNER_TEMP/email.json"
+        run: python3 scripts/send_email.py "$RUNNER_TEMP/email.json"
