@@ -1,95 +1,52 @@
 # aashwatsingh.github.io
 
-## Comet HQ (`/hq/`)
+Source for [aashwatsingh.github.io](https://aashwatsingh.github.io/), the portfolio of **Aashwat Singh**:
+Computer Science at UT Dallas (B.S., expected May 2028), software engineering and applied AI/ML, looking for
+Summer 2027 internships. [LinkedIn](https://www.linkedin.com/in/aashwat-singh/) ·
+[GitHub](https://github.com/aashwatSingh) · [aashwat.singh@utdallas.edu](mailto:aashwat.singh@utdallas.edu)
 
-A dashboard for school and the internship hunt. It syncs your UTD Canvas work (assignments, quizzes, exams,
-grades and assignment-group weights) and ranks it together with your own to-dos, internship next steps and
-today's DSA practice, so the top of the list is what to do next. An exam worth 20% of the grade two days out
-outranks a 2% homework due tomorrow, and each row says why.
+The portfolio is one static page, [`index.html`](index.html): plain HTML and CSS, no JavaScript, no build step
+and no trackers. Each project links to its code and to the evidence behind its claims (an evaluator, a schema,
+a status log), and the wording matches the resume.
 
-- **Canvas:** install the small **Comet HQ Sync** extension once (⋯ → Connect Canvas → Download the extension)
-  and HQ re-syncs from Canvas by itself every time you open it, using your existing login, with no token.
-  Without it, a **Sync to HQ** bookmark or a token mode through a small Cloudflare Worker (`hq/proxy/worker.js`)
-  also work.
-- **Tabs:** Today (priorities, tasks, the week ahead, interview countdown, Lock In's One Thing), School
-  (grades and coursework by due date), Internships (pipeline board and stats), DSA (150 problems by pattern
-  with spaced-repetition reviews, streak, heatmap and readiness).
-- **Privacy:** data stays in your browser (`localStorage`, key `hq:v1`); the Canvas token is stored separately
-  and never exported. Export and import from the **⋯** menu.
+## Editing the portfolio
 
-Setup, the scoring, the motion and the code: `hq/README.md`. Run its tests with `node --test hq/tests/*.test.mjs`, and the
-browser test (Playwright, mock Canvas) with `node hq/tests/browser-smoke.mjs`.
+- **Preview:** run `python3 -m http.server 8000` in the repo root and open <http://localhost:8000>.
+- **Keep it in step with the resume:** project names, one-line descriptions, dates and metrics should read the
+  same here, on the resume, on LinkedIn and in the GitHub profile README.
+- **Resume link:** save the resume as `resume.pdf` in the repo root, without the phone number (this repo is
+  public), and add `<li><a href="resume.pdf">Resume (PDF)</a></li>` to the contact list in `index.html`.
+- **Share preview:** `og-image.png` is the card LinkedIn and Slack show for the link. After changing the page
+  header, edit the text in `scripts/build_og_image.mjs` and run `node scripts/build_og_image.mjs` (needs
+  Playwright).
 
-## Lock In (`/lockin/`)
+## Also hosted here
 
-A daily standard you open every morning and close every night. It's built around one idea: watching and
-planning are not the work, and one bad day shouldn't turn into a lost week.
+These tools are for my own use. They are not linked from the portfolio, and they ask search engines not to
+index them (`noindex`). [`/tools/`](https://aashwatsingh.github.io/tools/) links to all four.
 
-- **Today:** a "Day N" counter, one message picked for your weak spots (the same one all day), your One Thing
-  with a 2-minute first step, and your daily standard. Each commitment has a **full** and a **minimum**
-  version; hit at least the minimum on all of them and the day is **kept**. Deep work is logged by the focus
-  timer and internship reps by a counter. Kept days unlock "Your lesson" on Hamza Lessons.
-- **About to slip?** opens a 20-second breathing pause, your *why* and your note from future you, then
-  three swaps (10 minutes on your first step, one application, a walk without your phone).
-- **Never miss twice:** one slip between kept days doesn't break the streak; two in a row do. Progress shows
-  the streak, comebacks, a heatmap, this week's totals (including Hamza lessons watched vs days kept) and a
-  proof file of every win.
-- **Night review** (opens at 6 pm): one win, one lesson, tomorrow's One Thing. A day runs until 4 am.
-- **Privacy:** your why, weak spots and history live only in your browser (`localStorage`, key `lockin:v1`).
-  The code here stays generic. Use the **⋯** menu to export and import between devices.
-- **Messages** live in `lockin/truths.js`; add your own. The maths lives in `lockin/logic.js`; run its tests
-  with `node --test lockin/logic.test.mjs`.
-- Add it to your phone's home screen (Share → Add to Home Screen); it has its own icon and opens full screen.
-- **Daily emails:** two Claude scheduled tasks send them through your Gmail connector: **Lock In morning email**
-  at 7:43 am Central (the weekday's focus, a message from `truths.js` and one challenge) and **Lock In night
-  email** at 10:13 pm (the night-review nudge). Each run starts a fresh session that clones this repo, runs
-  `node scripts/lockin_email.mjs morning` (or `night`) and sends exactly what it prints. The schedules are set in
-  Central time, so daylight saving needs nothing, and each run checks Sent first so a retry never mails twice.
-  Gmail has to be turned on in each task's connectors. They replaced a GitHub Actions schedule that GitHub
-  started 3.5 to 6 hours late. **Actions → Lock In email → Run workflow** still sends one by hand through
-  `scripts/send_email.py`, which needs two repository secrets (**Settings → Secrets and variables → Actions**):
-  `LOCKIN_GMAIL_ADDRESS`, and `LOCKIN_GMAIL_APP_PASSWORD`, a
-  [Google app password](https://myaccount.google.com/apppasswords) rather than your normal password (it mails
-  that same address unless a `LOCKIN_EMAIL_TO` secret says otherwise). Run the tests with
-  `node --test scripts/lockin_email.test.mjs` and `python -m unittest scripts/test_send_email.py`.
+| Path | What it is | Docs |
+| --- | --- | --- |
+| [`/hq/`](hq/) | Comet HQ: school, the internship hunt and DSA practice in one ranked list, synced from Canvas | [`hq/README.md`](hq/README.md) |
+| [`/lockin/`](lockin/) | Lock In: a daily standard, with morning and night emails | [`lockin/README.md`](lockin/README.md) |
+| [`/hamza/`](hamza/) | Hamza Lessons: a tracker for the @Hamza97 YouTube channel's lessons, with a nightly video sync | [`hamza/README.md`](hamza/README.md) |
+| [`/walkthru/`](walkthru/) | Walkthru: a move-in and move-out inspection prototype | [`walkthru/README.md`](walkthru/README.md) |
 
-When Lock In is set up and today isn't kept yet, Hamza Lessons shows a banner: lessons are the reward, not the work.
+Their paths are fixed on purpose: the Comet HQ extension only runs on `https://aashwatsingh.github.io/hq/*`,
+the Lock In emails link to `/lockin/`, and home-screen installs open these paths. Moving a tool means
+updating those too.
 
-## Hamza Lessons (`/hamza/`)
+## Tests
 
-A tracker for every lesson on the [@Hamza97](https://www.youtube.com/@Hamza97) YouTube channel.
-Every upload is a lesson: mark it watched, star it, rate it, set its topic, and write down your
-key takeaways and notes. The **Journal** tab collects every takeaway you've written, grouped by
-topic, and can copy them all out as Markdown.
+```sh
+node --test hq/tests/*.test.mjs lockin/logic.test.mjs hamza/insights.test.mjs walkthru/tests/*.test.mjs scripts/lockin_email.test.mjs
+python3 -m unittest scripts/test_send_email.py scripts/test_fetch_videos.py
+```
 
-- **Video list:** `hamza/data/videos.json`. The **Sync videos** GitHub Action
-  (`.github/workflows/sync-videos.yml`) refreshes it every night at 06:17 UTC by running
-  `scripts/fetch_videos.py`, which uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) to read the
-  channel's Videos, Shorts and Live tabs. No API key needed. To sync right away:
-  **Actions → Sync videos → Run workflow**.
-- **Your progress** is stored in your browser (`localStorage`). Use the **⋯** menu to export it
-  to a JSON file and import it on another device. An import merges entries and keeps the most
-  recently edited version of each lesson.
-- **Topics** are guessed from titles using the keyword rules in `hamza/topics.js`. Override any
-  video's topic from its lesson view.
-- **Upload dates** are approximate for older videos because YouTube's channel listings only
-  say things like "2 years ago". The order is still exact. Videos found by the nightly sync get
-  day-accurate dates.
+The browser smoke tests need Playwright: `node hq/tests/browser-smoke.mjs` and
+`node walkthru/tests/browser-smoke.mjs`.
 
-- **Insights tab:** streaks, a 26-week activity heatmap, per-topic progress, your rating spread and a
-  finish-date projection from your last 4 weeks of pace. The maths lives in `hamza/insights.js`; run
-  its tests with `node --test hamza/insights.test.mjs`. A standalone sample-data demo lives at
-  `/hamza/demo/`; rebuild it with `node scripts/build_demo.mjs` after changing `insights.js`.
+## AI assistance
 
-Run the sync tests locally with `python -m unittest scripts/test_fetch_videos.py`.
-
-## Walkthru (`/walkthru/`)
-
-A working prototype of Walkthru, the move-in and move-out inspection startup. Residents scan a QR code on the
-door and film each room in the phone's browser (no app, no login); every photo is SHA-256 fingerprinted and the
-record is sealed on submit. Staff review only what changed since the last record, and charges come from a rate
-sheet, split among roommates, with the Texas deposit deadline. A demo property with five planted changes is
-built in the browser so it can be tried without a real apartment. Data stays in the browser (IndexedDB).
-
-Details, the demo tour and limits: `walkthru/README.md`. Design: `walkthru/docs/ARCHITECTURE.md`. Run its tests
-with `node --test 'walkthru/tests/*.test.mjs'`.
+Much of the code here was written with Claude Code, an AI coding assistant. Commits it co-wrote say so in a
+`Co-Authored-By` trailer. The `Sync Hamza video list` commits come from the nightly GitHub Action.

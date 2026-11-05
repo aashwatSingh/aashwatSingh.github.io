@@ -1,7 +1,7 @@
 name: Lock In email
 
 # A by-hand backup sender. The daily emails come from the Lock In scheduled tasks in Claude
-# (see the README), because GitHub started this workflow's own schedule 3.5 to 6 hours late.
+# (see lockin/README.md), because GitHub started this workflow's own schedule 3.5 to 6 hours late.
 # Sending from here needs the LOCKIN_GMAIL_ADDRESS and LOCKIN_GMAIL_APP_PASSWORD repository
 # secrets.
 on:

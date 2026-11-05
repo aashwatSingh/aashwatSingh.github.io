@@ -1,5 +1,5 @@
 // Writes today's Lock In email as JSON ({ subject, text }). The Lock In scheduled tasks run
-// it at 7:43 am and 10:13 pm Central and send the result through Gmail (see the README);
+// it at 7:43 am and 10:13 pm Central and send the result through Gmail (see lockin/README.md);
 // .github/workflows/lockin-email.yml can also send one by hand through scripts/send_email.py.
 // The messages come from lockin/truths.js, so anything you add there also reaches your inbox.
 //
