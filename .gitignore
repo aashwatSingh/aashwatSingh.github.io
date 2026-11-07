@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+
+# Playwright MCP output (snapshots, screenshots)
+.playwright-mcp/
