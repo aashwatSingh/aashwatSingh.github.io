@@ -4,6 +4,9 @@
 Written 2026-11-07. Every file in this guide was run before it was published: 32 automated tests, a real-time
 streaming test and a browser end-to-end test. Section 13 lists exactly what was tested and what wasn't.
 
+**Want everything in one file?** [HANDOFF.md](HANDOFF.md) has the idea and pitch, every source file, the test
+tools and a short script that recreates the whole project.
+
 VoiceGuard listens to a risky call and checks three independent signals:
 
 - **Voice:** does the voice sound machine-made?
