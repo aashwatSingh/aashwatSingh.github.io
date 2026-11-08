@@ -2,9 +2,9 @@
 
 This one file holds everything done on VoiceGuard so far: the idea and pitch, how the system works, every
 source file, how to rebuild and test it, the decisions behind it, and what's left to do. A teammate can recreate
-the whole project from this file alone: Section 6 has a short script that writes all 40 files for you.
+the whole project from this file alone: Section 6 has a short script that writes all 41 files for you.
 
-Last updated 2026-11-07. Built for the T-Mobile hackathon challenge: keep customers more secure on the T-Mobile
+Last updated 2026-11-08 (after a code review; see Section 11). Built for the T-Mobile hackathon challenge: keep customers more secure on the T-Mobile
 network.
 
 ![The VoiceGuard demo phone screen during a simulated clone call](demo-ui.png)
@@ -47,7 +47,7 @@ calling the person back.
 
 | Part | State |
 |---|---|
-| Python server: audio pipeline, three signals, risk engine, WebSocket API, reports | Built. 37 automated tests pass. |
+| Python server: audio pipeline, three signals, risk engine, WebSocket API, reports | Built and hardened after a code review. 49 automated tests pass. |
 | Phone screen in the browser (React) | Built. Browser end-to-end test passes. |
 | Real AI models (voice detector, speech-to-text) | Code built and tested on stand-ins. **Not yet run with the real model files**, because downloads were blocked where this was built. That's the first job (Section 12). |
 | Demo clips (real voice + clone) | Not recorded yet (Section 8) |
@@ -300,6 +300,7 @@ One WebSocket per call, at `/ws/call`:
 | Server to phone | `risk` | `{"type":"risk","t":6.3,"level":"red","voice":0.95,"language":0.9,"network":0.6,"reasons":["Voice sounds synthetic (score 0.95)", "..."],"voice_flagged":true,"verified":false}` |
 | Server to phone | `transcript` | `{"type":"transcript","t":2.1,"text":"Grandma it's me..."}` |
 | Server to phone | `end` | `{"type":"end","transcript":"..."}`, after which the server closes the socket |
+| Server to phone | `error` | `{"type":"error","message":"Bad start message: ..."}` when the `start` message is invalid, after which the server closes the socket |
 
 There is also `GET /health` (returns `{"status":"ok"}`) and `POST /api/report` (saves a report to SQLite).
 
@@ -361,7 +362,7 @@ word.
 - **Disk:** the Python environment was 5.7 GB on Linux with the default PyTorch wheel, which includes GPU
   libraries. The CPU-only wheel (6.3) is much smaller.
 
-### 6.2 Recreate all 40 files
+### 6.2 Recreate all 41 files
 
 Save this file as `HANDOFF.md` in an empty folder. In that folder, run:
 
@@ -378,7 +379,7 @@ print(f"Wrote {len(files)} files into ./voiceguard")
 EOF
 ```
 
-It prints `Wrote 40 files into ./voiceguard`. It reads every file in Section 7, where each code block is labeled
+It prints `Wrote 41 files into ./voiceguard`. It reads every file in Section 7, where each code block is labeled
 with its path. On Windows, run it in Git Bash or WSL, or save the Python lines between `<<'EOF'` and `EOF` as
 `rebuild.py` and run `python rebuild.py`.
 
@@ -413,7 +414,7 @@ pip install -r requirements.txt
 python -m pytest -q
 ```
 
-**Expected:** `37 passed, 2 warnings`. The two warnings are a `FutureWarning` about `torch.jit.load` from inside
+**Expected:** `49 passed, 2 warnings`. The two warnings are a `FutureWarning` about `torch.jit.load` from inside
 silero-vad, and they're harmless.
 
 ### 6.4 Try the whole pipeline with stand-in models
@@ -486,6 +487,7 @@ red at 2.5s: This call looks like a scam.
 voice flagged at 6.8s: This voice may be AI-generated.
 safe word accepted: back to green
 call ended cleanly
+missing clip: error shown, UI ready again
 E2E PASSED
 ```
 
@@ -533,6 +535,8 @@ it only for the demo, with consenting teammates. Details are in the comments of 
 Every threshold lives in `backend/app/config.py`, and each can be changed with an environment variable named
 `VG_` plus the field name in capitals, for example `VG_VOICE_STRONG=0.9` or
 `VG_VOICE_MODEL_ID=garystafford/wav2vec2-deepfake-voice-detector`.
+Server settings live there too: `VG_DB_PATH` (where reports are saved), `VG_ALLOWED_ORIGINS` (the web pages
+allowed to open a call, as a JSON list) and `VG_LLM_TIMEOUT_S` (10 s by default).
 
 ---
 
@@ -564,7 +568,8 @@ voiceguard/
 │   │   ├── test_risk.py       12 tests: the decision table
 │   │   ├── test_audio.py      4 tests
 │   │   ├── test_ws.py         2 tests: whole calls through the WebSocket
-│   │   ├── test_llm.py        2 tests: request shape and parsing, fake API
+│   │   ├── test_llm.py        3 tests: request shape, parsing and timeout, fake API
+│   │   ├── test_robustness.py 11 tests: the code-review fixes
 │   │   ├── test_voice.py      3 tests: label lookup on a tiny local model
 │   │   ├── test_vad.py        2 tests: the real Silero model
 │   │   └── fake_server.py     the server with stand-in models
@@ -663,6 +668,14 @@ class Settings(BaseSettings):
     # Optional LLM classifier (Step 8): sends transcripts to an external API, so demo only
     llm_enabled: bool = False
     llm_model: str = "claude-opus-5-5"
+    llm_timeout_s: float = 10.0       # give up on a slow API call; the keyword rules still work
+
+    # Server
+    db_path: str = "voiceguard.db"    # where reports are saved
+    allowed_origins: list[str] = [    # web pages allowed to open /ws/call (as JSON in VG_ALLOWED_ORIGINS)
+        "http://localhost:5173", "http://127.0.0.1:5173",   # npm run dev
+        "http://localhost:4173", "http://127.0.0.1:4173",   # npm run preview
+    ]
 
 
 settings = Settings()
@@ -1121,6 +1134,7 @@ class CallSession:
         self.resample = Resampler(sr_in, s.sample_rate)
         self.audio = RingBuffer(capacity=int(30 * s.sample_rate))   # last 30 s at 16 kHz
         self._pending = np.zeros(0, dtype=np.float32)                # samples not yet in a VAD frame
+        self._odd_byte = b""                                         # half a sample left from the last message
         frames_per_window = int(s.voice_window_s * s.sample_rate / s.vad_frame)
         self.speech_flags: deque[bool] = deque(maxlen=frames_per_window)
         self.segmenter = UtteranceSegmenter(s.vad_frame, s.sample_rate, s.vad_threshold,
@@ -1137,7 +1151,11 @@ class CallSession:
 
     def feed(self, pcm16: bytes, last: bool = False) -> tuple[np.ndarray | None, list[np.ndarray]]:
         """Add audio. Returns (voice window to score or None, finished utterances to transcribe)."""
-        x = self.resample(pcm16_to_float32(pcm16), last=last)
+        # A message can end mid-sample (odd byte count); keep that byte for the next message.
+        data = self._odd_byte + pcm16
+        cut = len(data) - len(data) % 2
+        self._odd_byte = data[cut:]
+        x = self.resample(pcm16_to_float32(data[:cut]), last=last)
         self.audio.write(x)
         self._pending = np.concatenate([self._pending, x])
         f = self.s.vad_frame
@@ -1212,8 +1230,9 @@ It comes from speech recognition, so expect misheard words. Set a flag to true o
 class LLMClassifier:
     """Catches scam wording the keyword rules miss. Sends the transcript to the Claude API: demo only."""
 
-    def __init__(self, model: str):
-        self.client = anthropic.AsyncAnthropic()  # reads ANTHROPIC_API_KEY from the environment
+    def __init__(self, model: str, timeout_s: float = 10.0):
+        # Reads ANTHROPIC_API_KEY. The SDK's defaults (10-minute timeout, 2 retries) are far too long mid-call.
+        self.client = anthropic.AsyncAnthropic(timeout=timeout_s, max_retries=1)
         self.model = model
 
     async def classify(self, transcript: str) -> ScamFeatures | None:
@@ -1248,26 +1267,29 @@ class LLMClassifier:
 ```python
 import asyncio
 import json
+import logging
 import sqlite3
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Literal
+from typing import Annotated, Awaitable, Callable, Literal
 
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 
 from .config import Settings, settings
 from .language import ScamFeatures
 from .network import CallerInfo
 from .session import CallSession
 
+log = logging.getLogger("voiceguard")
+
 
 # ---- Messages (the WebSocket protocol) ----------------------------------------------------
 class StartMessage(BaseModel):          # client -> server, first message
     type: Literal["start"]
-    sample_rate: int                    # the browser's AudioContext.sampleRate, e.g. 48000
+    sample_rate: int = Field(ge=8_000, le=192_000)  # the browser's AudioContext.sampleRate, e.g. 48000
     caller: CallerInfo
 
 
@@ -1281,16 +1303,21 @@ class TranscriptEvent(BaseModel):       # server -> client
     text: str
 
 
+class ErrorEvent(BaseModel):            # server -> client, then the server closes the socket
+    type: Literal["error"] = "error"
+    message: str
+
+
 class EndEvent(BaseModel):              # server -> client, last message
     type: Literal["end"] = "end"
     transcript: str
 
 
-class Report(BaseModel):                # POST /api/report
-    number: str
+class Report(BaseModel):                # POST /api/report (no login, so sizes are capped)
+    number: str = Field(max_length=32)
     label: Literal["scam", "not_scam"]
     level: Literal["green", "yellow", "red"]
-    reasons: list[str]
+    reasons: list[Annotated[str, Field(max_length=200)]] = Field(max_length=20)
 
 
 # ---- Models -------------------------------------------------------------------------------
@@ -1312,7 +1339,7 @@ def load_detectors(s: Settings) -> Detectors:
     if s.llm_enabled:
         from .llm import LLMClassifier
 
-        classify = LLMClassifier(s.llm_model).classify
+        classify = LLMClassifier(s.llm_model, s.llm_timeout_s).classify
     return Detectors(voice.score, Transcriber(s.asr_model, s.asr_compute_type), SileroVAD, classify)
 
 
@@ -1331,7 +1358,7 @@ def create_app(make_detectors: Callable[[Settings], Detectors] = load_detectors,
 
     @app.post("/api/report")
     def report(r: Report):
-        with sqlite3.connect("voiceguard.db") as db:
+        with closing(sqlite3.connect(s.db_path)) as db, db:  # closing() closes it; `db` commits
             db.execute("CREATE TABLE IF NOT EXISTS reports (ts REAL, number TEXT, label TEXT, level TEXT, reasons TEXT)")
             db.execute("INSERT INTO reports VALUES (?, ?, ?, ?, ?)",
                        (time.time(), r.number, r.label, r.level, json.dumps(r.reasons)))
@@ -1339,25 +1366,47 @@ def create_app(make_detectors: Callable[[Settings], Detectors] = load_detectors,
 
     @app.websocket("/ws/call")
     async def call(ws: WebSocket):
+        # Browsers don't apply CORS to WebSockets, so any web page could connect here. Only allow our UI.
+        # (Scripts such as scripts/stream_file.py send no Origin header and are allowed.)
+        origin = ws.headers.get("origin")
+        if origin is not None and origin not in s.allowed_origins:
+            await ws.close(code=1008)
+            return
         await ws.accept()
         det: Detectors = ws.app.state.detectors
-        start = StartMessage.model_validate_json(await ws.receive_text())
-        session = CallSession(s, start.caller, start.sample_rate, det.new_vad())
         send_lock = asyncio.Lock()
-        utterances: asyncio.Queue[np.ndarray] = asyncio.Queue()
-        tasks: dict[str, asyncio.Task | None] = {"voice": None, "llm": None}
 
         async def send(event: BaseModel) -> None:
             async with send_lock:  # several tasks share one socket: keep messages whole and in order
                 await ws.send_text(event.model_dump_json())
 
-        async def score_voice(window: np.ndarray) -> None:
-            p_fake = await asyncio.to_thread(det.voice_score, window)  # CPU work off the event loop
-            await send(session.add_voice_score(p_fake))
+        try:
+            start = StartMessage.model_validate_json(await ws.receive_text())
+        except ValidationError as e:
+            await send(ErrorEvent(message=f"Bad start message: {e.errors()[0]['msg']}"))
+            await ws.close(code=1003)
+            return
+        session = CallSession(s, start.caller, start.sample_rate, det.new_vad())
+        utterances: asyncio.Queue[np.ndarray] = asyncio.Queue()
+        tasks: dict[str, asyncio.Task | None] = {"voice": None, "llm": None}
 
-        async def classify(text: str) -> None:
-            if (features := await det.classify(text)) is not None:
-                await send(session.add_llm_features(features))
+        async def score_voice(window: np.ndarray) -> None:
+            try:
+                p_fake = await asyncio.to_thread(det.voice_score, window)  # CPU work off the event loop
+                await send(session.add_voice_score(p_fake))
+            except Exception:
+                log.exception("Voice scoring failed; skipping this window")
+
+        async def classify() -> None:
+            try:
+                while True:
+                    seen = len(session.transcript)
+                    if (features := await det.classify(" ".join(session.transcript))) is not None:
+                        await send(session.add_llm_features(features))
+                    if len(session.transcript) == seen:  # nothing new arrived meanwhile: done
+                        return
+            except Exception:
+                log.exception("LLM classification failed; the keyword rules still apply")
 
         async def asr_worker() -> None:
             while True:
@@ -1368,7 +1417,9 @@ def create_app(make_detectors: Callable[[Settings], Detectors] = load_detectors,
                         await send(TranscriptEvent(t=session.t, text=text))
                         await send(session.add_transcript(text))
                         if det.classify and (tasks["llm"] is None or tasks["llm"].done()):
-                            tasks["llm"] = asyncio.create_task(classify(" ".join(session.transcript)))
+                            tasks["llm"] = asyncio.create_task(classify())
+                except Exception:  # one bad utterance must not stop transcription for the rest of the call
+                    log.exception("Transcription failed; skipping this utterance")
                 finally:
                     utterances.task_done()
 
@@ -1389,15 +1440,20 @@ def create_app(make_detectors: Callable[[Settings], Detectors] = load_detectors,
                         tasks["voice"] = asyncio.create_task(score_voice(window))
                 elif msg.get("text") is not None:
                     control = json.loads(msg["text"])
-                    if control["type"] == "verified":
+                    if control.get("type") == "verified":
                         await send(session.mark_verified())
-                    elif control["type"] == "stop":
+                    elif control.get("type") == "stop":
                         _, done = session.feed(b"", last=True)  # flush the resampler and last utterance
                         for u in done:
                             utterances.put_nowait(u)
-                        await asyncio.wait_for(utterances.join(), timeout=30)
-                        pending = [t for t in tasks.values() if t is not None]
-                        await asyncio.gather(*pending, return_exceptions=True)
+                        try:
+                            await asyncio.wait_for(utterances.join(), timeout=30)
+                        except TimeoutError:
+                            log.warning("Transcription still busy after 30 s; ending the call anyway")
+                        if tasks["llm"] is not None:
+                            tasks["llm"].cancel()  # never hold up the end of a call for the LLM
+                        if tasks["voice"] is not None:
+                            await asyncio.gather(tasks["voice"], return_exceptions=True)
                         await send(session.assess())
                         await send(EndEvent(transcript=" ".join(session.transcript)))
                         await ws.close()
@@ -1667,7 +1723,7 @@ def test_real_family_call_from_saved_contact_stays_green():
 </details>
 
 <details>
-<summary><code>backend/tests/test_llm.py</code>: 2 tests: the exact API request and the parsing, with a fake HTTP transport (no real call, no cost)</summary>
+<summary><code>backend/tests/test_llm.py</code>: 3 tests: the exact API request, the parsing and the short timeout, with a fake HTTP transport (no real call, no cost)</summary>
 
 <!-- file: backend/tests/test_llm.py -->
 ```python
@@ -1727,6 +1783,153 @@ def test_llm_flags_reach_the_risk_level():
             events.append(e)
     final = [e for e in events if e["type"] == "risk"][-1]
     assert final["level"] == "red" and "Caller wants payment by crypto" in final["reasons"]
+
+
+def test_llm_client_uses_a_short_timeout():
+    clf = LLMClassifier("claude-opus-5-5", timeout_s=10.0)
+    assert clf.client.timeout == 10.0 and clf.client.max_retries == 1
+```
+
+</details>
+
+<details>
+<summary><code>backend/tests/test_robustness.py</code>: 11 tests: a failure in one part (transcription, voice scoring, a slow LLM, an odd-sized message, a bad start message, another website) can't break the call</summary>
+
+<!-- file: backend/tests/test_robustness.py -->
+```python
+"""Regression tests for the code-review fixes: a bad moment in one part must not break the whole call."""
+import asyncio
+import json
+import time
+
+import pytest
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+
+from app.audio import EnergyVAD
+from app.config import Settings
+from app.main import Detectors, create_app
+from app.network import CallerInfo
+from app.session import CallSession
+from tests.test_ws import SR, fake_call_audio
+
+START = {"type": "start", "sample_rate": SR, "caller": {"number": "+15550100", "attestation": "C"}}
+
+
+def play_call(det: Detectors, chunk_bytes: int = SR // 10 * 2, seconds: float = 8.0) -> tuple[list[dict], float]:
+    """Run one call; return its events and how long 'stop' took to answer with 'end'."""
+    with TestClient(create_app(lambda s: det)) as client, client.websocket_connect("/ws/call") as ws:
+        ws.send_text(json.dumps(START))
+        audio = fake_call_audio(seconds)
+        for i in range(0, len(audio), chunk_bytes):
+            ws.send_bytes(audio[i:i + chunk_bytes])
+        t0 = time.time()
+        ws.send_text(json.dumps({"type": "stop"}))
+        events = []
+        while (e := ws.receive_json())["type"] != "end":
+            events.append(e)
+        return events + [e], time.time() - t0
+
+
+def test_one_failed_transcription_does_not_stop_the_rest():
+    calls = {"n": 0}
+
+    def flaky(utterance):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("decoder hiccup")
+        return "I need $2,000 right now, don't tell mom"
+
+    events, stop_s = play_call(Detectors(voice_score=lambda w: 0.1, transcribe=flaky, new_vad=EnergyVAD))
+    assert calls["n"] >= 3                                    # later sentences were still transcribed
+    assert any(e["type"] == "transcript" for e in events)
+    assert stop_s < 5                                         # and 'stop' didn't wait out the 30 s timeout
+
+
+def test_failed_voice_scoring_does_not_end_the_call():
+    def broken(window):
+        raise RuntimeError("model crashed")
+
+    events, _ = play_call(Detectors(voice_score=broken, transcribe=lambda u: "hello", new_vad=EnergyVAD))
+    assert events[-1]["type"] == "end"
+
+
+def test_slow_llm_does_not_hold_up_the_end_of_the_call():
+    async def slow_classify(text):
+        await asyncio.sleep(60)
+        return None
+
+    det = Detectors(voice_score=lambda w: 0.1, transcribe=lambda u: "Grandma it's me", new_vad=EnergyVAD,
+                    classify=slow_classify)
+    events, stop_s = play_call(det)
+    assert events[-1]["type"] == "end" and stop_s < 5
+
+
+def test_llm_runs_again_for_sentences_that_arrived_while_it_was_busy():
+    texts = iter(["Grandma it's me", "please help", "put it in my wallet"])
+    seen = []
+
+    async def classify(text):
+        seen.append(text)
+        await asyncio.sleep(0.3)
+        return None
+
+    det = Detectors(voice_score=lambda w: 0.1, transcribe=lambda u: next(texts, ""), new_vad=EnergyVAD,
+                    classify=classify)
+    with TestClient(create_app(lambda s: det)) as client, client.websocket_connect("/ws/call") as ws:
+        ws.send_text(json.dumps(START))
+        audio = fake_call_audio(8.0)
+        for i in range(0, len(audio), SR // 10 * 2):
+            ws.send_bytes(audio[i:i + SR // 10 * 2])
+        time.sleep(1.5)  # let the last classification finish before stopping
+        ws.send_text(json.dumps({"type": "stop"}))
+        while ws.receive_json()["type"] != "end":
+            pass
+    assert seen and seen[-1].endswith("put it in my wallet")
+
+
+def test_odd_length_messages_are_reassembled():
+    events, _ = play_call(Detectors(voice_score=lambda w: 0.1, transcribe=lambda u: "hi", new_vad=EnergyVAD),
+                          chunk_bytes=9_601)             # every message ends mid-sample
+    assert events[-1]["type"] == "end"
+
+
+def test_session_keeps_the_half_sample():
+    session = CallSession(Settings(), CallerInfo(number="1"), 16_000, EnergyVAD())
+    session.feed(b"\x00\x00\x00")                        # 1.5 samples
+    session.feed(b"\x00")                                # completes the second sample
+    assert session.audio.written == 2
+
+
+@pytest.mark.parametrize("rate", [0, -1, 1_000_000])
+def test_bad_sample_rate_gets_an_error_event(rate):
+    det = Detectors(voice_score=lambda w: 0.1, transcribe=lambda u: "", new_vad=EnergyVAD)
+    with TestClient(create_app(lambda s: det)) as client, client.websocket_connect("/ws/call") as ws:
+        ws.send_text(json.dumps({**START, "sample_rate": rate}))
+        event = ws.receive_json()
+    assert event["type"] == "error" and "start message" in event["message"]
+
+
+def test_other_websites_cannot_open_a_call():
+    det = Detectors(voice_score=lambda w: 0.1, transcribe=lambda u: "", new_vad=EnergyVAD)
+    with TestClient(create_app(lambda s: det)) as client:
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/ws/call", headers={"origin": "https://evil.example"}) as ws:
+                ws.receive_json()
+        with client.websocket_connect("/ws/call", headers={"origin": "http://localhost:5173"}) as ws:
+            ws.send_text(json.dumps(START))
+            assert ws.receive_json()["type"] == "ready"
+
+
+def test_report_is_saved_and_size_capped(tmp_path):
+    det = Detectors(voice_score=lambda w: 0.1, transcribe=lambda u: "", new_vad=EnergyVAD)
+    app = create_app(lambda s: det, Settings(db_path=str(tmp_path / "reports.db")))
+    with TestClient(app) as client:
+        ok = {"number": "+15550100", "label": "scam", "level": "red", "reasons": ["Caller asks for money"]}
+        assert client.post("/api/report", json=ok).json() == {"ok": True}
+        assert client.post("/api/report", json={**ok, "reasons": ["x"] * 21}).status_code == 422
+        assert client.post("/api/report", json={**ok, "number": "1" * 33}).status_code == 422
+    assert (tmp_path / "reports.db").exists()
 ```
 
 </details>
@@ -2265,6 +2468,7 @@ export type ServerEvent =
   | RiskEvent
   | { type: 'transcript'; t: number; text: string }
   | { type: 'end'; transcript: string }
+  | { type: 'error'; message: string }
 
 export type Call = { stop: () => void; verified: () => void }
 
@@ -2277,53 +2481,67 @@ export async function startCall(
 ): Promise<Call> {
   let stopped = false
   let stopSource = () => {}
+  let ws: WebSocket | null = null
 
   const ctx = new AudioContext()
-  await ctx.audioWorklet.addModule('/pcm-capture.js')
-  const capture = new AudioWorkletNode(ctx, 'pcm-capture', { channelCount: 1, channelCountMode: 'explicit' })
-  capture.connect(ctx.destination) // keeps the node running; it only outputs silence
+  try {
+    await ctx.audioWorklet.addModule('/pcm-capture.js')
+    const capture = new AudioWorkletNode(ctx, 'pcm-capture', { channelCount: 1, channelCountMode: 'explicit' })
+    capture.connect(ctx.destination) // keeps the node running; it only outputs silence
 
-  const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
-  const ws = new WebSocket(`${scheme}://${location.host}/ws/call`)
-  ws.onmessage = (m) => onEvent(JSON.parse(m.data))
-  ws.onclose = () => {
-    stopSource()
+    const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
+    const socket = new WebSocket(`${scheme}://${location.host}/ws/call`)
+    ws = socket
+    socket.onmessage = (m) => onEvent(JSON.parse(m.data))
+    socket.onclose = () => {
+      stopSource()
+      void ctx.close()
+    }
+    await new Promise<void>((resolve, reject) => {
+      socket.onopen = () => resolve()
+      socket.onerror = () => reject(new Error('Could not reach the VoiceGuard server'))
+    })
+    socket.send(JSON.stringify({ type: 'start', sample_rate: ctx.sampleRate, caller }))
+    capture.port.onmessage = (m) => {
+      if (!stopped && socket.readyState === WebSocket.OPEN) socket.send(m.data)
+    }
+
+    if (source === 'mic') {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        // Raw audio: echo cancellation and noise suppression change exactly the details the model looks at
+        audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      })
+      ctx.createMediaStreamSource(stream).connect(capture) // not to the speakers, to avoid feedback
+      stopSource = () => stream.getTracks().forEach((t) => t.stop())
+    } else {
+      const response = await fetch(source)
+      if (!response.ok) throw new Error(`Could not load ${source} (HTTP ${response.status})`)
+      const player = new AudioBufferSourceNode(ctx, { buffer: await ctx.decodeAudioData(await response.arrayBuffer()) })
+      player.connect(capture)
+      player.connect(ctx.destination) // the audience hears the "caller"
+      player.onended = stop
+      player.start()
+      stopSource = () => player.stop()
+    }
+    await ctx.resume()
+  } catch (err) {
+    // Don't leave a half-open call behind: close the socket (the server ends its session) and the audio.
+    if (ws) {
+      ws.onclose = null // we close the audio ourselves, just below
+      ws.close()
+    }
     void ctx.close()
-  }
-  await new Promise<void>((resolve, reject) => {
-    ws.onopen = () => resolve()
-    ws.onerror = () => reject(new Error('Could not reach the VoiceGuard server'))
-  })
-  ws.send(JSON.stringify({ type: 'start', sample_rate: ctx.sampleRate, caller }))
-  capture.port.onmessage = (m) => {
-    if (!stopped && ws.readyState === WebSocket.OPEN) ws.send(m.data)
+    throw err
   }
 
+  const socket = ws
   function stop() {
     if (stopped) return
     stopped = true
     stopSource()
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stop' })) // server replies 'end'
+    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'stop' })) // server replies 'end'
   }
-
-  if (source === 'mic') {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      // Raw audio: echo cancellation and noise suppression change exactly the details the model looks at
-      audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-    })
-    ctx.createMediaStreamSource(stream).connect(capture) // not to the speakers, to avoid feedback
-    stopSource = () => stream.getTracks().forEach((t) => t.stop())
-  } else {
-    const data = await (await fetch(source)).arrayBuffer()
-    const player = new AudioBufferSourceNode(ctx, { buffer: await ctx.decodeAudioData(data) })
-    player.connect(capture)
-    player.connect(ctx.destination) // the audience hears the "caller"
-    player.onended = stop
-    player.start()
-    stopSource = () => player.stop()
-  }
-  await ctx.resume()
-  return { stop, verified: () => ws.send(JSON.stringify({ type: 'verified' })) }
+  return { stop, verified: () => socket.send(JSON.stringify({ type: 'verified' })) }
 }
 ```
 
@@ -2365,6 +2583,7 @@ export default function App() {
         if (e.type === 'risk') setRisk(e)
         if (e.type === 'transcript') setLines((l) => [...l, e.text])
         if (e.type === 'end') setLive(false)
+        if (e.type === 'error') setNote(e.message)
       })
     } catch (err) {
       setNote(String(err))
@@ -2373,12 +2592,12 @@ export default function App() {
   }
 
   async function report() {
-    await fetch('/api/report', {
+    const response = await fetch('/api/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ number: caller.number, label: 'scam', level, reasons: risk?.reasons ?? [] }),
-    })
-    setNote('Reported. Thanks for helping protect other customers.')
+    }).catch(() => null)
+    setNote(response?.ok ? 'Reported. Thanks for helping protect other customers.' : "Couldn't send the report. Try again.")
   }
 
   return (
@@ -2497,7 +2716,9 @@ const URL = process.env.VG_URL || 'http://localhost:4173'
   const page = await browser.newPage({ viewport: { width: 420, height: 760 }, deviceScaleFactor: 2 })
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
+  page.on('console', (m) => {
+    if (m.type() === 'error' && !m.text().includes('404')) errors.push(m.text())
+  })
   await page.goto(URL)
 
   const t0 = Date.now()
@@ -2515,6 +2736,13 @@ const URL = process.env.VG_URL || 'http://localhost:4173'
   console.log('safe word accepted: back to green')
   await page.waitForSelector('footer button:has-text("Play cloned clip"):not([disabled])', { timeout: 30000 })
   console.log('call ended cleanly')
+
+  // A clip that fails to load must show an error and leave the UI usable (no half-open call).
+  await page.route('**/demo/clone_normal.wav', (route) => route.fulfill({ status: 404, body: '' }))
+  await page.getByRole('button', { name: 'Play clone, normal chat' }).click()
+  await page.waitForSelector('.note:has-text("Could not load")', { timeout: 10000 })
+  await page.waitForSelector('footer button:has-text("Play cloned clip"):not([disabled])', { timeout: 10000 })
+  console.log('missing clip: error shown, UI ready again')
 
   if (errors.length) throw new Error(`browser errors: ${errors.join(' | ')}`)
   await browser.close()
@@ -2711,6 +2939,24 @@ Run 3 depends on the voice model catching your clone (Section 9). Rehearse it, a
 - **The red card said "This voice may be AI-generated" when the voice score was 0.00** (red from the script and
   caller ID alone). Risk events now carry `voice_flagged`, and the headline depends on it.
 
+**Fixes from the code review (2026-11-08):** a review found that one failure could break a whole call. Each
+problem below is fixed in the files above and has a regression test.
+
+| Problem found | Fix | Regression test |
+|---|---|---|
+| One speech-to-text error stopped scam-language detection for the rest of the call; "stop" then hung for 30 s and never sent `end` | The transcription worker logs the error and moves on to the next sentence. Voice-scoring and LLM errors are caught the same way. If transcription is still busy 30 s after "stop", the call ends anyway. | `test_one_failed_transcription_does_not_stop_the_rest`, `test_failed_voice_scoring_does_not_end_the_call` |
+| With the LLM on, "stop" could wait out the SDK's default 10-minute timeout, plus 2 retries | The LLM client uses a 10 s timeout and 1 retry (`VG_LLM_TIMEOUT_S`), and "stop" cancels a running LLM request instead of waiting for it | `test_slow_llm_does_not_hold_up_the_end_of_the_call`, `test_llm_client_uses_a_short_timeout` |
+| A sentence that arrived while the LLM was busy was never sent to it | The LLM runs again until the transcript stops growing | `test_llm_runs_again_for_sentences_that_arrived_while_it_was_busy` |
+| An audio message with an odd number of bytes crashed the call | The session keeps the leftover half sample and joins it to the next message | `test_odd_length_messages_are_reassembled`, `test_session_keeps_the_half_sample` |
+| A bad `start` message, such as `sample_rate` 0, crashed the handler | `sample_rate` must be 8,000 to 192,000. A bad `start` gets an `error` event, then the server closes the socket. | `test_bad_sample_rate_gets_an_error_event` |
+| Any website open in the browser could start a call to `localhost:8000` (browsers don't apply CORS to WebSockets) | Only the UI's own pages (ports 5173 and 4173) may connect. Scripts that send no Origin header still can. Change the list with `VG_ALLOWED_ORIGINS`. | `test_other_websites_cannot_open_a_call` |
+| `/api/report` left one database connection open per report and accepted any amount of data | The connection is closed after each report. The number is capped at 32 characters, with at most 20 reasons of 200 characters each. | `test_report_is_saved_and_size_capped` |
+| If the clip or the microphone failed after the call started, the browser left the WebSocket and the audio open | `startCall` closes both before reporting the error. A clip that fails to download now shows "Could not load …". | Browser test: a missing clip shows the error and the socket ends closed |
+| "Report scam" said "Reported" even when the report failed | It checks the server's answer and says when the report didn't go through | Type-checked; tried in the browser |
+
+Left as is, because it's a product decision: once the customer taps "They said it correctly", the call can't warn
+again, even if the caller then asks for gift cards.
+
 **Changes from the first concept doc:**
 
 - Voice windows are 4 s, scored every second (the concept said 2 to 3 s chunks), for more speech per decision.
@@ -2732,7 +2978,7 @@ English, and any production deployment (Section 4).
 
 **Next steps, in order:**
 
-1. [ ] Rebuild (Section 6) and confirm `37 passed` and `E2E PASSED`.
+1. [ ] Rebuild (Section 6) and confirm `49 passed` and `E2E PASSED`.
 2. [ ] Download the real models and start the real server (6.6).
 3. [ ] Record and convert the clips, with written consent (Section 8).
 4. [ ] Measure accuracy and speed, and set the thresholds (Section 9).
@@ -2756,7 +3002,8 @@ English, and any production deployment (Section 4).
 
 Tested on Linux with Python 3.13.18, Node 22.23.4, Chromium through Playwright 1.63.0 and FFmpeg 6.1.1:
 
-- **Backend:** `37 passed` (language 7, network 5, risk 12, audio 4, WebSocket 2, LLM 2, voice 3, VAD 2). Each test
+- **Backend:** `49 passed` (language 7, network 5, risk 12, audio 4, WebSocket 2, robustness 11, LLM 3, voice 3,
+  VAD 2). Each test
   file also passes on its own, and pyflakes reports nothing.
 - **Clean install:** the pinned `requirements.txt` was installed into a brand-new environment, and the tests passed
   there.
@@ -2764,7 +3011,8 @@ Tested on Linux with Python 3.13.18, Node 22.23.4, Chromium through Playwright 1
   6.1 s.
 - **Browser end to end:** `npm run e2e` with the pinned `package.json`: red at 2.4 to 2.5 s, "This voice may be
   AI-generated" at 6.3 to 6.8 s across runs, the safe word returns it to green, the call ends cleanly and the
-  console shows no errors. The TypeScript build passes.
+  console shows no errors. A clip that fails to load shows an error, and the browser closes that call's socket. The
+  TypeScript build passes.
 - **Silero VAD 6.2.3** with its bundled weights: 0.51 ms per frame on 4 cores.
 - **The voice detector code** with transformers 5.22.2 and torch 2.15.0, on a tiny randomly initialized wav2vec2
   classifier in both label orders.
@@ -2807,12 +3055,14 @@ itself.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| The rebuild script prints fewer than 40 files | The file was changed or saved with a different name | Save it as `HANDOFF.md`, unedited, and run the script in the same folder |
+| The rebuild script prints fewer than 41 files | The file was changed or saved with a different name | Save it as `HANDOFF.md`, unedited, and run the script in the same folder |
 | `ValueError: ... has labels {...}; set VG_VOICE_FAKE_LABEL` | The model names its classes differently | Set `VG_VOICE_FAKE_LABEL` to its synthetic class, for example `spoof` |
 | The server gets only the first 100 ms of audio, and warnings appear only when the clip ends | An old copy of `pcm-capture.js` that uses `batch.length` after transferring the buffer | Use the version in Section 7 (`this.size`) |
 | `The following operation failed in the TorchScript interpreter` from the VAD | A VAD frame isn't exactly 512 samples of 16 kHz audio | Keep `vad_frame=512` and resample to 16 kHz first |
 | No sound, or `AudioContext` stays suspended | Browser autoplay rules | Start the call from a button click |
 | Microphone access fails | Page isn't on `localhost` or HTTPS, or permission was denied | Use http://localhost:5173 and allow the microphone |
+| The WebSocket closes immediately (code 1008) | The page's address isn't an allowed origin | Open the UI at http://localhost:5173 or :4173, or add your address to `VG_ALLOWED_ORIGINS` (a JSON list) |
+| The phone shows "Bad start message: ..." | The browser sent an invalid `start` message, for example a sample rate outside 8,000 to 192,000 | Check `callStream.ts`; the message says which field is wrong |
 | `Could not reach the VoiceGuard server` | Server not running on port 8000 | Start uvicorn, then check http://localhost:8000/health |
 | `npm run e2e` says the browser executable doesn't exist | Playwright's Chromium isn't installed | `npx playwright install chromium` |
 | `npm run e2e` times out waiting for red | The real server is running instead of the stand-in, or the stand-in clips are missing | Use `uvicorn tests.fake_server:app` and `scripts.make_test_clips` |
