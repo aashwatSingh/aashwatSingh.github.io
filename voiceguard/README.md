@@ -7,6 +7,9 @@ streaming test and a browser end-to-end test. Section 13 lists exactly what was 
 **Want everything in one file?** [HANDOFF.md](HANDOFF.md) has the idea and pitch, every source file, the test
 tools and a short script that recreates the whole project.
 
+**Just want to run the demo?** The project's own repo adds `setup.sh` and `demo.sh`, bundled demo clips and a
+scripted backup mode; see Section 12 of [HANDOFF.md](HANDOFF.md).
+
 VoiceGuard listens to a risky call and checks three independent signals:
 
 - **Voice:** does the voice sound machine-made?
@@ -1339,10 +1342,12 @@ class StartMessage(BaseModel):          # client -> server, first message
     type: Literal["start"]
     sample_rate: int = Field(ge=8_000, le=192_000)  # the browser's AudioContext.sampleRate, e.g. 48000
     caller: CallerInfo
+    clip: str | None = Field(default=None, max_length=40)  # which demo clip is playing; only the scripted demo uses it
 
 
 class ReadyEvent(BaseModel):            # server -> client
     type: Literal["ready"] = "ready"
+    mode: Literal["live", "scripted"] = "live"  # "scripted": no AI models, the phone shows a badge
 
 
 class TranscriptEvent(BaseModel):       # server -> client
@@ -1375,6 +1380,8 @@ class Detectors:
     transcribe: Callable[[np.ndarray], str]
     new_vad: Callable[[], Callable[[np.ndarray], float]]
     classify: Callable[[str], Awaitable[ScamFeatures | None]] | None = None
+    mode: Literal["live", "scripted"] = "live"
+    for_clip: Callable[[str | None], "Detectors"] | None = None  # scripted demo: per-call answers for each clip
 
 
 def load_detectors(s: Settings) -> Detectors:
@@ -1434,6 +1441,8 @@ def create_app(make_detectors: Callable[[Settings], Detectors] = load_detectors,
             await send(ErrorEvent(message=f"Bad start message: {e.errors()[0]['msg']}"))
             await ws.close(code=1003)
             return
+        if det.for_clip is not None:
+            det = det.for_clip(start.clip)
         session = CallSession(s, start.caller, start.sample_rate, det.new_vad())
         utterances: asyncio.Queue[np.ndarray] = asyncio.Queue()
         tasks: dict[str, asyncio.Task | None] = {"voice": None, "llm": None}
@@ -1472,7 +1481,7 @@ def create_app(make_detectors: Callable[[Settings], Detectors] = load_detectors,
                     utterances.task_done()
 
         worker = asyncio.create_task(asr_worker())
-        await send(ReadyEvent())
+        await send(ReadyEvent(mode=det.mode))
         await send(session.assess())  # the network signal is known before anyone speaks
         try:
             while True:
@@ -1987,7 +1996,7 @@ export type RiskEvent = {
 }
 
 export type ServerEvent =
-  | { type: 'ready' }
+  | { type: 'ready'; mode: 'live' | 'scripted' }
   | RiskEvent
   | { type: 'transcript'; t: number; text: string }
   | { type: 'end'; transcript: string }
@@ -2001,6 +2010,7 @@ export async function startCall(
   source: string,
   caller: Caller,
   onEvent: (e: ServerEvent) => void,
+  clip?: string, // name of the demo clip, so the scripted backup demo knows what it's hearing
 ): Promise<Call> {
   let stopped = false
   let stopSource = () => {}
@@ -2024,7 +2034,7 @@ export async function startCall(
       socket.onopen = () => resolve()
       socket.onerror = () => reject(new Error('Could not reach the VoiceGuard server'))
     })
-    socket.send(JSON.stringify({ type: 'start', sample_rate: ctx.sampleRate, caller }))
+    socket.send(JSON.stringify({ type: 'start', sample_rate: ctx.sampleRate, caller, clip }))
     capture.port.onmessage = (m) => {
       if (!stopped && socket.readyState === WebSocket.OPEN) socket.send(m.data)
     }
@@ -2092,11 +2102,12 @@ export default function App() {
   const [live, setLive] = useState(false)
   const [askSafeWord, setAskSafeWord] = useState(false)
   const [note, setNote] = useState('')
+  const [scripted, setScripted] = useState(false)
   const call = useRef<Call | null>(null)
   const caller = CALLERS[who]
   const level = risk?.level ?? 'green'
 
-  async function begin(source: string) {
+  async function begin(source: string, clip?: string) {
     setRisk(null)
     setLines([])
     setAskSafeWord(false)
@@ -2104,11 +2115,12 @@ export default function App() {
     setLive(true)
     try {
       call.current = await startCall(source, caller, (e) => {
+        if (e.type === 'ready') setScripted(e.mode === 'scripted')
         if (e.type === 'risk') setRisk(e)
         if (e.type === 'transcript') setLines((l) => [...l, e.text])
         if (e.type === 'end') setLive(false)
         if (e.type === 'error') setNote(e.message)
-      })
+      }, clip)
     } catch (err) {
       setNote(String(err))
       setLive(false)
@@ -2126,6 +2138,7 @@ export default function App() {
 
   return (
     <main className="phone" data-level={level}>
+      {scripted && <div className="scripted">Scripted demo: fixed results, no AI models</div>}
       <header>
         <div className="name">{caller.in_contacts ? 'Alex (contact)' : 'Unknown caller'}</div>
         <div className="number">{caller.number}</div>
@@ -2172,9 +2185,9 @@ export default function App() {
           <option value="unknown">Unknown, unverified number</option>
           <option value="contact">Saved contact, verified number</option>
         </select>
-        <button disabled={live} onClick={() => begin('/demo/real.wav')}>Play real clip</button>
-        <button disabled={live} onClick={() => begin('/demo/clone.wav')}>Play cloned clip</button>
-        <button disabled={live} onClick={() => begin('/demo/clone_normal.wav')}>Play clone, normal chat</button>
+        <button disabled={live} onClick={() => begin('/demo/real.wav', 'real')}>Play real clip</button>
+        <button disabled={live} onClick={() => begin('/demo/clone.wav', 'clone')}>Play cloned clip</button>
+        <button disabled={live} onClick={() => begin('/demo/clone_normal.wav', 'clone_normal')}>Play clone, normal chat</button>
         <button disabled={live} onClick={() => begin('mic')}>Use microphone</button>
         <button disabled={!live} onClick={() => call.current?.stop()}>End call</button>
       </footer>
@@ -2210,6 +2223,7 @@ Replace `src/App.css`:
 .phone footer { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .phone footer select { grid-column: 1 / -1; padding: 8px; }
 .phone footer button { padding: 10px; border-radius: 10px; border: 0; cursor: pointer; }
+.scripted { align-self: center; background: #455a64; color: #fff; font-size: 12px; padding: 4px 10px; border-radius: 999px; }
 ```
 
 </details>

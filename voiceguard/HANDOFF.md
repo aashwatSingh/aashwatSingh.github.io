@@ -2,7 +2,7 @@
 
 This one file holds everything done on VoiceGuard so far: the idea and pitch, how the system works, every
 source file, how to rebuild and test it, the decisions behind it, and what's left to do. A teammate can recreate
-the whole project from this file alone: Section 6 has a short script that writes all 41 files for you.
+the whole project from this file alone: Section 6 has a short script that writes all 48 files for you. The code also lives in its own repo; see Section 12.
 
 Last updated 2026-11-08 (after a code review; see Section 11). Built for the T-Mobile hackathon challenge: keep customers more secure on the T-Mobile
 network.
@@ -47,14 +47,15 @@ calling the person back.
 
 | Part | State |
 |---|---|
-| Python server: audio pipeline, three signals, risk engine, WebSocket API, reports | Built and hardened after a code review. 49 automated tests pass. |
+| Python server: audio pipeline, three signals, risk engine, WebSocket API, reports | Built and hardened after a code review. 54 automated tests pass. |
 | Phone screen in the browser (React) | Built. Browser end-to-end test passes. |
 | Real AI models (voice detector, speech-to-text) | Code built and tested on stand-ins. **Not yet run with the real model files**, because downloads were blocked where this was built. That's the first job (Section 12). |
-| Demo clips (real voice + clone) | Not recorded yet (Section 8) |
+| One-command demo (`setup.sh`, `demo.sh`) with a scripted backup mode | Built. The scripted demo passes all three demo runs in a real browser, tested from a fresh clone. |
+| Demo clips | Synthetic espeak-ng clips are bundled. Real recordings of a teammate and their clone: not made yet (Section 8). |
 | Optional LLM for scam wording | Built and tested with a fake API (no real calls made) |
 
-**Fastest path:** follow Section 6, which rebuilds everything and runs all the tests, then work through the
-checklist in Section 12.
+**Fastest path:** in the repo, run `./setup.sh scripted` then `./demo.sh scripted` for a working demo in seconds
+(6.0). Then do the full setup for the live demo and work through the checklist in Section 12.
 
 ---
 
@@ -353,6 +354,23 @@ word.
 
 ## 6. Rebuild the project
 
+### 6.0 The quick way: setup.sh and demo.sh
+
+From the project folder (the repo, or `voiceguard/` after 6.2):
+
+| Command | What it does |
+|---|---|
+| `./setup.sh scripted` | Installs only what the scripted backup demo needs (about 10 s, no AI models) and the UI |
+| `./setup.sh` | Installs everything and downloads the AI models once |
+| `./demo.sh scripted` | Starts the backup demo: fixed results, no models, a "Scripted demo" badge on the phone |
+| `./demo.sh` | Starts the live demo with the real models, offline (`HF_HUB_OFFLINE=1`) |
+| `cd frontend && npm run demo-check` | While a demo runs: plays the three demo runs in Chrome and checks each outcome |
+
+Both demos serve the phone at http://localhost:4173; Ctrl+C stops both servers. `demo.sh` stops with a clear
+message if the live setup or the models are missing. The **scripted demo** (`backend/app/scripted.py`) uses the real
+server, risk engine and UI, but gives each clip a fixed voice score and the known words of its script. Use it only
+as a fallback, and say so on stage. The rest of Section 6 does the same steps by hand.
+
 ### 6.1 What you need
 
 - **Python 3.12 or newer** (`python3 --version`). Tested on 3.13.
@@ -362,7 +380,7 @@ word.
 - **Disk:** the Python environment was 5.7 GB on Linux with the default PyTorch wheel, which includes GPU
   libraries. The CPU-only wheel (6.3) is much smaller.
 
-### 6.2 Recreate all 41 files
+### 6.2 Recreate all 48 files
 
 Save this file as `HANDOFF.md` in an empty folder. In that folder, run:
 
@@ -379,7 +397,9 @@ print(f"Wrote {len(files)} files into ./voiceguard")
 EOF
 ```
 
-It prints `Wrote 41 files into ./voiceguard`. It reads every file in Section 7, where each code block is labeled
+It prints `Wrote 48 files into ./voiceguard`. The three demo clips are audio, so they can't live in this
+file: make them with `python -m scripts.make_demo_clips ../demo-clips` from `voiceguard/backend` (needs espeak-ng),
+or record your own (Section 8). It reads every file in Section 7, where each code block is labeled
 with its path. On Windows, run it in Git Bash or WSL, or save the Python lines between `<<'EOF'` and `EOF` as
 `rebuild.py` and run `python rebuild.py`.
 
@@ -414,7 +434,7 @@ pip install -r requirements.txt
 python -m pytest -q
 ```
 
-**Expected:** `49 passed, 2 warnings`. The two warnings are a `FutureWarning` about `torch.jit.load` from inside
+**Expected:** `54 passed, 2 warnings`. The two warnings are a `FutureWarning` about `torch.jit.load` from inside
 silero-vad, and they're harmless.
 
 ### 6.4 Try the whole pipeline with stand-in models
@@ -547,8 +567,12 @@ The script in 6.2 writes each of these files to `voiceguard/<path>`. Click a fil
 ```text
 voiceguard/
 ├── .gitignore                 keeps the virtual env, node_modules and all audio out of git
+├── setup.sh                   one-time setup (`./setup.sh` or `./setup.sh scripted`)
+├── demo.sh                    starts the demo (`./demo.sh` or `./demo.sh scripted`)
+├── demo-clips/                bundled synthetic clips (audio, made by make_demo_clips.py)
 ├── backend/
 │   ├── requirements.txt       pinned Python packages
+│   ├── requirements-scripted.txt  only what the scripted demo needs
 │   ├── app/
 │   │   ├── __init__.py
 │   │   ├── config.py          every threshold and setting
@@ -568,6 +592,7 @@ voiceguard/
 │   │   ├── test_risk.py       12 tests: the decision table
 │   │   ├── test_audio.py      4 tests
 │   │   ├── test_ws.py         2 tests: whole calls through the WebSocket
+│   │   ├── test_scripted.py   5 tests: the scripted demo's three runs
 │   │   ├── test_llm.py        3 tests: request shape, parsing and timeout, fake API
 │   │   ├── test_robustness.py 11 tests: the code-review fixes
 │   │   ├── test_voice.py      3 tests: label lookup on a tiny local model
@@ -577,13 +602,15 @@ voiceguard/
 │       ├── __init__.py
 │       ├── eval_voice.py      measures the voice detector on your clips
 │       ├── stream_file.py     plays a WAV into the server in real time
-│       └── make_test_clips.py writes stand-in clips
+│       ├── make_test_clips.py writes stand-in clips (noise)
+│       └── make_demo_clips.py makes the demo clips with espeak-ng
 └── frontend/
     ├── package.json           pinned npm packages and scripts
     ├── index.html
     ├── tsconfig.json  tsconfig.app.json  tsconfig.node.json
     ├── vite.config.ts         dev server and proxy to the backend
-    ├── e2e.cjs                Playwright end-to-end test
+    ├── e2e.cjs                Playwright end-to-end test (stand-in server)
+    ├── demo-check.cjs         plays the three demo runs and checks them
     ├── public/
     │   └── pcm-capture.js     AudioWorklet: audio to 16-bit PCM
     └── src/
@@ -612,6 +639,22 @@ silero-vad==6.2.3
 pytest==9.2.0
 httpx==0.28.1
 anthropic==2.6.0  # only for the optional LLM step (Step 8)
+```
+
+</details>
+
+<details>
+<summary><code>backend/requirements-scripted.txt</code>: only what the scripted backup demo needs</summary>
+
+<!-- file: backend/requirements-scripted.txt -->
+```text
+# Only what the scripted backup demo needs (no AI models): ./setup.sh scripted
+fastapi==0.162.2
+uvicorn[standard]==0.54.0
+pydantic-settings==2.16.2
+numpy==2.5.4
+soxr==1.1.0
+soundfile==0.14.0
 ```
 
 </details>
@@ -965,6 +1008,52 @@ class RiskEngine:
 
 </details>
 
+<details>
+<summary><code>backend/app/scripted.py</code>: the scripted backup demo: fixed answers per clip, no AI models</summary>
+
+<!-- file: backend/app/scripted.py -->
+```python
+"""Scripted backup demo: the real server and UI, with fixed answers instead of AI models.
+
+Each demo clip gets a fixed voice score and the known words of its script (one line per sentence the VAD finds).
+The risk engine, the WebSocket protocol and the phone screen are the real ones. Nothing is downloaded and torch
+isn't needed. The phone shows a "Scripted demo" badge: use this only as a fallback, and say so on stage.
+
+Run from backend/:  uvicorn app.scripted:app --port 8000
+"""
+from .audio import EnergyVAD
+from .config import settings
+from .main import Detectors, create_app
+
+NORMAL_CHAT = ["Hi Grandma, it's me!", "Just calling to say hi.", "Are we still on for Sunday?"]
+SCAM_SCRIPT = [
+    "Grandma, it's me.",
+    "I'm calling from my lawyer's phone.",
+    "I got arrested and I need $2,000 for bail right now.",
+    "Please don't tell Mom.",
+    "Can you buy Google Play gift cards?",
+]
+# clip name -> (voice score, what the caller says). The clip names match the buttons in App.tsx.
+SCRIPTS: dict[str | None, tuple[float, list[str]]] = {
+    "real": (0.08, NORMAL_CHAT),
+    "clone": (0.93, SCAM_SCRIPT),
+    "clone_normal": (0.93, NORMAL_CHAT),
+}
+
+
+def for_clip(clip: str | None) -> Detectors:
+    voice, lines = SCRIPTS.get(clip, (0.10, []))  # microphone or unknown clip: low score, no transcript
+    remaining = iter(lines)
+    return Detectors(voice_score=lambda window: voice, transcribe=lambda utterance: next(remaining, ""),
+                     new_vad=EnergyVAD, mode="scripted")
+
+
+app = create_app(lambda s: Detectors(voice_score=lambda w: 0.10, transcribe=lambda u: "", new_vad=EnergyVAD,
+                                     mode="scripted", for_clip=for_clip), settings)
+```
+
+</details>
+
 ### 7.2 Backend: streaming and the server
 
 <details>
@@ -1291,10 +1380,12 @@ class StartMessage(BaseModel):          # client -> server, first message
     type: Literal["start"]
     sample_rate: int = Field(ge=8_000, le=192_000)  # the browser's AudioContext.sampleRate, e.g. 48000
     caller: CallerInfo
+    clip: str | None = Field(default=None, max_length=40)  # which demo clip is playing; only the scripted demo uses it
 
 
 class ReadyEvent(BaseModel):            # server -> client
     type: Literal["ready"] = "ready"
+    mode: Literal["live", "scripted"] = "live"  # "scripted": no AI models, the phone shows a badge
 
 
 class TranscriptEvent(BaseModel):       # server -> client
@@ -1327,6 +1418,8 @@ class Detectors:
     transcribe: Callable[[np.ndarray], str]
     new_vad: Callable[[], Callable[[np.ndarray], float]]
     classify: Callable[[str], Awaitable[ScamFeatures | None]] | None = None
+    mode: Literal["live", "scripted"] = "live"
+    for_clip: Callable[[str | None], "Detectors"] | None = None  # scripted demo: per-call answers for each clip
 
 
 def load_detectors(s: Settings) -> Detectors:
@@ -1386,6 +1479,8 @@ def create_app(make_detectors: Callable[[Settings], Detectors] = load_detectors,
             await send(ErrorEvent(message=f"Bad start message: {e.errors()[0]['msg']}"))
             await ws.close(code=1003)
             return
+        if det.for_clip is not None:
+            det = det.for_clip(start.clip)
         session = CallSession(s, start.caller, start.sample_rate, det.new_vad())
         utterances: asyncio.Queue[np.ndarray] = asyncio.Queue()
         tasks: dict[str, asyncio.Task | None] = {"voice": None, "llm": None}
@@ -1424,7 +1519,7 @@ def create_app(make_detectors: Callable[[Settings], Detectors] = load_detectors,
                     utterances.task_done()
 
         worker = asyncio.create_task(asr_worker())
-        await send(ReadyEvent())
+        await send(ReadyEvent(mode=det.mode))
         await send(session.assess())  # the network signal is known before anyone speaks
         try:
             while True:
@@ -2011,6 +2106,62 @@ def test_silero_rejects_other_frame_sizes():
 </details>
 
 <details>
+<summary><code>backend/tests/test_scripted.py</code>: 5 tests: the scripted demo produces green, red and yellow for the three runs</summary>
+
+<!-- file: backend/tests/test_scripted.py -->
+```python
+"""The scripted backup demo must produce the three outcomes of the demo script (Section 10 of HANDOFF.md)."""
+import json
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.scripted import app
+from tests.test_ws import SR, fake_call_audio
+
+UNKNOWN = {"number": "+15550199", "attestation": "C"}
+CONTACT = {"number": "+15550142", "in_contacts": True, "attestation": "A"}
+
+
+def run(clip: str | None, caller: dict) -> list[dict]:
+    with TestClient(app) as client, client.websocket_connect("/ws/call") as ws:
+        ws.send_text(json.dumps({"type": "start", "sample_rate": SR, "caller": caller, "clip": clip}))
+        audio = fake_call_audio(12.0)
+        for i in range(0, len(audio), SR // 10 * 2):
+            ws.send_bytes(audio[i:i + SR // 10 * 2])
+        ws.send_text(json.dumps({"type": "stop"}))
+        events = []
+        while (e := ws.receive_json())["type"] != "end":
+            events.append(e)
+        return events + [e]
+
+
+@pytest.mark.parametrize("clip, caller, level, voice_flagged", [
+    ("real", UNKNOWN, "green", False),          # run 1: no false alarm
+    ("clone", UNKNOWN, "red", True),            # run 2: scam script + cloned voice
+    ("clone_normal", CONTACT, "yellow", True),  # run 3: only the voice is suspicious
+])
+def test_demo_runs(clip, caller, level, voice_flagged):
+    events = run(clip, caller)
+    assert events[0] == {"type": "ready", "mode": "scripted"}
+    final = [e for e in events if e["type"] == "risk"][-1]
+    assert final["level"] == level
+    assert final["voice_flagged"] == voice_flagged
+
+
+def test_transcript_follows_the_script():
+    events = run("clone", UNKNOWN)
+    assert events[-1]["transcript"].startswith("Grandma, it's me. I'm calling from my lawyer's phone.")
+
+
+def test_microphone_gets_no_scripted_words():
+    events = run(None, UNKNOWN)
+    assert events[-1]["transcript"] == ""
+```
+
+</details>
+
+<details>
 <summary><code>backend/tests/fake_server.py</code>: the server with stand-in models</summary>
 
 <!-- file: backend/tests/fake_server.py -->
@@ -2217,6 +2368,63 @@ if __name__ == "__main__":
 
 </details>
 
+<details>
+<summary><code>backend/scripts/make_demo_clips.py</code>: makes the three demo clips with espeak-ng</summary>
+
+<!-- file: backend/scripts/make_demo_clips.py -->
+```python
+"""Make the three backup demo clips with espeak-ng (a free text-to-speech program), from the exact scripts the
+scripted demo uses. They are synthetic voices, so there's no one's voice to get consent for.
+
+Needs espeak-ng (macOS: brew install espeak-ng; Ubuntu: sudo apt install espeak-ng).
+From backend/:  python -m scripts.make_demo_clips ../demo-clips
+"""
+import argparse
+import pathlib
+import subprocess
+import tempfile
+
+import numpy as np
+import soundfile as sf
+
+from app.scripted import NORMAL_CHAT, SCAM_SCRIPT
+
+CLIPS = {  # file name -> (espeak-ng voice, sentences)
+    "real.wav": ("en-us+f3", NORMAL_CHAT),
+    "clone.wav": ("en-us+m3", SCAM_SCRIPT),
+    "clone_normal.wav": ("en-us+m3", NORMAL_CHAT),
+}
+PAUSE_S = 1.0  # silence between sentences; more than the 600 ms that ends an utterance
+
+
+def speak(voice: str, text: str) -> tuple[np.ndarray, int]:
+    with tempfile.TemporaryDirectory() as d:
+        wav = pathlib.Path(d) / "s.wav"
+        subprocess.run(["espeak-ng", "-v", voice, "-s", "150", "-w", str(wav), text], check=True)
+        return sf.read(wav, dtype="float32")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("out", type=pathlib.Path)
+    args = ap.parse_args()
+    args.out.mkdir(parents=True, exist_ok=True)
+    for name, (voice, sentences) in CLIPS.items():
+        parts, sr = [], 22_050
+        for text in sentences:
+            x, sr = speak(voice, text)
+            parts += [x, np.zeros(int(PAUSE_S * sr), dtype=np.float32)]
+        audio = np.concatenate(parts)
+        sf.write(args.out / name, audio, sr, subtype="PCM_16")
+        print(f"wrote {args.out / name} ({len(audio) / sr:.1f} s, {len(sentences)} sentences)")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+</details>
+
 ### 7.5 Frontend
 
 <details>
@@ -2233,7 +2441,8 @@ if __name__ == "__main__":
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "e2e": "node e2e.cjs"
+    "e2e": "node e2e.cjs",
+    "demo-check": "node demo-check.cjs"
   },
   "dependencies": {
     "react": "19.3.1",
@@ -2464,7 +2673,7 @@ export type RiskEvent = {
 }
 
 export type ServerEvent =
-  | { type: 'ready' }
+  | { type: 'ready'; mode: 'live' | 'scripted' }
   | RiskEvent
   | { type: 'transcript'; t: number; text: string }
   | { type: 'end'; transcript: string }
@@ -2478,6 +2687,7 @@ export async function startCall(
   source: string,
   caller: Caller,
   onEvent: (e: ServerEvent) => void,
+  clip?: string, // name of the demo clip, so the scripted backup demo knows what it's hearing
 ): Promise<Call> {
   let stopped = false
   let stopSource = () => {}
@@ -2501,7 +2711,7 @@ export async function startCall(
       socket.onopen = () => resolve()
       socket.onerror = () => reject(new Error('Could not reach the VoiceGuard server'))
     })
-    socket.send(JSON.stringify({ type: 'start', sample_rate: ctx.sampleRate, caller }))
+    socket.send(JSON.stringify({ type: 'start', sample_rate: ctx.sampleRate, caller, clip }))
     capture.port.onmessage = (m) => {
       if (!stopped && socket.readyState === WebSocket.OPEN) socket.send(m.data)
     }
@@ -2568,11 +2778,12 @@ export default function App() {
   const [live, setLive] = useState(false)
   const [askSafeWord, setAskSafeWord] = useState(false)
   const [note, setNote] = useState('')
+  const [scripted, setScripted] = useState(false)
   const call = useRef<Call | null>(null)
   const caller = CALLERS[who]
   const level = risk?.level ?? 'green'
 
-  async function begin(source: string) {
+  async function begin(source: string, clip?: string) {
     setRisk(null)
     setLines([])
     setAskSafeWord(false)
@@ -2580,11 +2791,12 @@ export default function App() {
     setLive(true)
     try {
       call.current = await startCall(source, caller, (e) => {
+        if (e.type === 'ready') setScripted(e.mode === 'scripted')
         if (e.type === 'risk') setRisk(e)
         if (e.type === 'transcript') setLines((l) => [...l, e.text])
         if (e.type === 'end') setLive(false)
         if (e.type === 'error') setNote(e.message)
-      })
+      }, clip)
     } catch (err) {
       setNote(String(err))
       setLive(false)
@@ -2602,6 +2814,7 @@ export default function App() {
 
   return (
     <main className="phone" data-level={level}>
+      {scripted && <div className="scripted">Scripted demo: fixed results, no AI models</div>}
       <header>
         <div className="name">{caller.in_contacts ? 'Alex (contact)' : 'Unknown caller'}</div>
         <div className="number">{caller.number}</div>
@@ -2648,9 +2861,9 @@ export default function App() {
           <option value="unknown">Unknown, unverified number</option>
           <option value="contact">Saved contact, verified number</option>
         </select>
-        <button disabled={live} onClick={() => begin('/demo/real.wav')}>Play real clip</button>
-        <button disabled={live} onClick={() => begin('/demo/clone.wav')}>Play cloned clip</button>
-        <button disabled={live} onClick={() => begin('/demo/clone_normal.wav')}>Play clone, normal chat</button>
+        <button disabled={live} onClick={() => begin('/demo/real.wav', 'real')}>Play real clip</button>
+        <button disabled={live} onClick={() => begin('/demo/clone.wav', 'clone')}>Play cloned clip</button>
+        <button disabled={live} onClick={() => begin('/demo/clone_normal.wav', 'clone_normal')}>Play clone, normal chat</button>
         <button disabled={live} onClick={() => begin('mic')}>Use microphone</button>
         <button disabled={!live} onClick={() => call.current?.stop()}>End call</button>
       </footer>
@@ -2685,6 +2898,7 @@ export default function App() {
 .phone footer { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .phone footer select { grid-column: 1 / -1; padding: 8px; }
 .phone footer button { padding: 10px; border-radius: 10px; border: 0; cursor: pointer; }
+.scripted { align-self: center; background: #455a64; color: #fff; font-size: 12px; padding: 4px 10px; border-radius: 999px; }
 ```
 
 </details>
@@ -2700,7 +2914,7 @@ body { margin: 0; background: #e9e9e9; }
 </details>
 
 <details>
-<summary><code>frontend/e2e.cjs</code>: Playwright end-to-end test</summary>
+<summary><code>frontend/e2e.cjs</code>: Playwright end-to-end test against the stand-in server</summary>
 
 <!-- file: frontend/e2e.cjs -->
 ```js
@@ -2755,10 +2969,57 @@ const URL = process.env.VG_URL || 'http://localhost:4173'
 
 </details>
 
+<details>
+<summary><code>frontend/demo-check.cjs</code>: plays the three demo runs in Chrome and checks each outcome</summary>
+
+<!-- file: frontend/demo-check.cjs -->
+```js
+// Plays the 3-run demo script in a real browser and checks each outcome.
+// Needs the demo running (./demo.sh scripted, or ./demo.sh with your own clips). From frontend/: npm run demo-check
+const { chromium } = require('playwright')
+
+const URL = process.env.VG_URL || 'http://localhost:4173'
+const RUNS = [
+  { name: 'Run 1: real voice, unknown number', caller: 'unknown', button: 'Play real clip', expect: 'green' },
+  { name: 'Run 2: clone with scam script, unknown number', caller: 'unknown', button: 'Play cloned clip', expect: 'red' },
+  { name: 'Run 3: clone, normal chat, saved contact', caller: 'contact', button: 'Play clone, normal chat', expect: 'yellow' },
+]
+
+;(async () => {
+  const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] })
+  const page = await browser.newPage({ viewport: { width: 420, height: 900 }, deviceScaleFactor: 2 })
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
+  await page.goto(URL)
+
+  let failures = 0
+  for (const [i, run] of RUNS.entries()) {
+    await page.selectOption('footer select', run.caller)
+    const t0 = Date.now()
+    await page.getByRole('button', { name: run.button }).click()
+    await page.waitForSelector('footer button:has-text("End call"):not([disabled])')            // call started
+    await page.waitForSelector('footer button:has-text("End call")[disabled]', { timeout: 90000 }) // call ended
+    const level = await page.getAttribute('main', 'data-level')
+    const mode = (await page.locator('.scripted').count()) ? 'scripted' : 'live'
+    const ok = level === run.expect
+    if (!ok) failures++
+    console.log(`${ok ? 'PASS' : 'FAIL'}  ${run.name}: ${level} (expected ${run.expect}; ${mode}; ${((Date.now() - t0) / 1000).toFixed(1)} s)`)
+    await page.screenshot({ path: `demo-run-${i + 1}.png`, fullPage: true })
+  }
+  await browser.close()
+  if (errors.length) { console.log(`Browser errors: ${errors.join(' | ')}`); failures++ }
+  console.log(failures ? 'DEMO CHECK FAILED' : 'DEMO CHECK PASSED')
+  process.exit(failures ? 1 : 0)
+})()
+```
+
+</details>
+
 ### 7.6 Project root
 
 <details>
-<summary><code>.gitignore</code>: keeps the virtual env, node_modules and all audio out of git</summary>
+<summary><code>.gitignore</code>: keeps the virtual env, node_modules and all audio out of git (except the synthetic demo clips)</summary>
 
 <!-- file: .gitignore -->
 ```gitignore
@@ -2771,12 +3032,125 @@ __pycache__/
 node_modules/
 dist/
 e2e-screenshot.png
+demo-run-*.png
 
 # Voice recordings and clones stay off GitHub (consent)
 *.wav
 *.m4a
 *.mp3
 *.amr
+
+# ...except the bundled synthetic demo clips (espeak-ng voices, no real person)
+!demo-clips/*.wav
+```
+
+</details>
+
+<details>
+<summary><code>setup.sh</code>: one-time setup</summary>
+
+<!-- file: setup.sh -->
+```bash
+#!/usr/bin/env bash
+# One-time setup. Run from anywhere:
+#   ./setup.sh            everything, including the AI models (several GB, downloads once)
+#   ./setup.sh scripted   only what the scripted backup demo needs (small, no models)
+set -euo pipefail
+MODE="${1:-full}"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+PY="${PYTHON:-python3}"
+"$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else "Python 3.12 or newer is needed. Run with PYTHON=/path/to/python3.12 ./setup.sh")'
+command -v npm >/dev/null || { echo "Node.js 22 (or 20.19+) is needed: https://nodejs.org"; exit 1; }
+
+cd "$ROOT/backend"
+[ -d .venv ] || "$PY" -m venv .venv
+source .venv/bin/activate
+python -m pip install -q --upgrade pip
+if [ "$MODE" = scripted ]; then
+  pip install -q -r requirements-scripted.txt
+else
+  if [ "$(uname -s)" = Linux ] && ! command -v nvidia-smi >/dev/null; then
+    # No NVIDIA GPU: the CPU-only PyTorch is gigabytes smaller
+    pip install -q torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu || echo "CPU wheel unavailable; using the default PyTorch"
+  fi
+  pip install -q -r requirements.txt
+  echo "Downloading the AI models (once)..."
+  hf download MelodyMachine/Deepfake-audio-detection-V2 >/dev/null
+  hf download Systran/faster-whisper-base.en >/dev/null
+fi
+
+# Demo clips: use the bundled synthetic ones unless you've put your own recordings there
+mkdir -p "$ROOT/frontend/public/demo"
+for f in real clone clone_normal; do
+  [ -f "$ROOT/frontend/public/demo/$f.wav" ] && continue
+  if [ -f "$ROOT/demo-clips/$f.wav" ]; then
+    cp "$ROOT/demo-clips/$f.wav" "$ROOT/frontend/public/demo/$f.wav"
+  else
+    echo "Missing demo-clips/$f.wav. Make the clips with: cd backend && python -m scripts.make_demo_clips ../demo-clips (needs espeak-ng)"
+  fi
+done
+
+cd "$ROOT/frontend"
+npm install --silent
+echo "Setup done. Start the demo with ./demo.sh$([ "$MODE" = scripted ] && echo ' scripted')"
+```
+
+</details>
+
+<details>
+<summary><code>demo.sh</code>: starts the demo</summary>
+
+<!-- file: demo.sh -->
+```bash
+#!/usr/bin/env bash
+# Start the demo: the server on port 8000 and the phone screen on http://localhost:4173
+#   ./demo.sh            live: the real AI models (run ./setup.sh first)
+#   ./demo.sh scripted   backup: fixed results, no models; the phone shows a "Scripted demo" badge
+set -euo pipefail
+MODE="${1:-live}"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+case "$MODE" in
+  live) APP=app.main:app ;;
+  scripted) APP=app.scripted:app ;;
+  *) echo "Usage: ./demo.sh [live|scripted]"; exit 2 ;;
+esac
+[ -d "$ROOT/backend/.venv" ] && [ -d "$ROOT/frontend/node_modules" ] || { echo "Run ./setup.sh first."; exit 1; }
+
+BACK=""; FRONT=""
+cleanup() { kill $BACK $FRONT 2>/dev/null || true; }
+trap cleanup EXIT
+trap 'cleanup; exit 0' INT TERM
+
+cd "$ROOT/backend"
+source .venv/bin/activate
+if [ "$MODE" = live ]; then
+  python -c "import torch, transformers, faster_whisper, silero_vad" 2>/dev/null \
+    || { echo "Live mode needs the full setup: run ./setup.sh (without 'scripted')."; exit 1; }
+  python -c "from huggingface_hub import snapshot_download as get
+for repo in ('MelodyMachine/Deepfake-audio-detection-V2', 'Systran/faster-whisper-base.en'):
+    get(repo, local_files_only=True)" 2>/dev/null \
+    || { echo "The AI models aren't downloaded yet: run ./setup.sh while online."; exit 1; }
+  export HF_HUB_OFFLINE=1  # the models are on disk; never wait on venue Wi-Fi
+fi
+uvicorn "$APP" --port 8000 --log-level warning &
+BACK=$!
+
+cd "$ROOT/frontend"
+npm run build --silent >/dev/null
+node node_modules/vite/bin/vite.js preview --port 4173 --strictPort >/dev/null &
+FRONT=$!
+
+echo "Starting the $MODE demo (loading the models can take a minute)..."
+for _ in $(seq 1 300); do
+  if curl -sf http://localhost:8000/health >/dev/null && curl -sf http://localhost:4173 >/dev/null; then
+    echo "VoiceGuard $MODE demo is running: open http://localhost:4173 in Chrome. Press Ctrl+C to stop."
+    wait
+    exit 0
+  fi
+  kill -0 "$BACK" 2>/dev/null || { echo "The server stopped; see the error above (is port 8000 already in use?)."; exit 1; }
+  sleep 1
+done
+echo "The demo didn't start within 5 minutes."; exit 1
 ```
 
 </details>
@@ -2889,6 +3263,9 @@ If speech-to-text is slow, use `VG_ASR_MODEL=tiny.en`.
 
 **Before you go on stage:**
 
+- [ ] `./demo.sh` runs and `npm run demo-check` passes with your clips. If the live demo misbehaves, fall back
+  to `./demo.sh scripted` and say it's the scripted version.
+
 - [ ] Models pre-downloaded (6.6). Start the server with `HF_HUB_OFFLINE=1` so nothing tries the venue Wi-Fi.
 - [ ] `python -m pytest -q` passes.
 - [ ] Real clips in `frontend/public/demo/` (Section 8).
@@ -2978,7 +3355,7 @@ English, and any production deployment (Section 4).
 
 **Next steps, in order:**
 
-1. [ ] Rebuild (Section 6) and confirm `49 passed` and `E2E PASSED`.
+1. [ ] Run `./setup.sh` (full) and confirm `54 passed`, then `./demo.sh` and `npm run demo-check`.
 2. [ ] Download the real models and start the real server (6.6).
 3. [ ] Record and convert the clips, with written consent (Section 8).
 4. [ ] Measure accuracy and speed, and set the thresholds (Section 9).
@@ -2990,6 +3367,8 @@ English, and any production deployment (Section 4).
 
 **Other places this work lives:**
 
+- **The project repo:** https://github.com/aashwatSingh/voiceguard. Clone it and run `./setup.sh` and `./demo.sh`
+  (6.0). It has everything in Section 7 plus the bundled demo clips.
 - The step-by-step build guide, with the same code split into 11 steps:
   [`voiceguard/README.md` on GitHub](https://github.com/aashwatSingh/aashwatSingh.github.io/blob/claude/brave-goodall-e55eu5/voiceguard/README.md)
   (branch `claude/brave-goodall-e55eu5`).
@@ -3002,8 +3381,8 @@ English, and any production deployment (Section 4).
 
 Tested on Linux with Python 3.13.18, Node 22.23.4, Chromium through Playwright 1.63.0 and FFmpeg 6.1.1:
 
-- **Backend:** `49 passed` (language 7, network 5, risk 12, audio 4, WebSocket 2, robustness 11, LLM 3, voice 3,
-  VAD 2). Each test
+- **Backend:** `54 passed` (language 7, network 5, risk 12, audio 4, WebSocket 2, robustness 11, scripted 5, LLM 3,
+  voice 3, VAD 2). Each test
   file also passes on its own, and pyflakes reports nothing.
 - **Clean install:** the pinned `requirements.txt` was installed into a brand-new environment, and the tests passed
   there.
@@ -3019,6 +3398,10 @@ Tested on Linux with Python 3.13.18, Node 22.23.4, Chromium through Playwright 1
 - **The Claude SDK request** (anthropic 2.6.0), checked offline with a fake HTTP transport.
 - **The FFmpeg phone-line commands:** correct output formats, and content above 4 kHz removed (a 5 kHz test tone
   fell from 22.6% to 0.9% of the energy).
+- **The demo, from a fresh clone of the repo:** `./setup.sh scripted` took 11 s; `./demo.sh scripted` started
+  both servers; `npm run demo-check` passed all three runs (green, red, yellow) in Chrome; SIGTERM stopped both
+  servers; `./demo.sh` (live) stopped with a clear message when the full setup or the models were missing. Both
+  Silero VAD and the simple energy VAD split each bundled clip into exactly one utterance per scripted sentence.
 - **This file:** the project was recreated from `HANDOFF.md` with the script in 6.2 in an empty folder, and the
   recreated copy passed the backend tests, the TypeScript build and the browser test.
 
@@ -3055,7 +3438,7 @@ itself.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| The rebuild script prints fewer than 41 files | The file was changed or saved with a different name | Save it as `HANDOFF.md`, unedited, and run the script in the same folder |
+| The rebuild script prints fewer than 48 files | The file was changed or saved with a different name | Save it as `HANDOFF.md`, unedited, and run the script in the same folder |
 | `ValueError: ... has labels {...}; set VG_VOICE_FAKE_LABEL` | The model names its classes differently | Set `VG_VOICE_FAKE_LABEL` to its synthetic class, for example `spoof` |
 | The server gets only the first 100 ms of audio, and warnings appear only when the clip ends | An old copy of `pcm-capture.js` that uses `batch.length` after transferring the buffer | Use the version in Section 7 (`this.size`) |
 | `The following operation failed in the TorchScript interpreter` from the VAD | A VAD frame isn't exactly 512 samples of 16 kHz audio | Keep `vad_frame=512` and resample to 16 kHz first |
