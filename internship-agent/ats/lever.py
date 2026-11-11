@@ -133,7 +133,10 @@ class LeverAdapter(BaseAdapter):
                 box = inputs.nth(i)
                 text = " ".join((await box.locator("xpath=ancestor::label[1]").inner_text()).split())
                 if wanted is None or text in wanted:
-                    await box.check(force=True)
+                    try:                                    # styled inputs are hidden: click their label
+                        await box.locator("xpath=ancestor::label[1]").click(timeout=4000)
+                    except Exception:                       # noqa: BLE001
+                        await box.evaluate("e => e.click()")
                     done += 1
             if not done:
                 raise LookupError(f"option {wanted!r} not found")

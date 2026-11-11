@@ -152,6 +152,37 @@ python report.py
 After a `--dry-run` sweep this writes `ready_to_submit.csv` (forms that are completely filled and
 only need the human step) and `blocking_questions.csv` (what stopped the rest, most common first).
 
+## Closing the gap: answer once, then let it learn
+
+```bash
+python report.py
+```
+
+```bash
+python answer_blockers.py
+```
+
+`report.py` prints the auto-fill share per portal and what would unlock the rest (`--rescore`
+re-answers the logged questions with your current profile and answers, without a browser).
+`answer_blockers.py` then asks you, once, for the profile values and the individual questions
+that still stop forms. In `--local-blitz`, whatever you type into an unanswered field before
+submitting is also remembered in `custom_answers.json` for the next form. Questions that ask you
+to attest to authorship or AI use are never auto-answered, never remembered, and stop essay
+drafting on that form.
+
+## Workday (experimental)
+
+```bash
+python agent_runner.py --local-blitz --ats Workday --workday-manual-sign-in
+```
+
+Workday is opt-in. Only the part before login has been run against a live site (open posting,
+eligibility check, Apply, sign-in screen). After login it walks the wizard with the same answer
+engine but has never been exercised: expect to finish pages by hand at first. It never clicks
+the final Submit (you review and submit), tries your portal password at most once per site per
+run, and creates accounts only with `--workday-create-accounts`. Stepping through pages saves a
+draft in your Workday account even in `--dry-run`.
+
 ## Files it writes
 
 | File | Contents |

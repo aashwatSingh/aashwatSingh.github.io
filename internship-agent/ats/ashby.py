@@ -176,7 +176,11 @@ class AshbyAdapter(BaseAdapter):
             await page.select_option(f"{f.sel} select", label=str(value))
             return
         if f.widget == "yesno":
-            await page.locator(f"{f.sel} button", has_text=re.compile(rf"^\s*{re.escape(str(value))}\s*$")).click()
+            button = page.locator(f"{f.sel} button", has_text=re.compile(rf"^\s*{re.escape(str(value))}\s*$")).first
+            try:
+                await button.click(timeout=5000)
+            except Exception:                               # noqa: BLE001 - covered by a sticky header or overlay
+                await button.evaluate("e => e.click()")
             return
         if f.widget == "boxes":
             wanted = None if value is True else ([value] if isinstance(value, str) else list(value))

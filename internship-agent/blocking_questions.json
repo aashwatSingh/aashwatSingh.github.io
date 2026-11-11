@@ -135,6 +135,18 @@
   ]
  },
  {
+  "label": "Company name",
+  "kind": "text",
+  "options": [],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 3,
+  "companies": [
+   "Coinbase"
+  ]
+ },
+ {
   "label": "Cover Letter",
   "kind": "file",
   "options": [],
@@ -221,6 +233,32 @@
   ]
  },
  {
+  "label": "Please confirm receipt of the above linked Global Data Privacy Notice and US Arbitration Agreement.",
+  "kind": "select",
+  "options": [
+   "Confirmed"
+  ],
+  "rule": "x-arbitration",
+  "note": "legal agreement needs your decision (set logistics.accept_arbitration_agreements in the profile)",
+  "profile_key": "logistics.accept_arbitration_agreements",
+  "count": 3,
+  "companies": [
+   "Coinbase"
+  ]
+ },
+ {
+  "label": "Title",
+  "kind": "text",
+  "options": [],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 3,
+  "companies": [
+   "Coinbase"
+  ]
+ },
+ {
   "label": "What's the most interesting paper, blog post, or documentation you've read in the past month?",
   "kind": "textarea",
   "options": [],
@@ -230,6 +268,24 @@
   "count": 3,
   "companies": [
    "Cybernetic Labs"
+  ]
+ },
+ {
+  "label": "Which of the following best describes how you use AI tools today?",
+  "kind": "select",
+  "options": [
+   "I am opposed to using AI tools in my workflow and prefer traditional/manual work",
+   "I do not use AI tools for my work but I am not against it.",
+   "I have experimented with AI tools (professionally and/or personally).",
+   "I regularly use AI tools to speed up existing tasks (e.g., drafting, summarizing",
+   "I design or automate workflows with AI tools (e.g., building agents, integrating"
+  ],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 3,
+  "companies": [
+   "Coinbase"
   ]
  },
  {
@@ -469,6 +525,21 @@
   "count": 2,
   "companies": [
    "Notion"
+  ]
+ },
+ {
+  "label": "I am available to begin a potential full-time role before September 2028.",
+  "kind": "select",
+  "options": [
+   "Yes",
+   "No"
+  ],
+  "rule": "summer-availability",
+  "note": "availability outside the stated internship window",
+  "profile_key": "",
+  "count": 2,
+  "companies": [
+   "Coinbase"
   ]
  },
  {
@@ -828,6 +899,18 @@
   ]
  },
  {
+  "label": "Are you legally authorized to work in the United States for any employer?",
+  "kind": "select",
+  "options": [],
+  "rule": "work-auth",
+  "note": "wanted Yes but options are []",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Viam"
+  ]
+ },
+ {
   "label": "Are you legally permitted to live and work in the United States or Canada on a permanent basis without needing employer sponsorship (e.g., U.S. or Canadian citizen, permanent resident, asylee)?",
   "kind": "select",
   "options": [
@@ -936,18 +1019,6 @@
   "count": 1,
   "companies": [
    "Lyft"
-  ]
- },
- {
-  "label": "Company name",
-  "kind": "text",
-  "options": [],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Coinbase"
   ]
  },
  {
@@ -1577,20 +1648,6 @@
   ]
  },
  {
-  "label": "Please confirm receipt of the above linked Global Data Privacy Notice and US Arbitration Agreement.",
-  "kind": "select",
-  "options": [
-   "Confirmed"
-  ],
-  "rule": "x-arbitration",
-  "note": "legal agreement needs your decision (set logistics.accept_arbitration_agreements in the profile)",
-  "profile_key": "logistics.accept_arbitration_agreements",
-  "count": 1,
-  "companies": [
-   "Coinbase"
-  ]
- },
- {
   "label": "Please confirm that you are able to work 40 hours per week (remote) for the duration of the internship program: Late February 2027 to late June 2027",
   "kind": "select",
   "options": [
@@ -1935,18 +1992,6 @@
   "count": 1,
   "companies": [
    "Lyft"
-  ]
- },
- {
-  "label": "Title",
-  "kind": "text",
-  "options": [],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Coinbase"
   ]
  },
  {
@@ -2328,6 +2373,23 @@
   ]
  },
  {
+  "label": "Which best describes your hands-on experience with SQL and Python for data work?",
+  "kind": "select",
+  "options": [
+   "Used both extensively in coursework/projects for analysis and modeling",
+   "Comfortable with one, familiar with the other",
+   "Coursework exposure only",
+   "Little to no experience"
+  ],
+  "rule": "experience",
+  "note": "experience and skill self-assessments are never auto-answered",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Coinbase"
+  ]
+ },
+ {
   "label": "Which co-op work term options are you available for ? (Select all that apply)",
   "kind": "checkbox_group",
   "options": [
@@ -2357,24 +2419,6 @@
   "count": 1,
   "companies": [
    "Strada Education Foundation"
-  ]
- },
- {
-  "label": "Which of the following best describes how you use AI tools today?",
-  "kind": "select",
-  "options": [
-   "I am opposed to using AI tools in my workflow and prefer traditional/manual work",
-   "I do not use AI tools for my work but I am not against it.",
-   "I have experimented with AI tools (professionally and/or personally).",
-   "I regularly use AI tools to speed up existing tasks (e.g., drafting, summarizing",
-   "I design or automate workflows with AI tools (e.g., building agents, integrating"
-  ],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Coinbase"
   ]
  },
  {
