@@ -6,13 +6,15 @@ and the posting goes to the manual-review queue.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from urllib.parse import urlparse
 
 from playwright.async_api import Page
 
 from answers import Decision, Question
-from ats.base import MANUAL_REVIEW, SUBMITTED, BaseAdapter, FormField, SubmitWatch, visible_captcha
+from ats.base import (MANUAL_REVIEW, SUBMITTED, BaseAdapter, FormField, SubmitWatch, fetch_json,
+                      strip_html, visible_captcha)
 
 EXTRACT_JS = r"""
 () => {
@@ -64,6 +66,18 @@ class LeverAdapter(BaseAdapter):
         p = urlparse(job["url"])
         m = re.match(r"/([^/]+)/([0-9a-f-]{36})", p.path)
         return f"https://{p.netloc}/{m.group(1)}/{m.group(2)}/apply" if m else job["url"]
+
+    async def job_text(self, page: Page, job: dict) -> str:
+        # The /apply page has no description; the public postings API does.
+        p = urlparse(job["url"])
+        m = re.match(r"/([^/]+)/([0-9a-f-]{36})", p.path)
+        if not m:
+            return ""
+        api = "api.eu.lever.co" if ".eu." in p.netloc else "api.lever.co"
+        data = await asyncio.to_thread(fetch_json, f"https://{api}/v0/postings/{m.group(1)}/{m.group(2)}") or {}
+        lists = " ".join(f"{l.get('text', '')} {strip_html(l.get('content', ''))}" for l in data.get("lists", []))
+        return " ".join([data.get("text", ""), data.get("descriptionPlain") or "", lists,
+                         data.get("additionalPlain") or ""]).strip()
 
     async def extract(self, page: Page) -> list[FormField]:
         fields = []

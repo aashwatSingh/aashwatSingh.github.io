@@ -1,13 +1,15 @@
 """Ashby adapter (jobs.ashbyhq.com/<org>/<posting-id>/application)."""
 from __future__ import annotations
 
+import asyncio
 import re
 from urllib.parse import urlparse
 
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
 from answers import Decision, Question
-from ats.base import MANUAL_REVIEW, SUBMITTED, BaseAdapter, FormField, SubmitWatch, visible_captcha
+from ats.base import (MANUAL_REVIEW, SUBMITTED, BaseAdapter, FormField, SubmitWatch, fetch_json,
+                      visible_captcha)
 
 EXTRACT_JS = r"""
 () => {
@@ -78,6 +80,7 @@ EXTRACT_JS = r"""
 class AshbyAdapter(BaseAdapter):
     name = "Ashby"
     form_ready_selector = ".ashby-application-form-field-entry"
+    _boards: dict[str, dict] = {}
 
     @staticmethod
     def matches(url: str) -> bool:
@@ -89,6 +92,20 @@ class AshbyAdapter(BaseAdapter):
         if not m:
             return job["url"]
         return f"https://jobs.ashbyhq.com/{m.group(1)}/{m.group(2)}/application"
+
+    async def job_text(self, page: Page, job: dict) -> str:
+        # The /application tab has no description; the public job-board API does.
+        m = re.match(r"/([^/]+)/([0-9a-f-]{36})", urlparse(job["url"]).path)
+        if not m:
+            return ""
+        org, posting = m.groups()
+        if org not in self._boards:
+            self._boards[org] = await asyncio.to_thread(
+                fetch_json, f"https://api.ashbyhq.com/posting-api/job-board/{org}") or {}
+        for j in self._boards[org].get("jobs", []):
+            if j.get("id") == posting or posting in (j.get("jobUrl") or ""):
+                return f"{j.get('title', '')}\n{j.get('descriptionPlain') or ''}"
+        return ""
 
     async def extract(self, page: Page) -> list[FormField]:
         fields = []

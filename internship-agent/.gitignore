@@ -18,3 +18,5 @@ logs/
 __pycache__/
 .pytest_cache/
 .browser_profile_llm/
+ready_to_submit.csv
+blocking_questions.csv

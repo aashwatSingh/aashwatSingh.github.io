@@ -618,11 +618,15 @@ class AnswerEngine:
                           r"^if .{0,30}(please|kindly)|please (specify|explain|elaborate|list|describe) if|^other\b|"
                           r"^(please )?(specify|explain)\b", follow_up),
 
+            # --- recruiting text / marketing opt-ins: declined -----------------
+            ("marketing", r"\bsms\b|text messag|mobile messag|marketing|newsletter|talent (community|network|pool)|"
+                          r"future (opportunities|openings|roles|positions)|job alerts|whatsapp", marketing),
+
             # --- work authorization -----------------------------------------
             ("sponsorship", r"sponsor", sponsorship),
             ("never-answer", r"citizen|u\.?s\.? person|\bitar\b|export control|\bear\b|green card|"
                              r"permanent resident|visa (status|type|category)|immigration status|"
-                             r"(current|type of|which|what) visa|work visa|\bopt\b|\bcpt\b|clearance|"
+                             r"(current|type of|which|what) visa|work visa|\bopt\b(?! ?-?(in|out))|\bcpt\b|clearance|"
                              r"country of (birth|citizenship|origin)|national(ity)?\b|date of birth|\bdob\b|"
                              r"social security|\bssn\b|criminal|convicted|felony|background check|drug|"
                              r"accommodation|reasonable adjustment",
@@ -636,9 +640,6 @@ class AnswerEngine:
             ("work-auth", r"authoriz(ed|ation) to (lawfully |legally )?work|work authorization|"
                           r"eligible to work|legally (able|permitted|entitled|allowed) to work|"
                           r"right to work|authorized to work", work_auth),
-
-            ("marketing", r"\bsms\b|text messag|marketing|newsletter|talent (community|network|pool)|"
-                          r"future (opportunities|openings|roles|positions)|job alerts|whatsapp", marketing),
 
             # --- identity ---------------------------------------------------
             ("preferred-name", r"preferred (first |given )?name|nickname|goes? by|name you (go by|prefer)|chosen name",
@@ -758,10 +759,13 @@ class AnswerEngine:
             ("gender", r"gender|\bsex\b", gender),
 
             # --- essays the profile actually contains -------------------------
-            ("essay-project", r"(challenging|difficult|complex|hardest|proud|toughest|impactful).{0,60}"
-                              r"(project|technical problem|thing you('ve| have) built)|"
+            ("essay-project", r"(challenging|difficult|complex|hardest|proud|toughest|impactful|impressive).{0,60}"
+                              r"(project|problem|thing) (that )?you('ve| have)? (built|worked on|solved|faced|tackled|"
+                              r"completed|encountered|shipped)|"
                               r"(technical |engineering |software )project you('ve| have)? (built|worked on|completed)",
-             essay_limit_ok(p["essays"]["challenging_project"])),
+             lambda q, label, ctx: None if (ctx.company and ctx.company.lower() in label)
+             or re.search(r"publicly available|our (product|company|team|mission)|we (face|are facing)", label)
+             else essay_limit_ok(p["essays"]["challenging_project"])(q, label, ctx)),
             ("essay-why-swe", r"^why (did you choose |do you want to (study|pursue) |are you (pursuing|studying) )?"
                               r"(a career in )?(software engineering|computer science|engineering|technology)\??$|"
                               r"what (drives|motivates|sparked) your (interest|passion) in "

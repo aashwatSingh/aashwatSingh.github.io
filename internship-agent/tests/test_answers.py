@@ -97,9 +97,18 @@ def test_ambiguous_authorization_options_are_blocked():
     ("How many years of experience do you have with REST APIs?", "text"),
     ("Are you holding any outstanding offers?", "select"),
     ("Why Acme?", "textarea"),
+    ("Based on what is publicly available about Acme, what is a challenging technical problem you think "
+     "we face?", "textarea"),
 ])
 def test_not_guessed(label, kind):
     blocked(label, kind=kind)
+
+
+def test_own_project_essay_is_answered():
+    assert filled("Tell us about a technical project you've worked on through a class or research.",
+                  kind="textarea") == PROFILE["essays"]["challenging_project"]
+    assert filled("Please describe the most impressive and complex project you have worked on.",
+                  kind="textarea") == PROFILE["essays"]["challenging_project"]
 
 
 def test_start_date_does_not_pick_a_range_option():
@@ -161,6 +170,11 @@ def test_prior_employment_and_legal_name():
     assert filled("Please state your full legal name:", kind="text") == PROFILE["identity"]["full_name"]
     assert ask("Full Legal Name in Native Language (e.g. Chinese Characters)", kind="text",
                required=False).action == "skip"
+
+
+def test_sms_consent_is_declined_not_blocked():
+    assert filled("SMS Consent: Do you agree to receive mobile messages from us in relation to this job "
+                  "application? Message and data rates may apply. Reply STOP to opt out.") == "No"
 
 
 def test_custom_answers_override():

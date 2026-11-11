@@ -52,7 +52,9 @@
   "work_authorization": {
     "authorized_to_work_us": true,
     "requires_sponsorship": true,
-    "over_18": true
+    "over_18": true,
+    "us_person": null,
+    "apply_when_no_sponsorship": false
   },
   "logistics": {
     "willing_to_relocate": true,
@@ -99,5 +101,6 @@
     "why_software_engineering": "",
     "challenging_project": ""
   },
-  "_comment": "Copy to candidate_profile.json (git-ignored) and fill in. Booleans below are placeholders - set every one deliberately. The agent never invents a value that is not in this file."
+  "_comment": "Copy to candidate_profile.json (git-ignored) and fill in. Booleans below are placeholders - set every one deliberately. The agent never invents a value that is not in this file.",
+  "_work_authorization_notes": "us_person: true/false, or null if you would rather decide per posting (ITAR / export-control roles then go to manual review). apply_when_no_sponsorship: set true to still apply where the employer says it will not sponsor a visa."
 }

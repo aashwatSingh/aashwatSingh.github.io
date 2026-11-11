@@ -13,6 +13,7 @@ ats/              form adapters: Greenhouse, Ashby, Lever
 llm.py            optional: Claude-drafted "Why this company?" answers
 llm_agent.py      optional: browser-use agent for portals without an adapter
 coverage_report.py  offline audit of what the engine would answer
+report.py         ready_to_submit.csv + blocking_questions.csv from the run logs
 ```
 
 ## Setup
@@ -72,8 +73,9 @@ the rule that produced it, so any submission can be audited afterwards.
 ## What it will not do
 
 **It does not get past "confirm you're a human" checks.** Greenhouse answers an automated
-submission with *"enter the 8-character code [emailed to you] to confirm you're a human"*; Lever
-puts hCaptcha on every form; Ashby scores submissions with reCAPTCHA. The agent never solves a
+submission with *"enter the 8-character code [emailed to you] to confirm you're a human"*; Ashby
+raises a reCAPTCHA image challenge on submit; Lever puts hCaptcha on every form. (The first two
+were observed on live submissions from a headless cloud browser.) The agent never solves a
 CAPTCHA and never fetches or types a verification code. Those steps are the sites asking for a
 person, so a person does them (`--assist`), or the posting goes to the manual-review queue. This
 is a deliberate difference from the original spec (steps 4.4 and 6).
@@ -83,6 +85,13 @@ is a deliberate difference from the original spec (steps 4.4 and 6).
 ratings, years of experience, "do you meet the qualifications", and company-specific essays are
 never guessed: if such a question is required, the form is not submitted and the question is
 listed in `manual_review_queue.csv`.
+
+**It does not apply where the posting rules the candidate out.** Before filling a form it reads
+the job description (from the page, or the ATS's public posting API) and skips postings that
+require U.S. citizenship or a clearance, are for graduate students only, or say the employer will
+not sponsor a visa while the profile says sponsorship is needed (`apply_when_no_sponsorship`
+overrides this). ITAR / "U.S. person" postings follow `work_authorization.us_person` in the
+profile; while that is `null` they go to manual review.
 
 To unlock more postings, answer the recurring blockers once in `custom_answers.json`:
 
@@ -107,6 +116,13 @@ python coverage_report.py --answers
 
 These two list the most common blocking questions across the queued Greenhouse postings and
 every answer the engine would give, without opening a browser.
+
+```bash
+python report.py
+```
+
+After a `--dry-run` sweep this writes `ready_to_submit.csv` (forms that are completely filled and
+only need the human step) and `blocking_questions.csv` (what stopped the rest, most common first).
 
 ## Files it writes
 
@@ -133,6 +149,6 @@ polarity, look-alike dropdown options, dated commitments) and run against a fict
 |---|---|
 | Scraper, dedup, tracker sync | exercised against the live lists and a real tracker |
 | Greenhouse / Ashby / Lever form filling | exercised against live forms in dry-run |
-| Submission | blocked by each site's human-verification step when run unattended (see above) |
+| Submission | no application has been submitted by this code yet: unattended runs stop at each site's human-verification step (see above) |
 | `--assist` human-in-the-loop wait | implemented; needs a machine with a display, not yet exercised |
 | `llm.py`, `llm_agent.py` | written against anthropic 2.x and browser-use 1.0; construct and import cleanly, not yet run against the API |

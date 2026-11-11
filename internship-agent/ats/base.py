@@ -73,11 +73,36 @@ _CLOSED = re.compile(
     r"the job you are looking for|not accepting applications|posting is closed", re.I)
 
 
-def prequalify_text(text: str) -> str | None:
-    low = " ".join(text.lower().split())
+_US_PERSON = re.compile(
+    r"must be an? u\.?s\.? person|u\.?s\.? person(s)? (status|is required|are required|only)|"
+    r"requires? .{0,60}u\.?s\.? person|limited to u\.?s\.? persons?|itar requirements?|"
+    r"(subject to|governed by|comply with|compliance with) .{0,40}(itar|international traffic in arms|"
+    r"export administration)|export[- ]controlled (information|items|technology|data)")
+_NO_SPONSORSHIP = re.compile(
+    r"(do not|don.t|does not|doesn.t|cannot|can.t|unable to|will not|won.t|not able to|are not able to) "
+    r"(currently )?(offer |provide |facilitate )?(any )?(visa |immigration |employment |work )?sponsor|"
+    r"no (visa |immigration |work )?sponsorship|sponsorship (is|will) not (be )?(available|offered|provided)|"
+    r"not (eligible|available) for (visa |immigration )?sponsorship|"
+    r"without (the )?(need for )?(current or future )?(visa |employer |immigration )?sponsorship")
+
+
+def prequalify_text(text: str, profile: dict | None = None, job: dict | None = None) -> tuple[str, str] | None:
+    """Check the posting text for hard blockers. Returns (status, reason) or None if eligible."""
+    low = " ".join(text.lower().replace("’", "'").split())
     for pattern, reason in _DISQUALIFIERS:
         if re.search(pattern, low):
-            return reason
+            return SKIPPED_INELIGIBLE, reason
+    auth = (profile or {}).get("work_authorization", {})
+    if _US_PERSON.search(low):
+        us_person = auth.get("us_person")           # true / false / null (not stated)
+        if us_person is False:
+            return SKIPPED_INELIGIBLE, "restricted to U.S. persons (ITAR / export control)"
+        if us_person is None:
+            return MANUAL_REVIEW, "US_PERSON_REQUIRED"
+    listed_no = (job or {}).get("sponsorship") == "Does Not Offer Sponsorship"
+    if auth.get("requires_sponsorship") and not auth.get("apply_when_no_sponsorship") \
+            and (listed_no or _NO_SPONSORSHIP.search(low)):
+        return SKIPPED_INELIGIBLE, "employer states it does not sponsor work visas"
     return None
 
 
@@ -113,11 +138,16 @@ class BaseAdapter:
         """Click submit. Returns (status, reason, detail)."""
         raise NotImplementedError
 
-    async def job_text(self, page: Page) -> str:
+    async def page_text(self, page: Page) -> str:
         try:
             return await page.inner_text("body", timeout=5000)
         except PWTimeout:
             return ""
+
+    async def job_text(self, page: Page, job: dict) -> str:
+        """Posting description used for pre-qualification. Adapters whose form page
+        does not show the description fetch it from the ATS's public posting API."""
+        return await self.page_text(page)
 
     # ---- shared flow ------------------------------------------------------
     async def apply(self, page: Page, job: dict, engine: AnswerEngine, ctx: Context,
@@ -129,18 +159,24 @@ class BaseAdapter:
         try:
             await page.wait_for_selector(self.form_ready_selector, timeout=20000)
         except PWTimeout:
-            text = await self.job_text(page)
+            text = await self.page_text(page)
             if _CLOSED.search(text):
                 return ApplyResult(CLOSED, "posting closed")
             return ApplyResult(MANUAL_REVIEW, "FORM_NOT_FOUND", "application form did not render")
         await page.wait_for_timeout(1500)
 
-        text = await self.job_text(page)
-        if _CLOSED.search(text[:3000]):
+        if _CLOSED.search((await self.page_text(page))[:3000]):
             return ApplyResult(CLOSED, "posting closed")
-        reason = prequalify_text(text)
-        if reason:
-            return ApplyResult(SKIPPED_INELIGIBLE, reason)
+        text = await self.job_text(page, job)
+        if not text.strip():
+            return ApplyResult(MANUAL_REVIEW, "NO_JOB_DESCRIPTION",
+                               "could not read the posting text to check eligibility")
+        blocked = prequalify_text(text, engine.p, job)
+        if blocked:
+            status, reason = blocked
+            detail = ("the posting is limited to U.S. persons (ITAR / export control); set "
+                      "work_authorization.us_person in the profile") if reason == "US_PERSON_REQUIRED" else ""
+            return ApplyResult(status, reason, detail)
 
         answers: list[dict] = []
         unknowns: list[str] = []
@@ -223,6 +259,21 @@ class SubmitWatch:
         if self.gate:
             return MANUAL_REVIEW, self.gate[0], self.gate[1] + " (not completed in time)"
         return MANUAL_REVIEW, "NO_CONFIRMATION", "no confirmation after clicking submit"
+
+
+def fetch_json(url: str):
+    """Small synchronous GET for public posting APIs (run via asyncio.to_thread)."""
+    import requests
+    try:
+        r = requests.get(url, timeout=20)
+        return r.json() if r.ok else None
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def strip_html(text: str) -> str:
+    import html
+    return " ".join(re.sub(r"<[^>]+>", " ", html.unescape(html.unescape(text or ""))).split())
 
 
 def _loggable(value):

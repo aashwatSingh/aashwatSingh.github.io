@@ -54,7 +54,9 @@
  "work_authorization": {
   "authorized_to_work_us": true,
   "requires_sponsorship": true,
-  "over_18": true
+  "over_18": true,
+  "us_person": null,
+  "apply_when_no_sponsorship": false
  },
  "logistics": {
   "willing_to_relocate": true,

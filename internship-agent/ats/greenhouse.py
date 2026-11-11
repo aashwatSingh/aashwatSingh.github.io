@@ -1,6 +1,7 @@
 """Greenhouse adapter (job-boards.greenhouse.io hosted + embedded forms)."""
 from __future__ import annotations
 
+import asyncio
 import re
 from urllib.parse import parse_qs, urlparse
 
@@ -8,7 +9,8 @@ import requests
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
 from answers import MONTHS, Decision, Question
-from ats.base import MANUAL_REVIEW, SUBMITTED, BaseAdapter, FormField, SubmitWatch, visible_captcha
+from ats.base import (MANUAL_REVIEW, SUBMITTED, BaseAdapter, FormField, SubmitWatch, fetch_json,
+                      strip_html, visible_captcha)
 
 EXTRACT_JS = r"""
 () => {
@@ -96,6 +98,15 @@ class GreenhouseAdapter(BaseAdapter):
             raise LookupError("could not resolve the Greenhouse board for this company-hosted posting")
         job["gh_board"] = board
         return f"https://job-boards.greenhouse.io/embed/job_app?for={board}&token={job_id}"
+
+    async def job_text(self, page: Page, job: dict) -> str:
+        # Hosted pages show the description above the form; embedded forms do not.
+        qs = parse_qs(urlparse(page.url).query)
+        if "/embed/" in page.url and qs.get("for") and qs.get("token"):
+            data = await asyncio.to_thread(
+                fetch_json, f"https://boards-api.greenhouse.io/v1/boards/{qs['for'][0]}/jobs/{qs['token'][0]}") or {}
+            return f"{data.get('title', '')}\n{strip_html(data.get('content', ''))}"
+        return await self.page_text(page)
 
     # ---- fields -------------------------------------------------------------
     async def extract(self, page: Page) -> list[FormField]:

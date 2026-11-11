@@ -162,7 +162,7 @@ async def run(args) -> int:
     deadline = time.time() + args.max_minutes * 60 if args.max_minutes else None
     async with async_playwright() as pw:
         context = await pw.chromium.launch_persistent_context(
-            str(config.BROWSER_PROFILE_DIR), headless=not args.headed,
+            args.profile_dir, headless=not args.headed,
             viewport={"width": 1280, "height": 1600}, accept_downloads=False)
         context.set_default_timeout(15000)
         try:
@@ -266,6 +266,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--assist", type=int, nargs="?", const=300, default=0, metavar="SECONDS",
                     help="human-in-the-loop: when a site asks to confirm you are human (CAPTCHA, emailed "
                          "code), wait this long for you to do it in the visible browser (implies --headed)")
+    ap.add_argument("--profile-dir", default=str(config.BROWSER_PROFILE_DIR),
+                    help="Chromium user-data directory (one runner per directory)")
     ap.add_argument("--only-url", help="apply to this single posting")
     ap.add_argument("--company", help="company name for --only-url postings not in the queue")
     ap.add_argument("--title", help="role title for --only-url postings not in the queue")
