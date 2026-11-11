@@ -48,6 +48,7 @@ class ApplyResult:
     answers: list[dict] = field(default_factory=list)
     unknowns: list[str] = field(default_factory=list)
     screenshot: str = ""
+    learned: list[dict] = field(default_factory=list)     # answers the candidate typed in the browser
 
 
 class FillError(RuntimeError):
@@ -124,8 +125,15 @@ class BaseAdapter:
     def form_url(self, job: dict) -> str:
         return job["url"]
 
-    async def extract(self, page: Page) -> list[FormField]:
+    async def extract(self, page: Page, include_filled: bool = False) -> list[FormField]:
         raise NotImplementedError
+
+    async def read_value(self, page: Page, f: FormField):
+        """What is currently entered in a field: text, the chosen option, or a list of ticked options."""
+        try:
+            return await page.evaluate(READ_VALUE_JS, [f.sel, f.widget])
+        except Exception:                                  # noqa: BLE001 - page navigating / field gone
+            return None
 
     async def read_options(self, page: Page, f: FormField) -> list[str]:
         return f.question.options
@@ -145,23 +153,35 @@ class BaseAdapter:
         """Evidence that the application went through (a URL or phrase), else None."""
         return None
 
-    async def wait_for_human_finish(self, page: Page, unknowns: list[str]) -> tuple[str, str, str] | None:
-        """Blitz mode: the candidate answers what the profile could not, then submits in the browser."""
+    async def wait_for_human_finish(self, page: Page, unknown_fields: list[FormField]
+                                    ) -> tuple[tuple[str, str, str] | None, list[dict]]:
+        """Blitz mode: the candidate answers what the profile could not, then submits in the browser.
+
+        While waiting, the values typed into those fields are noted so the same question can be
+        answered automatically next time (see answers.remember_answers).
+        """
         wait = max(self.human_wait_s, 180)
         print("\a[ACTION REQUIRED] Answer these in the browser window, then click Submit "
               f"(waiting up to {wait}s; everything else is filled):", flush=True)
-        for u in unknowns[:8]:
-            print(f"      - {u[:110]}", flush=True)
+        for f in unknown_fields[:8]:
+            print(f"      - {f.question.label[:110]}", flush=True)
+        seen: dict[str, dict] = {}
         deadline = time.monotonic() + wait
         while time.monotonic() < deadline:
             await page.wait_for_timeout(700)
+            for f in unknown_fields:
+                if f.widget == "file":
+                    continue
+                value = await self.read_value(page, f)
+                if value:
+                    seen[f.key] = {"label": f.question.label, "kind": f.question.kind, "value": value}
             try:
                 proof = await self.confirmed(page)
             except Exception:                              # noqa: BLE001 - page navigating
                 continue
             if proof:
-                return SUBMITTED, "completed by the candidate in the browser", proof
-        return None
+                return (SUBMITTED, "completed by the candidate in the browser", proof), list(seen.values())
+        return None, []
 
     async def page_text(self, page: Page) -> str:
         try:
@@ -208,6 +228,7 @@ class BaseAdapter:
         ctx.job_text = text
         answers: list[dict] = []
         unknowns: list[str] = []
+        unknown_fields: list[FormField] = []
         handled: set[str] = set()
         own_words_only = False       # the form carries an AI-use / authorship attestation
         for _ in range(4):                       # re-extract: answers can reveal new fields
@@ -249,6 +270,7 @@ class BaseAdapter:
                                 "rule": decision.rule, "note": decision.note})
                 if decision.action == "unknown":
                     unknowns.append(q.label)
+                    unknown_fields.append(f)
             await page.wait_for_timeout(400)
 
         if not answers:
@@ -256,9 +278,9 @@ class BaseAdapter:
         await _screenshot(page, shot_path)
         if unknowns:
             if self.human_wait_s and not dry_run:
-                done = await self.wait_for_human_finish(page, unknowns)
+                done, learned = await self.wait_for_human_finish(page, unknown_fields)
                 if done:
-                    return ApplyResult(*done, answers, unknowns, shot_path)
+                    return ApplyResult(*done, answers, unknowns, shot_path, learned)
             return ApplyResult(MANUAL_REVIEW, "UNANSWERED_REQUIRED",
                                " | ".join(u[:90] for u in unknowns[:8]), answers, unknowns, shot_path)
         if dry_run:
@@ -316,6 +338,40 @@ def fetch_json(url: str):
 def strip_html(text: str) -> str:
     import html
     return " ".join(re.sub(r"<[^>]+>", " ", html.unescape(html.unescape(text or ""))).split())
+
+
+# Reads back what a person entered. `sel` is either the control itself or the question's container;
+# `widget` is the adapter's name for the control, so the right part of a composite field is read.
+READ_VALUE_JS = r"""
+([sel, widget]) => {
+  const el = document.querySelector(sel);
+  if (!el) return null;
+  const clean = s => (s || '').replace(/\s+/g, ' ').replace(/\*\s*$/, '').trim();
+  const textOf = box => (box && box.value && box.value !== 'undefined') ? box.value : null;
+  const isSelectInput = el.matches('input.select__input, input[role=combobox]');
+  if (el.matches('input, textarea') && !isSelectInput) return textOf(el);            // a plain text control
+  const root = el.matches('input, select')
+    ? (el.closest('.select-shell, fieldset, .application-question, [class*="_fieldEntry_"]') || el.parentElement) : el;
+  if (widget === 'text')
+    return textOf(root.querySelector('textarea, input:not([type=hidden]):not([type=file]):not([type=radio]):not([type=checkbox])'));
+  const pressed = root.querySelector('[class*="_yesno_"] button[aria-pressed="true"], [class*="_yesno_"] button[class*="_active_"]');
+  if (widget === 'yesno' || pressed) return pressed ? clean(pressed.innerText) : null;
+  const labelOf = c => clean((c.id && document.querySelector(`label[for="${CSS.escape(c.id)}"]`)?.innerText)
+                             || c.closest('label')?.innerText || c.value);
+  const ticked = [...root.querySelectorAll('input[type=radio]:checked, input[type=checkbox]:checked')];
+  if (ticked.length) {
+    const labels = ticked.map(labelOf).filter(Boolean);
+    return ticked[0].type === 'radio' ? (labels[0] || null) : labels;
+  }
+  const multi = [...root.querySelectorAll('.select__multi-value__label')].map(e => clean(e.innerText));
+  if (multi.length) return multi;
+  const single = root.querySelector('.select__single-value');
+  if (single) return clean(single.innerText);
+  const dropdown = el.matches('select') ? el : root.querySelector('select');
+  if (dropdown && dropdown.value) return clean(dropdown.options[dropdown.selectedIndex].text);
+  return textOf(root.querySelector('textarea, input:not([type=hidden]):not([type=file]):not([type=radio]):not([type=checkbox])'));
+}
+"""
 
 
 def _loggable(value):

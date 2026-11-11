@@ -79,10 +79,10 @@ class LeverAdapter(BaseAdapter):
         return " ".join([data.get("text", ""), data.get("descriptionPlain") or "", lists,
                          data.get("additionalPlain") or ""]).strip()
 
-    async def extract(self, page: Page) -> list[FormField]:
+    async def extract(self, page: Page, include_filled: bool = False) -> list[FormField]:
         fields = []
         for r in await page.evaluate(EXTRACT_JS):
-            if r.get("filled"):
+            if r.get("filled") and not include_filled:
                 continue
             q = Question(label=r["label"], kind=r["kind"], required=bool(r["required"]),
                          options=r.get("options") or [], field_id=r.get("id") or "",
@@ -104,6 +104,14 @@ class LeverAdapter(BaseAdapter):
         if f.widget == "file":
             await page.set_input_files(f"{f.sel} input[type=file]", value)
             await page.wait_for_timeout(4000)               # Lever parses the resume before continuing
+            # Its parser copies the most recent employer into "Current company"; only keep that
+            # when the profile really lists a current job there.
+            org = page.locator('input[name="org"]')
+            if await org.count():
+                parsed = (await org.input_value()).strip().lower()
+                current = [x["company"].lower() for x in profile.get("experience") or [] if x.get("current")]
+                if parsed and not any(parsed in c or c in parsed for c in current):
+                    await org.fill("")
             return
         if f.widget == "text":
             target = page.locator(f"{f.sel} textarea, {f.sel} input:not([type=hidden])").first

@@ -111,10 +111,10 @@ class AshbyAdapter(BaseAdapter):
                 return f"{j.get('title', '')}\n{j.get('descriptionPlain') or ''}"
         return ""
 
-    async def extract(self, page: Page) -> list[FormField]:
+    async def extract(self, page: Page, include_filled: bool = False) -> list[FormField]:
         fields = []
         for r in await page.evaluate(EXTRACT_JS):
-            if r.get("filled"):
+            if r.get("filled") and not include_filled:
                 continue
             q = Question(label=r["label"], kind=r["kind"], required=bool(r["required"]),
                          options=r.get("options") or [], field_id=r.get("id") or "",

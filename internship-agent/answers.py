@@ -446,8 +446,10 @@ class AnswerEngine:
                 continue
             if isinstance(answer, bool):
                 intent = YesNo(answer)
+            elif isinstance(answer, list):
+                intent = Multi([str(a) for a in answer])
             elif q.kind in CHOICE_KINDS:
-                intent = Text(str(answer), [re.escape(str(answer))])
+                intent = Text(str(answer), [rf"^{re.escape(str(answer))}$", re.escape(str(answer))])
             else:
                 intent = Text(str(answer))
             d = self._apply(intent, q, "custom")
@@ -1544,6 +1546,38 @@ _ID_RULES = {"first-name", "last-name", "preferred-name", "email", "phone", "lin
 def _char_limit(q: Question) -> int | None:
     m = re.search(r"(?:max(?:imum)?|limit|up to)\D{0,12}(\d{2,5})\s*char", f"{q.label} {q.description}", re.I)
     return int(m.group(1)) if m else None
+
+
+def pattern_for(label: str) -> str:
+    """The custom_answers.json pattern that matches exactly this question."""
+    return "^" + re.escape(norm(label)) + "$"
+
+
+def remember_answers(items: list[dict], company: str, path: Path | None = None) -> int:
+    """Store answers the candidate gave in the browser so the same question is answered next time.
+
+    items: {"label", "kind", "value"} as read back from the form. Not remembered: uploads, empty
+    values, and AI-use / authorship attestations (those are answered by the person every time).
+    Essays and questions that name the employer are stored for that employer only.
+    """
+    path = Path(path or config.CUSTOM_ANSWERS_JSON)
+    custom = load_custom_answers(path)
+    added = 0
+    for item in items:
+        label, value, kind = item.get("label") or "", item.get("value"), item.get("kind") or "text"
+        if not label.strip() or not value or kind == "file" or AI_POLICY.search(label):
+            continue
+        entry = {"pattern": pattern_for(label), "answer": value, "learned_from": company}
+        essay = isinstance(value, str) and (kind == "textarea" or len(value) > 120)
+        if company and (company.lower() in label.lower() or essay):
+            entry["company"] = "^" + re.escape(company) + "$"
+        custom = [e for e in custom if not (e.get("pattern") == entry["pattern"]
+                                            and e.get("company") == entry.get("company"))]
+        custom.append(entry)
+        added += 1
+    if added:
+        path.write_text(json.dumps(custom, indent=1, ensure_ascii=False), encoding="utf-8")
+    return added
 
 
 def existing_file(path: str | None) -> str | None:

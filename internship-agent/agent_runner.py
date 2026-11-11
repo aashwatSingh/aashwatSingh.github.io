@@ -30,7 +30,7 @@ from playwright.async_api import async_playwright
 import config
 import dedup
 import scraper
-from answers import AnswerEngine, Context
+from answers import AnswerEngine, Context, load_custom_answers, remember_answers
 from ats import ADAPTERS, adapter_for
 from ats.base import (CLOSED, DRY_RUN_OK, ERROR, MANUAL_REVIEW, SKIPPED_INELIGIBLE, SUBMITTED, ApplyResult)
 
@@ -204,6 +204,10 @@ async def run(args) -> int:
                 if result.status == SUBMITTED:
                     ledger.record_application(job)
                     job["status"] = "applied"
+                    if result.learned:
+                        kept = remember_answers(result.learned, job["company"])
+                        engine.custom = load_custom_answers()
+                        log(f"  remembered {kept} answer(s) you gave in the browser (custom_answers.json)")
                 elif result.status == DRY_RUN_OK:
                     pass                                   # stays pending for the live run
                 elif result.status == MANUAL_REVIEW:

@@ -119,11 +119,11 @@ class GreenhouseAdapter(BaseAdapter):
         return await self.page_text(page)
 
     # ---- fields -------------------------------------------------------------
-    async def extract(self, page: Page) -> list[FormField]:
+    async def extract(self, page: Page, include_filled: bool = False) -> list[FormField]:
         raw = await page.evaluate(EXTRACT_JS)
         fields = []
         for r in raw:
-            if r.get("filled"):
+            if r.get("filled") and not include_filled:
                 continue
             q = Question(label=r["label"], kind=r["kind"], required=bool(r["required"]),
                          options=r.get("options") or [], field_id=r.get("id") or "",
