@@ -1,0 +1,108 @@
+{
+ "resume_path": "./resume.pdf",
+ "identity": {
+  "first_name": "Jordan",
+  "middle_name": "",
+  "last_name": "Rivera",
+  "preferred_name": "Jordan",
+  "full_name": "Jordan Rivera",
+  "email": "jordan@example.com",
+  "phone_formatted": "(555) 010-0199",
+  "phone_dashed": "555-010-0199",
+  "phone_digits": "5550100199",
+  "phone_type": "Mobile",
+  "country_code": "+1"
+ },
+ "address": {
+  "line1": "1 Example Way",
+  "line2": "",
+  "city": "Springfield",
+  "state": "Illinois",
+  "state_abbr": "IL",
+  "postal_code": "62701",
+  "country": "United States"
+ },
+ "links": {
+  "linkedin": "https://www.linkedin.com/in/example",
+  "github": "https://github.com/example",
+  "portfolio": "https://github.com/example"
+ },
+ "portal": {
+  "username": "jordan@example.com",
+  "password": ""
+ },
+ "education": {
+  "school": "Example State University",
+  "school_aliases": [
+   "Example State"
+  ],
+  "school_location": "Springfield, IL",
+  "degree": "Bachelor of Science",
+  "degree_short": "B.S.",
+  "degree_level": "Bachelor's",
+  "major": "Computer Science",
+  "minor": "",
+  "class_standing": "Junior",
+  "start_month": 8,
+  "start_year": 2024,
+  "grad_month": 5,
+  "grad_year": 2028,
+  "gpa": "2.9",
+  "gpa_scale": "4.0",
+  "coursework": "Data Structures, Algorithms"
+ },
+ "work_authorization": {
+  "authorized_to_work_us": true,
+  "requires_sponsorship": true,
+  "over_18": true
+ },
+ "logistics": {
+  "willing_to_relocate": true,
+  "onsite": true,
+  "hybrid": true,
+  "remote": true,
+  "earliest_start": "2027-05-17",
+  "latest_end": "2027-08-20",
+  "desired_hourly_rate": "30",
+  "desired_compensation_text": "Open / Negotiable",
+  "heard_about": [
+   "Company Website",
+   "Job Board",
+   "LinkedIn"
+  ],
+  "previously_worked_or_applied": false,
+  "non_compete": false,
+  "relatives_at_company": false,
+  "worked_for_us_federal_government": false
+ },
+ "eeo": {
+  "gender": "Female",
+  "sexual_orientation": "",
+  "hispanic_or_latino": false,
+  "race": "White",
+  "race_subcategory": "",
+  "veteran": false,
+  "disability": false
+ },
+ "skills": {
+  "languages": [
+   "Java",
+   "Python"
+  ],
+  "backend": [
+   "PostgreSQL"
+  ],
+  "tools": [
+   "Git"
+  ],
+  "never_claim": [
+   "Docker",
+   "REST APIs"
+  ]
+ },
+ "experience": [],
+ "essays": {
+  "why_software_engineering": "I like building reliable software.",
+  "challenging_project": "I built a caching layer."
+ }
+}

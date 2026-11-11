@@ -1,0 +1,103 @@
+{
+  "resume_path": "./resume.pdf",
+  "identity": {
+    "first_name": "",
+    "middle_name": "",
+    "last_name": "",
+    "preferred_name": "",
+    "full_name": "",
+    "email": "",
+    "phone_formatted": "",
+    "phone_dashed": "",
+    "phone_digits": "",
+    "phone_type": "",
+    "country_code": ""
+  },
+  "address": {
+    "line1": "",
+    "line2": "",
+    "city": "",
+    "state": "",
+    "state_abbr": "",
+    "postal_code": "",
+    "country": ""
+  },
+  "links": {
+    "linkedin": "",
+    "github": "",
+    "portfolio": ""
+  },
+  "portal": {
+    "username": "",
+    "password": ""
+  },
+  "education": {
+    "school": "",
+    "school_aliases": [],
+    "school_location": "",
+    "degree": "",
+    "degree_short": "",
+    "degree_level": "",
+    "major": "",
+    "minor": "",
+    "class_standing": "",
+    "start_month": 0,
+    "start_year": 0,
+    "grad_month": 0,
+    "grad_year": 0,
+    "gpa": "",
+    "gpa_scale": "",
+    "coursework": ""
+  },
+  "work_authorization": {
+    "authorized_to_work_us": true,
+    "requires_sponsorship": true,
+    "over_18": true
+  },
+  "logistics": {
+    "willing_to_relocate": true,
+    "onsite": true,
+    "hybrid": true,
+    "remote": true,
+    "earliest_start": "",
+    "latest_end": "",
+    "desired_hourly_rate": "",
+    "desired_compensation_text": "",
+    "heard_about": [],
+    "previously_worked_or_applied": false,
+    "non_compete": false,
+    "relatives_at_company": false,
+    "worked_for_us_federal_government": false
+  },
+  "eeo": {
+    "gender": "",
+    "sexual_orientation": "",
+    "hispanic_or_latino": false,
+    "race": "",
+    "race_subcategory": "",
+    "veteran": false,
+    "disability": false
+  },
+  "skills": {
+    "languages": [],
+    "backend": [],
+    "tools": [],
+    "never_claim": []
+  },
+  "experience": [
+    {
+      "title": "",
+      "company": "",
+      "location": "",
+      "start": "",
+      "end": "",
+      "current": false,
+      "bullets": []
+    }
+  ],
+  "essays": {
+    "why_software_engineering": "",
+    "challenging_project": ""
+  },
+  "_comment": "Copy to candidate_profile.json (git-ignored) and fill in. Booleans below are placeholders - set every one deliberately. The agent never invents a value that is not in this file."
+}

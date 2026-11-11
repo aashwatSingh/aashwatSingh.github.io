@@ -1,0 +1,20 @@
+# --- Personal data: this repo is served by GitHub Pages, so none of this may be committed ---
+candidate_profile.json
+swe_internship_agent_prompt.md
+*.pdf
+internship_tracker.xlsx
+internship_tracker.backup-*.xlsx
+applied_tracker.csv
+manual_review_queue.csv
+custom_answers.json
+.env
+
+# --- Runtime state ---
+job_queue.json
+run_state.json
+logs/
+.browser_profile/
+.cache/
+__pycache__/
+.pytest_cache/
+.browser_profile_llm/
