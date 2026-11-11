@@ -69,6 +69,16 @@ EXTRACT_JS = r"""
 }
 """
 
+# Returns how many characters the person has typed into the security-code boxes; optionally focuses the first.
+CODE_STATE_JS = r"""
+(focusFirst) => {
+  let boxes = [...document.querySelectorAll('input[id^="security-input"], input[autocomplete="one-time-code"]')];
+  if (!boxes.length) boxes = [...document.querySelectorAll('input[maxlength="1"]')].filter(e => e.offsetParent);
+  if (focusFirst && boxes[0]) { boxes[0].scrollIntoView({block: 'center'}); boxes[0].focus(); }
+  return boxes.map(e => e.value || '').join('').length;
+}
+"""
+
 EDU_DATE = re.compile(r"^(start|end)-(month|year)--\d+$")
 
 
@@ -251,6 +261,7 @@ class GreenhouseAdapter(BaseAdapter):
         await button.scroll_into_view_if_needed()
         await button.click()
         watch = SubmitWatch(self, 15)
+        focused = resubmitted = False
         while watch.running():
             await page.wait_for_timeout(500)
             url = page.url
@@ -266,6 +277,13 @@ class GreenhouseAdapter(BaseAdapter):
                                         "Greenhouse emailed a human-verification code")
                 if done:
                     return done
+                # A person supplies the code; the runner only focuses the box and presses Submit after.
+                typed = await page.evaluate(CODE_STATE_JS, not focused)
+                focused = True
+                if typed >= 8 and not resubmitted:
+                    resubmitted = True
+                    await page.wait_for_timeout(400)
+                    await button.click()
                 continue
             if await visible_captcha(page):
                 done = watch.human_gate("CAPTCHA", "reCAPTCHA challenge shown on submit")

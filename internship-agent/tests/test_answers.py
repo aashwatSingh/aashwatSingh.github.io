@@ -88,13 +88,9 @@ def test_ambiguous_authorization_options_are_blocked():
     ("Why are you interested in Acme's Software Engineering Internship?", "textarea"),
     ("Is there any other context you'd like to share about your U.S. Immigration sponsorship needs?", "textarea"),
     ("Do you have experience working, studying or collaborating remotely?", "select"),
-    ("Will you be available for a full-time role immediately post-internship?", "select"),
     ("Are you able to be onsite in San Carlos, CA from Feb 1st - Feb 5th, 2027?", "select"),
     ("Are you comfortable working onsite 5 days a week and commit to 55 hours per week?", "select"),
-    ("Are you local to NYC or the Tri-State area and able to commute in for a Hybrid work schedule?", "select"),
     ("After your review of the job description, do you meet each of the basic qualifications?", "select"),
-    ("Do you have experience with Docker?", "select"),
-    ("How many years of experience do you have with REST APIs?", "text"),
     ("Are you holding any outstanding offers?", "select"),
     ("Why Acme?", "textarea"),
     ("Based on what is publicly available about Acme, what is a challenging technical problem you think "
@@ -138,7 +134,11 @@ def test_gpa_blank_when_optional_and_exact_when_required():
 def test_graduation():
     assert filled("What is your expected graduation year?", kind="text") == "2028"
     assert filled("Expected graduation", options=["Fall 2027", "Spring 2028", "Fall 2028"]) == "Spring 2028"
-    blocked("Will you be graduating before September 2027?")
+    assert filled("Will you be graduating before September 2027?") == "No"
+    assert filled("Are you currently enrolled in a bachelor's degree program with anticipated graduation "
+                  "between December 2027 and June 2030?") == "Yes"
+    assert filled("I'm a current student aiming to complete my degree in either Fall 2027 or Spring 2028.",
+                  kind="checkbox") is True
 
 
 def test_dated_program_inside_window_is_yes():
@@ -181,3 +181,119 @@ def test_custom_answers_override():
     eng = AnswerEngine(PROFILE, custom_answers=[{"pattern": "outstanding offers", "answer": False}])
     d = eng.resolve(Question("Are you holding any outstanding offers?", "select", True, YN), Context())
     assert (d.action, d.value) == ("fill", "No")
+
+
+# --- extended coverage -------------------------------------------------------
+def test_never_claimed_and_unlisted_tech_is_no_or_zero():
+    assert filled("Do you have experience with Docker?") == "No"
+    assert filled("Do you have experience building REST APIs?") == "No"
+    assert filled("Do you have experience with Kubernetes?") == "No"
+    assert filled("Do you have experience with Python?") == "Yes"
+    assert filled("How many years of experience do you have with REST APIs?", kind="text") == "0"
+    assert filled("How many years of experience do you have with Docker?", kind="number") == "0"
+
+
+def test_years_of_experience_follow_the_profile():
+    assert filled("How many years of programming experience do you have?", kind="text") == "1"
+    assert filled("Years of full-time professional experience", kind="number") == "0"
+    assert filled("Years of experience", options=["0-1", "2-3", "4+"]) == "0-1"
+
+
+def test_local_questions_use_the_address():
+    assert filled("Are you local to NYC or the Tri-State area and able to commute in?") == "No"
+    assert filled("Are you located in the United States?") == "Yes"
+    opts = ["Yes, I already live in or near New York City", "Yes, I will relocate to New York City", "No"]
+    assert filled("Are you based in New York City?", options=opts) == opts[1]
+
+
+def test_post_internship_and_high_school():
+    assert filled("Will you be available for a full-time role immediately post-internship?",
+                  options=["Yes", "No", "I am awaiting further information"]) == "No"
+    assert filled("Please confirm you are currently enrolled in high school.") == "No"
+    assert filled("Are you a current University of Waterloo student?") == "No"
+
+
+def test_office_preference_order():
+    eng = AnswerEngine(PROFILE, custom_answers=[])
+    ctx = Context(company="Acme")
+    opts = ["London, UK", "New York, NY", "Seattle, WA", "Austin, TX"]
+    first = eng.resolve(Question("First location preference:", "select", True, opts), ctx)
+    second = eng.resolve(Question("Second location preference", "select", True, opts), ctx)
+    assert (first.value, second.value) == ("Austin, TX", "Seattle, WA")
+    blocked("Preferred Work Location", options=["London", "Paris", "Singapore"])
+
+
+def test_misc_extended():
+    assert filled("Which programming language would you like to work with during your internship?",
+                  kind="text") == "Python"
+    assert filled("Please confirm the season you are applying for.",
+                  options=["Spring 2027", "Summer 2027", "Fall 2027"]) == "Summer 2027"
+    assert filled("What type of position are you applying for?", options=["Full-time", "Internship"]) == "Internship"
+    assert filled("Are you currently employed by a client, partner, or competitor of Acme?") == "No"
+    assert filled("Please include your middle name. If you do not have one, please enter N/A", kind="text") == "N/A"
+    assert filled("Which Acme campus event did you attend? Please enter N/A if not applicable.", kind="text") == "N/A"
+    assert filled("Who is your current or previous employer?", kind="text") == "Example Labs"
+    assert filled("Please re-confirm the university you currently attend", kind="text") == PROFILE["education"]["school"]
+    assert filled("What is your desired hourly rate? (numbers only)", kind="text") == "40"
+    assert filled("Expected annual salary", kind="number") == "80000"
+    assert filled("I confirm all answers provided by me within this application are true and correct.",
+                  kind="checkbox") is True
+    blocked("The Mutual Arbitration Agreement is legally binding on you and the company.")
+    blocked("Do you have any outstanding offers or deadlines?")
+
+
+def test_graduation_windows():
+    assert filled("Will you graduate from January 2028-Summer 2028?") == "Yes"
+    assert filled("Are you graduating in December 2027 or May/June 2028?") == "Yes"
+    assert filled("Are you graduating in December 2027 or December 2028?") == "No"
+    assert filled("Will you be an active college student at the time of this internship?") == "Yes"
+
+
+def test_audit_regressions_round_two():
+    assert filled("If you are based in the U.S. please provide your zipcode:", kind="text") \
+        == PROFILE["address"]["postal_code"]
+    assert filled("Internship Duration", options=["3 months", "4 months", "6 months", "12 months"]) == "3 months"
+    opts = ["I will be enrolled in a bachelor's degree program by the start",
+            "I will be enrolled in a graduate degree program by the start", "None of the above"]
+    assert filled("Please select your enrollment status:", options=opts) == opts[0]
+    blocked("How much experience in C programming language do you have?",
+            options=["Less than 3 months", "3-5 months", "6-9 months", "10 months +"])
+    assert filled("Do you have housing accommodations in the Austin area?") == "No"
+    assert filled("Will you be local to Chicago for the summer of 2027?") == "Yes"
+    blocked("Please provide your university email address.", kind="text")
+
+
+def test_audit_regressions_round_three():
+    assert filled("When did you begin your current degree program? Please answer in MM/YYYY format (e.g. 08/2022)",
+                  kind="text") == "08/2024"
+    assert filled("When do you expect to complete your current degree program? Please answer in MM/YYYY format "
+                  "(e.g. 08/2022)", kind="text") == "05/2028"
+    for label in ("Tell us about your two strongest technical accomplishments from school or past internships.",
+                  "Technical Accomplishments - School/Internships"):
+        d = ask(label, kind="textarea", required=False)
+        assert d.action != "fill" or d.value != PROFILE["education"]["school"], label
+    assert filled("Current school or university:", kind="text") == PROFILE["education"]["school"]
+
+
+def test_audit_regressions_round_four():
+    # mentions the military but is not a veteran-status question
+    blocked("Acme provides technology and support to the United States military and allied forces. Are you "
+            "comfortable contributing to this mission?", options=["Yes", "No", "Other"])
+    assert filled("Have you served in the military?") == "No"
+    opts = ["Crystal City, Virginia", "Dallas, Texas", "San Diego, California", "Boston, Massachusetts"]
+    assert filled("Which of our office(s) would you be willing to work from/relocate to?", options=opts) == "Dallas, Texas"
+    assert filled("Prior US Government Employment?", kind="boolean", options=YN) == "No"
+
+
+def test_blockers_round_five():
+    assert filled("What intern season are you interested in?", options=["Spring 2027", "Summer 2027"]) == "Summer 2027"
+    assert filled("I understand that this position requires me to work on-site.", options=["I understand"]) == "I understand"
+    assert filled("Are you available for a minimum 12 week internship?") == "Yes"
+    assert filled("Do you have, or are you currently pursuing, a college degree?") == "Yes"
+    assert filled("What year do you intend to complete your degree?", kind="text") == "2028"
+    assert filled("What class year will you be entering in Fall 2027?",
+                  options=["Sophomore", "Junior", "Senior", "Graduate"]) == "Senior"
+    assert filled("What is your most recently completed form of education?",
+                  options=["High School", "Associate", "Bachelor's", "Master's"]) == "High School"
+    assert filled("Your current location", kind="text") == "Springfield, IL"
+    blocked("Do you have prior internship or co-op experience?")

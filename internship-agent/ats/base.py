@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
 import config
+import essays
 from answers import AnswerEngine, Context, Decision, Question
 
 SUBMITTED = "submitted"
@@ -63,6 +64,8 @@ _DISQUALIFIERS = [
     (r"(must|required to|need to|ability to|able to) (hold|have|possess|obtain|maintain)\b.{0,40}"
      r"(security )?clearance|active (top )?secret|\bts/sci\b|clearance (is )?required",
      "requires a security clearance"),
+    (r"(currently|must be) (enrolled in|attending|a) (a )?high school|high school (students?|juniors?|seniors?) "
+     r"(only|who|are)|for high school students", "for high-school students"),
     (r"(must be|currently) (enrolled in|pursuing|working towards?) an? (ph\.?d|doctoral|master'?s|m\.?s\.?|mba)\b"
      r"(?!.{0,60}(bachelor|undergrad|b\.?s\.?\b|or\b))",
      "open to graduate students only"),
@@ -113,9 +116,9 @@ class BaseAdapter:
     # (CAPTCHA, emailed code) in a visible browser. 0 = unattended: such
     # postings go straight to manual review. Set by the runner (--assist).
     human_wait_s = 0
-    # Optional callable(question, job, page_text, profile) -> str | None for
-    # "Why this company?" essays (llm.why_company_answer). None = never drafted.
-    essay_writer = None
+    # Open-ended questions the fact rules cannot answer are drafted from the
+    # resume by essays.generate (templates, or Claude when a key is set).
+    write_essays = True
 
     # ---- adapter hooks ----------------------------------------------------
     def form_url(self, job: dict) -> str:
@@ -171,6 +174,8 @@ class BaseAdapter:
         if not text.strip():
             return ApplyResult(MANUAL_REVIEW, "NO_JOB_DESCRIPTION",
                                "could not read the posting text to check eligibility")
+        if job.get("term_unverified") and not re.search(r"2027|\bsummer\b", text, re.I):
+            return ApplyResult(SKIPPED_INELIGIBLE, "posting does not mention Summer or 2027")
         blocked = prequalify_text(text, engine.p, job)
         if blocked:
             status, reason = blocked
@@ -199,10 +204,13 @@ class BaseAdapter:
                             q.options = []
                             f.extra["options_error"] = str(exc)[:120]
                     decision = engine.resolve(q, ctx)
-                if decision.action == "unknown" and q.kind == "textarea" and self.essay_writer:
-                    draft = await asyncio.to_thread(self.essay_writer, q.label, job, text, engine.p)
+                if decision.action != "fill" and q.kind in ("textarea", "text") and self.write_essays \
+                        and decision.rule in ("no-rule", "experience", "follow-up", "essay-project", "essay-why-swe"):
+                    draft = await asyncio.to_thread(
+                        essays.generate, q.label, job, text, engine.p, q.description, q.required,
+                        38 if q.kind == "text" else None)        # single-line inputs: keep it short
                     if draft:
-                        decision = Decision("fill", draft, "llm-why-company")
+                        decision = Decision("fill", draft[1], draft[0])
                 if decision.action == "fill":
                     try:
                         await self.fill(page, f, decision.value, engine.p)
@@ -251,8 +259,11 @@ class SubmitWatch:
         if self.gate is None:
             self.gate = (reason, detail)
             self.deadline = time.monotonic() + wait
-            print(f"\a  >> {reason}: complete it in the browser window and submit "
-                  f"(waiting up to {wait}s; the form is already filled)", flush=True)
+            what = ("Paste the 8-character code from your email into the browser window "
+                    "(it is submitted for you once entered)" if reason == "EMAIL_VERIFICATION_CODE"
+                    else "Solve CAPTCHA in browser window and click Submit")
+            print(f"\a[ACTION REQUIRED] {what}... (waiting up to {wait}s; the form is already filled)",
+                  flush=True)
         return None
 
     def timed_out(self) -> tuple[str, str, str]:

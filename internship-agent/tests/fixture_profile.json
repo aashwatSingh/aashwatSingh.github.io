@@ -49,7 +49,13 @@
   "grad_year": 2028,
   "gpa": "2.9",
   "gpa_scale": "4.0",
-  "coursework": "Data Structures, Algorithms"
+  "coursework": "Data Structures, Algorithms",
+  "enrollment_status": "Currently Enrolled Full-Time",
+  "class_standing_text": "Junior (3rd Year by Summer 2027)",
+  "sat_score": null,
+  "act_score": null,
+  "transcript_path": null,
+  "school_email": null
  },
  "work_authorization": {
   "authorized_to_work_us": true,
@@ -63,10 +69,10 @@
   "onsite": true,
   "hybrid": true,
   "remote": true,
-  "earliest_start": "2027-05-17",
+  "earliest_start": "2027-05-24",
   "latest_end": "2027-08-20",
-  "desired_hourly_rate": "30",
-  "desired_compensation_text": "Open / Negotiable",
+  "desired_hourly_rate": "40",
+  "desired_compensation_text": "Open / Standard Intern Rate",
   "heard_about": [
    "Company Website",
    "Job Board",
@@ -75,7 +81,25 @@
   "previously_worked_or_applied": false,
   "non_compete": false,
   "relatives_at_company": false,
-  "worked_for_us_federal_government": false
+  "worked_for_us_federal_government": false,
+  "desired_annual_salary": "80000",
+  "availability_text": "Summer 2027, 10-12 weeks",
+  "preferred_office_order": [
+   "TX",
+   "CA",
+   "WA",
+   "NY",
+   "Remote"
+  ],
+  "client_or_competitor_employment": false,
+  "government_official": false,
+  "notice_period_or_start_restrictions": false,
+  "professional_licenses": [],
+  "has_outstanding_offers": null,
+  "accept_arbitration_agreements": null,
+  "meets_basic_qualifications": null,
+  "pursuing_further_education_after_degree": null,
+  "has_prior_internship": null
  },
  "eeo": {
   "gender": "Female",
@@ -100,11 +124,62 @@
   "never_claim": [
    "Docker",
    "REST APIs"
-  ]
+  ],
+  "preferred_language": "Python",
+  "years_experience_internship": "1",
+  "years_experience_full_time": "0"
  },
- "experience": [],
+ "experience": [
+  {
+   "title": "Software Intern",
+   "company": "Example Labs",
+   "location": "Remote",
+   "start": "2026-01",
+   "end": "2026-03",
+   "current": false,
+   "bullets": [
+    "Built a Python data pipeline with Pytest coverage."
+   ]
+  }
+ ],
  "essays": {
-  "why_software_engineering": "I like building reliable software.",
-  "challenging_project": "I built a caching layer."
- }
+  "why_software_engineering": "I like building reliable software that people use. I built Ledgerly to learn the whole stack.",
+  "challenging_project": "I built a caching layer for Ledgerly that cut API calls by 60%. The hard part was invalidation."
+ },
+ "projects": [
+  {
+   "name": "Ledgerly",
+   "tagline": "a full-stack budgeting web app",
+   "stack": [
+    "TypeScript",
+    "React",
+    "PostgreSQL"
+   ],
+   "focus": [
+    "fullstack",
+    "backend",
+    "web",
+    "database"
+   ],
+   "summary": "Ledgerly, a full-stack TypeScript, React, and PostgreSQL budgeting app with a caching layer that cut API calls by 60%",
+   "detail": "Built a budgeting web app with a caching layer that cut API calls by 60%."
+  },
+  {
+   "name": "the Example Labs pipeline",
+   "tagline": "a Python data pipeline",
+   "stack": [
+    "Python",
+    "Pytest"
+   ],
+   "focus": [
+    "ai",
+    "ml",
+    "data",
+    "python",
+    "pipeline"
+   ],
+   "summary": "a Python data pipeline at Example Labs that cut manual review time by 40%",
+   "detail": "Built a Python data pipeline with Pytest coverage that cut manual review time by 40%."
+  }
+ ]
 }

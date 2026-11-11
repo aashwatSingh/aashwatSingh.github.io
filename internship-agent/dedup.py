@@ -349,7 +349,8 @@ def save_queue(queue: list[dict], path: Path | None = None) -> None:
     tmp.replace(path)
 
 
-def filter_queue(queue: list[dict], ledger: Ledger, level: str = "company") -> tuple[list[dict], int]:
+def filter_queue(queue: list[dict], ledger: Ledger, level: str = "company",
+                 max_per_company: int = 0) -> tuple[list[dict], int]:
     """Mark already-applied jobs, and collapse repeats inside the queue itself.
 
     Jobs are never deleted (so a re-scrape does not resurrect them); they get
@@ -357,9 +358,14 @@ def filter_queue(queue: list[dict], ledger: Ledger, level: str = "company") -> t
     company stays pending.
     """
     changed = 0
+    for job in queue:                       # re-evaluate earlier duplicate marks (the level may have changed)
+        if job.get("status") == "duplicate":
+            job["status"] = "pending"
+            job.pop("status_detail", None)
     seen_urls: set[str] = set()
     seen_companies: set[str] = set()
     seen_roles: set[tuple[str, str]] = set()
+    per_company: Counter = Counter(normalize_company(r["Company"]) for r in ledger.rows)
     for job in queue:
         if job.get("status", "pending") != "pending":
             continue
@@ -374,12 +380,15 @@ def filter_queue(queue: list[dict], ledger: Ledger, level: str = "company") -> t
                 reason = "repeated in queue (same company + role)"
             elif level == "company" and company in seen_companies:
                 reason = "repeated in queue (company already queued)"
+            elif max_per_company and per_company[company] >= max_per_company:
+                reason = f"repeated in queue (company cap of {max_per_company} reached)"
         if reason:
             job["status"] = "duplicate"
             job["status_detail"] = reason
             changed += 1
             continue
         seen_urls.add(url); seen_companies.add(company); seen_roles.add((company, role))
+        per_company[company] += 1
     return queue, changed
 
 
@@ -401,6 +410,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("command", choices=["sync", "filter", "stats"])
     ap.add_argument("--dedup-level", choices=["company", "role"], default="company")
+    ap.add_argument("--max-per-company", type=int, default=0,
+                    help="with --dedup-level role: cap on applications per company, counting the tracker (0 = none)")
     args = ap.parse_args(argv)
 
     ledger = Ledger()
@@ -410,7 +421,7 @@ def main(argv: list[str] | None = None) -> int:
               f"({len(ledger.companies)} companies) merged from {config.TRACKER_XLSX.name}")
     elif args.command == "filter":
         queue = load_queue()
-        queue, changed = filter_queue(queue, ledger, args.dedup_level)
+        queue, changed = filter_queue(queue, ledger, args.dedup_level, args.max_per_company)
         save_queue(queue)
         pending = sum(1 for j in queue if j.get("status", "pending") == "pending")
         print(f"job_queue.json: {changed} marked duplicate, {pending} pending "

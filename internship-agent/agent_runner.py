@@ -74,7 +74,7 @@ async def apply_one(context, job: dict, engine: AnswerEngine, ledger: dedup.Ledg
                     *, dry_run: bool, use_llm: bool) -> ApplyResult:
     adapter = adapter_for(job["url"])
     shot = str(config.MANUAL_REVIEW_DIR / f"{job['id']}.png")
-    ctx = Context(company=job["company"], title=job["title"],
+    ctx = Context(company=job["company"], title=job["title"], locations=list(job.get("locations") or []),
                   applied_before=ledger.has_company(job["company"]))
     page = await context.new_page()
     try:
@@ -104,6 +104,18 @@ async def _safe_shot(page, path: str) -> None:
         await page.screenshot(path=path, full_page=True, timeout=10000)
     except Exception:                                              # noqa: BLE001
         pass
+
+
+async def launch_browser(pw, args):
+    """Persistent profile so cookies and sign-ins carry over between forms and runs."""
+    options = dict(headless=not args.headed, accept_downloads=False,
+                   viewport=None if args.headed else {"width": 1280, "height": 1600})
+    if args.browser_channel:
+        try:
+            return await pw.chromium.launch_persistent_context(args.profile_dir, channel=args.browser_channel, **options)
+        except Exception as exc:                                   # noqa: BLE001 - e.g. Chrome not installed
+            log(f"could not start '{args.browser_channel}' ({str(exc).splitlines()[0][:90]}); using bundled Chromium")
+    return await pw.chromium.launch_persistent_context(args.profile_dir, **options)
 
 
 def select_jobs(queue: list[dict], args) -> list[dict]:
@@ -139,16 +151,19 @@ async def run(args) -> int:
         queue, added = scraper.merge_into_queue(queue, scraper.scrape(crawl=args.crawl_boards))
         queue = scraper.sort_queue(queue)
         log(f"queue: {len(queue)} listings ({added} new)")
-    queue, _ = dedup.filter_queue(queue, ledger, args.dedup_level)
-    dedup.save_queue(queue)
+    queue, _ = dedup.filter_queue(queue, ledger, args.dedup_level, args.max_per_company)
+    save_queue = (lambda q: None) if args.dry_run else dedup.save_queue    # a dry run never edits the queue
+    save_queue(queue)
 
     use_llm = args.ats == "all" and bool(os.environ.get("ANTHROPIC_API_KEY"))
-    import llm
     for adapter in ADAPTERS.values():
         adapter.human_wait_s = args.assist
-        adapter.essay_writer = llm.why_company_answer if llm.available() else None
+        adapter.write_essays = not args.no_essays
     if args.assist:
         args.headed = True
+    if not args.dry_run and not args.assist:
+        log("unattended run: postings that hit a CAPTCHA or emailed code go to manual review "
+            "(use --local-blitz on your own machine to clear those in the browser)")
     jobs = select_jobs(queue, args)
     start_total = ledger.total
     log(f"ledger: {start_total} applied, target {args.target}; {len(jobs)} candidate postings "
@@ -161,9 +176,7 @@ async def run(args) -> int:
     tally: Counter = Counter()
     deadline = time.time() + args.max_minutes * 60 if args.max_minutes else None
     async with async_playwright() as pw:
-        context = await pw.chromium.launch_persistent_context(
-            args.profile_dir, headless=not args.headed,
-            viewport={"width": 1280, "height": 1600}, accept_downloads=False)
+        context = await launch_browser(pw, args)
         context.set_default_timeout(15000)
         try:
             for job in jobs:
@@ -207,14 +220,14 @@ async def run(args) -> int:
                         job["status"] = "error"
                 if result.status not in (SUBMITTED, DRY_RUN_OK):
                     job["status_detail"] = f"{result.reason}: {result.detail}"[:300]
-                dedup.save_queue(queue)
+                save_queue(queue)
                 log(f"{result.status.upper():<18} {job['company']} — {job['title']} [{job['ats']}] "
                     f"({time.time() - t0:.0f}s) {result.reason}"
                     + (f": {result.detail[:140]}" if result.detail else "")
                     + (f"  | total {ledger.total}/{args.target}" if result.status == SUBMITTED else ""))
         finally:
             await context.close()
-            dedup.save_queue(queue)
+            save_queue(queue)
 
     log(f"done: {dict(tally)}; ledger {start_total} -> {ledger.total} of {args.target}")
     remaining = sum(1 for j in queue if j.get("status") == "pending")
@@ -259,15 +272,25 @@ def main(argv: list[str] | None = None) -> int:
                     help="comma list of ATS names, or 'all' (others need the LLM agent)")
     ap.add_argument("--dedup-level", choices=["company", "role"], default="company",
                     help="company: never apply to a company twice; role: only skip the same role/URL")
+    ap.add_argument("--max-per-company", type=int, default=0,
+                    help="with --dedup-level role: cap applications per company, counting the tracker (0 = none)")
     ap.add_argument("--retry-manual", action="store_true", help="re-attempt postings in manual review")
     ap.add_argument("--rescrape", action="store_true", help="refresh the queue before starting")
     ap.add_argument("--crawl-boards", action="store_true", help="with --rescrape: crawl ATS boards too")
     ap.add_argument("--headed", action="store_true", help="show the browser window")
+    ap.add_argument("--no-essays", action="store_true",
+                    help="never draft open-ended answers; send those postings to manual review")
     ap.add_argument("--assist", type=int, nargs="?", const=300, default=0, metavar="SECONDS",
                     help="human-in-the-loop: when a site asks to confirm you are human (CAPTCHA, emailed "
                          "code), wait this long for you to do it in the visible browser (implies --headed)")
     ap.add_argument("--profile-dir", default=str(config.BROWSER_PROFILE_DIR),
                     help="Chromium user-data directory (one runner per directory)")
+    ap.add_argument("--browser-channel", default="", metavar="NAME",
+                    help="use an installed browser instead of bundled Chromium, e.g. 'chrome' or 'msedge'")
+    ap.add_argument("--local-blitz", action="store_true",
+                    help="run on your own machine: visible browser with a persistent ./chrome_profile, fill and "
+                         "submit everything, and when a site asks for a CAPTCHA or an emailed code ring the "
+                         "bell and wait up to 120 s for you to do that one step, then record and move on")
     ap.add_argument("--only-url", help="apply to this single posting")
     ap.add_argument("--company", help="company name for --only-url postings not in the queue")
     ap.add_argument("--title", help="role title for --only-url postings not in the queue")
@@ -277,6 +300,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.prefetch:
         prefetch_schemas()
         return 0
+
+    if args.local_blitz:
+        args.headed = True
+        args.assist = args.assist or 120
+        if args.profile_dir == str(config.BROWSER_PROFILE_DIR):
+            args.profile_dir = str(config.BASE / "chrome_profile")
+        args.browser_channel = args.browser_channel or "chrome"
 
     def _sigint(*_):
         global _stop

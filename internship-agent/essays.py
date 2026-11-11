@@ -1,0 +1,197 @@
+"""Open-ended answers written from the candidate's own resume material.
+
+Every sentence is assembled from candidate_profile.json (projects, experience,
+essays, education) plus the company name, role title and technologies that
+appear in BOTH the posting and the profile. Nothing else is asserted, so the
+output can be generic about the company but never untrue about the candidate.
+
+Question types handled by templates:
+    why_company   "Why do you want to intern at X?", "Why X?", "What makes X attractive?"
+    project       "Tell us about a project", "proudest technical accomplishment", "favorite work project"
+    achievements  "top two accomplishments", "most impressive thing you've accomplished"
+    goals         "What do you want to get out of this internship?", "most excited to work on"
+    why_swe       "Which aspect of software engineering excites you?", "Why software engineering?"
+
+Anything else that needs a story the resume does not contain ("describe a time
+messy data led you to a wrong answer") is left to llm.py when an API key is
+set, and otherwise to the candidate: a template cannot answer it truthfully.
+"""
+from __future__ import annotations
+
+import re
+
+KINDS = [
+    ("skip", r"^(additional|other|any other|anything else).{0,40}(information|comments?|details|share|like us to know)|"
+             r"^(additional information|comments?|notes?|values)$|cover letter|is there anything"),
+    ("achievements", r"(top|two|2|three|3) .{0,90}(accomplishments|achievements)"),
+    ("project", r"(project|problem|thing|piece|work) .{0,40}you('ve| have| are|'re)? (built|worked on|solved|shipped|"
+                r"completed|made|created|most proud of)|tell us about .{0,40}project|describe .{0,40}project|"
+                r"favorite (work )?project|proud(est)? .{0,30}(technical|project|work|accomplishment|achievement)|"
+                r"technical (accomplishment|challenge|project)|something you('ve| have)? built|"
+                r"most impressive thing you('ve| have)? (ever )?(accomplished|done|built)|work you('re| are) proudest of"),
+    ("goals", r"(want|hope|expect|looking) to (get out of|gain|learn|achieve|accomplish) .{0,60}(intern|program|role|"
+              r"experience|position)|get out of (the|this|your) .{0,40}(intern|program)|"
+              r"most excited to (work on|learn|build) .{0,40}intern|goals? for (this|the|your) internship"),
+    ("why_swe", r"aspect of software engineering|why (software engineering|computer science|engineering)\b(?!.{0,30}\bat\b)|"
+                r"why .{0,30}become an? (software )?engineer|"
+                r"(interest|passion) in (technology|software|engineering|computer science)$"),
+    # why_company is matched in classify(): it must clearly be about this employer or this role
+]
+_WHY_ROLE = (r"why .{0,50}(this|the|our) (role|position|internship|company|opportunity|program|team)|"
+             r"why .{0,40}\b(intern|work|join) (at|with|for|here)|^why (us|here)\b|why are you applying|"
+             r"what (interests|excites|attracts|draws) you (about|to) .{0,40}(this|the|our|interning|working|role|"
+             r"opportunity|position|company)|interest(ed)? in (this|the) (role|position|internship|company|opportunity)|"
+             r"what makes .{0,40}(attractive|appealing|a good fit)")
+
+
+def classify(question: str, company: str = "") -> str | None:
+    q = " ".join(question.lower().replace("’", "'").split())
+    for kind, pattern in KINDS:
+        if re.search(pattern, q):
+            return kind
+    name = company.lower().strip()
+    if re.search(_WHY_ROLE, q):
+        return "why_company"
+    if name and name in q and re.search(r"^why\b|interest|excite|attract|want to", q):
+        return "why_company"
+    return None
+
+
+def word_limit(question: str, description: str = "") -> int | None:
+    text = f"{question} {description}".lower()
+    m = re.search(r"(\d{2,4})\s*(?:-\s*)?words?\b(?: max| or (?:less|fewer)| limit)?|"
+                  r"(?:max(?:imum)?|limit|under|up to|no more than)\D{0,12}(\d{2,4})\s*words", text)
+    if m:
+        return int(m.group(1) or m.group(2))
+    n = sentence_limit(question, description)
+    if n:
+        return 60 * n
+    m = re.search(r"(?:max(?:imum)?|limit|up to)\D{0,12}(\d{3,5})\s*char", text)
+    return int(m.group(1)) // 7 if m else None
+
+
+def sentence_limit(question: str, description: str = "") -> int | None:
+    m = re.search(r"(?:\d\s*(?:-|–|to)\s*)?(\d)\s*sentences|(one|two|three) sentences?|in a sentence",
+                  f"{question} {description}".lower())
+    if not m:
+        return None
+    return int(m.group(1)) if m.group(1) else {"one": 1, "two": 2, "three": 3}.get(m.group(2), 1)
+
+
+def fit(text: str, limit: int | None, sentences_max: int | None = None) -> str:
+    """Drop whole sentences from the end until the answer is inside the limits."""
+    if sentences_max:
+        text = " ".join(re.split(r"(?<=[.!?])\s+", text)[:sentences_max])
+    if not limit or len(text.split()) <= limit:
+        return text
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    while len(sentences) > 1 and len(" ".join(sentences).split()) > limit:
+        sentences.pop()
+    out = " ".join(sentences)
+    return out if len(out.split()) <= limit else " ".join(out.split()[:limit]).rstrip(",;") + "."
+
+
+def _role_focus(title: str, job_text: str) -> str:
+    t = f"{title}".lower()
+    if re.search(r"machine learning|\bml\b|\bai\b|computer vision|deep learning|nlp|research", t):
+        return "ai"
+    if re.search(r"\bdata\b|analytics|pipeline", t):
+        return "data"
+    if re.search(r"back[- ]?end|platform|infrastructure|systems|cloud|database", t):
+        return "backend"
+    if re.search(r"front[- ]?end|full[- ]?stack|web|mobile|ios|android", t):
+        return "fullstack"
+    text = job_text.lower()
+    ai = len(re.findall(r"machine learning|\bml\b|\bllm|computer vision|pytorch|model", text))
+    web = len(re.findall(r"react|typescript|front[- ]?end|full[- ]?stack|postgres|\bapi\b|backend", text))
+    return "ai" if ai > web + 1 else "fullstack"
+
+
+_FOCUS_PHRASE = {"ai": "applied AI and machine learning systems", "data": "data pipelines and infrastructure",
+                 "backend": "reliable backend systems", "fullstack": "full-stack product engineering"}
+
+
+def _pick_project(profile: dict, focus: str) -> dict:
+    projects = profile.get("projects") or []
+    want = {"ai": {"ai", "ml", "vision", "pipeline"}, "data": {"data", "pipeline", "python"},
+            "backend": {"backend", "database"}, "fullstack": {"fullstack", "web"}}[focus]
+    return max(projects, key=lambda p: len(want & set(p.get("focus", []))), default=None)
+
+
+def _shared_tech(profile: dict, job_text: str, project: dict, limit: int = 3) -> list[str]:
+    """Technologies named in the posting that the profile also lists; else the project's own stack."""
+    skills = [*profile["skills"]["languages"], *profile["skills"]["backend"], *profile["skills"]["tools"]]
+    names = [re.sub(r"\s*\(.*\)", "", s) for s in skills]
+    banned = {b.lower() for b in profile["skills"].get("never_claim", [])}
+    low = job_text.lower()
+    hits = [n for n in names if n.lower() not in banned
+            and re.search(rf"(?<![a-z0-9+#]){re.escape(n.lower())}(?![a-z0-9+#])", low)]
+    return (hits or list(project.get("stack", [])))[:limit]
+
+
+def _join(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + (", and " if len(items) > 2 else " and ") + items[-1]
+
+
+def template_answer(question: str, job: dict, job_text: str, profile: dict, description: str = "",
+                    limit: int | None = None) -> tuple[str, str] | None:
+    """(kind, text) for a recognised question type, else None."""
+    kind = classify(question, job.get("company", ""))
+    if kind in (None, "skip") or not profile.get("projects"):
+        return None
+    stated = word_limit(question, description)
+    limit = min(x for x in (limit, stated) if x) if (limit or stated) else None
+    company, title = job.get("company", "your company"), job.get("title", "this internship")
+    focus = _role_focus(title, job_text)
+    project = _pick_project(profile, focus)
+    other = next((p for p in profile["projects"] if p is not project), project)
+    tech = _join(_shared_tech(profile, job_text, project))
+    school = profile["education"]["school"]
+
+    if kind == "why_company":
+        text = (f"I am excited to apply for this internship at {company} because of your engineering team's "
+                f"focus on {_FOCUS_PHRASE[focus]}. Having built {project['summary']}, I have hands-on experience "
+                f"designing and shipping production-ready systems with {tech}. I would love to bring my focus on "
+                f"clean architecture, automated testing, and performance optimization to {company}'s engineering "
+                f"team next summer. I also built {other['summary']}, which taught me to own a system end to end.")
+    elif kind == "project":
+        text = profile["essays"]["challenging_project"]
+    elif kind == "achievements":
+        first, second = (d[0].lower() + d[1:] for d in (project["detail"], other["detail"]))
+        text = (f"First, I {first} Second, I {second} Both reflect how I work: find the bottleneck, measure it, "
+                f"and ship a tested fix.")
+    elif kind == "goals":
+        text = (f"I want to ship production code alongside experienced engineers at {company} and deepen my skills "
+                f"in {tech}. So far I have built {project['summary']}. An internship is where I can learn how those "
+                f"ideas hold up at production scale: code review, testing discipline, and system design across a "
+                f"real team. I am most excited to own a scoped project end to end, measure its impact, and bring "
+                f"those habits back to my final year at {school}.")
+    else:                                   # why_swe
+        text = profile["essays"]["why_software_engineering"]
+    return kind, fit(text, limit, sentence_limit(question, description))
+
+
+def generate(question: str, job: dict, job_text: str, profile: dict, description: str = "",
+             required: bool = True, limit: int | None = None) -> tuple[str, str] | None:
+    """Best available answer: Claude (grounded, vetted) when a key is set, else a template.
+
+    Returns (rule_name, text) or None when the question should stay with the candidate.
+    Optional free-text boxes are filled only for recognised essay types.
+    """
+    kind = classify(question, job.get("company", ""))
+    if kind == "skip":
+        return None
+    if not required and kind is None:
+        return None
+    try:
+        import llm
+        if llm.available():
+            stated = word_limit(question, description)
+            cap = min(x for x in (limit, stated) if x) if (limit or stated) else None
+            text = llm.open_answer(question, job, job_text, profile, cap)
+            if text:
+                return f"llm-{kind or 'open'}", text
+    except Exception:                       # noqa: BLE001 - the template still stands
+        pass
+    hit = template_answer(question, job, job_text, profile, description, limit)
+    return (f"essay-{hit[0]}", hit[1]) if hit else None

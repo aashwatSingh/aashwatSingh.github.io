@@ -20,3 +20,4 @@ __pycache__/
 .browser_profile_llm/
 ready_to_submit.csv
 blocking_questions.csv
+chrome_profile/

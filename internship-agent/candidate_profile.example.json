@@ -47,7 +47,13 @@
     "grad_year": 0,
     "gpa": "",
     "gpa_scale": "",
-    "coursework": ""
+    "coursework": "",
+    "enrollment_status": "",
+    "class_standing_text": "",
+    "sat_score": null,
+    "act_score": null,
+    "transcript_path": null,
+    "school_email": null
   },
   "work_authorization": {
     "authorized_to_work_us": true,
@@ -69,7 +75,19 @@
     "previously_worked_or_applied": false,
     "non_compete": false,
     "relatives_at_company": false,
-    "worked_for_us_federal_government": false
+    "worked_for_us_federal_government": false,
+    "desired_annual_salary": "",
+    "availability_text": "",
+    "preferred_office_order": [],
+    "client_or_competitor_employment": false,
+    "government_official": false,
+    "notice_period_or_start_restrictions": false,
+    "professional_licenses": [],
+    "has_outstanding_offers": null,
+    "accept_arbitration_agreements": null,
+    "meets_basic_qualifications": null,
+    "pursuing_further_education_after_degree": null,
+    "has_prior_internship": null
   },
   "eeo": {
     "gender": "",
@@ -84,7 +102,10 @@
     "languages": [],
     "backend": [],
     "tools": [],
-    "never_claim": []
+    "never_claim": [],
+    "preferred_language": "",
+    "years_experience_internship": "",
+    "years_experience_full_time": ""
   },
   "experience": [
     {
@@ -102,5 +123,16 @@
     "challenging_project": ""
   },
   "_comment": "Copy to candidate_profile.json (git-ignored) and fill in. Booleans below are placeholders - set every one deliberately. The agent never invents a value that is not in this file.",
-  "_work_authorization_notes": "us_person: true/false, or null if you would rather decide per posting (ITAR / export-control roles then go to manual review). apply_when_no_sponsorship: set true to still apply where the employer says it will not sponsor a visa."
+  "_work_authorization_notes": "us_person: true/false, or null if you would rather decide per posting (ITAR / export-control roles then go to manual review). apply_when_no_sponsorship: set true to still apply where the employer says it will not sponsor a visa.",
+  "projects": [
+    {
+      "name": "",
+      "tagline": "",
+      "stack": [],
+      "focus": [],
+      "summary": "",
+      "detail": ""
+    }
+  ],
+  "_projects_notes": "projects feed the essay templates: summary is one clause that follows 'Having built ...'; focus tags (ai, ml, data, python, backend, fullstack, web, database) decide which project matches a role."
 }

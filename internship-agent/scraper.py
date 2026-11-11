@@ -4,9 +4,12 @@ Sources
   1. SimplifyJobs/Summer2027-Internships  (structured listings.json + README tables)
   2. Pitt CSC Summer 2027 list            (README tables)
   3. vanshb03/Summer2027-Internships      (listings.json; short links resolved when reachable)
-  4. Direct ATS boards (--crawl-boards): every Greenhouse / Lever / Ashby board
-     seen in the lists is queried through its public job-board API for other
-     2027 intern postings.
+  4. speedyapply 2027 SWE and AI college-jobs lists (markdown tables)
+  5. Direct ATS boards (--crawl-boards): every Greenhouse / Lever / Ashby board
+     that has ever appeared in the lists (any season, open or closed) is queried
+     through that ATS's public job-board API for intern postings that are open
+     now. This replaces search-engine "site:" queries: it asks the three ATS
+     hosts directly, so nothing depends on scraping a search results page.
 
 Each posting is pre-qualified from list metadata (term, category, title,
 degree, citizenship, location) so the runner only opens plausible roles.
@@ -41,6 +44,10 @@ SOURCES = [
      "url": f"{RAW}/pittcsc/Summer2027-Internships/dev/README.md"},
     {"name": "vanshb03", "kind": "listings_json",
      "url": f"{RAW}/vanshb03/Summer2027-Internships/dev/.github/scripts/listings.json"},
+    {"name": "speedyapply-swe", "kind": "pipe_table", "category": "Software",
+     "url": f"{RAW}/speedyapply/2027-SWE-College-Jobs/main/README.md"},
+    {"name": "speedyapply-ai", "kind": "pipe_table", "category": "AI/ML/Data",
+     "url": f"{RAW}/speedyapply/2027-AI-College-Jobs/main/README.md"},
     # Lists named in the spec that did not exist at time of writing are tried
     # anyway so they are picked up if they appear.
     {"name": "ouckah", "kind": "listings_json", "optional": True,
@@ -80,6 +87,7 @@ NON_ENGINEERING_TITLE = re.compile(
 ADVANCED_DEGREE_TITLE = re.compile(
     r"\bph\.?d\b|doctoral|\bmasters?\b|master's|\bms\b[/ ]|\bmba\b|graduate (student|intern|program)|"
     r"\bgrad\b student|postdoc|🎓", re.I)
+WRONG_AUDIENCE_TITLE = re.compile(r"high school|new grad|\b(2025|2026)\b|winter 20|returning intern", re.I)
 SENIORITY_TITLE = re.compile(r"\b(senior|staff|principal|lead|manager|director)\b", re.I)
 CLEARANCE = re.compile(r"clearance|ts/sci|top secret|\bsecret\b|u\.?s\.? citizen", re.I)
 
@@ -111,6 +119,8 @@ def prequalify(job: dict) -> str | None:
         return f"advanced degree only ({', '.join(degrees)})"
     if ADVANCED_DEGREE_TITLE.search(title):
         return "advanced degree role"
+    if WRONG_AUDIENCE_TITLE.search(title):
+        return "different cohort (high school / new grad / another year)"
     if SENIORITY_TITLE.search(title) and not re.search(r"intern|co-?op", title, re.I):
         return "not an internship"
     category = (job.get("category") or "").lower()
@@ -296,6 +306,34 @@ def parse_readme_tables(text: str, source: str) -> list[dict]:
     return jobs
 
 
+def parse_pipe_tables(text: str, source: str, category: str = "") -> list[dict]:
+    """Markdown pipe tables (speedyapply): | Company | Position | Location | Salary | Posting | Age |.
+
+    Only the U.S. internship sections are read; new-grad and international tables are skipped.
+    """
+    jobs: list[dict] = []
+    in_scope = False
+    for line in text.splitlines():
+        if line.startswith("#"):
+            head = line.lower()
+            if head.startswith("## "):
+                in_scope = "internship" in head and "usa" in head
+            continue
+        if not in_scope or not line.startswith("|") or line.startswith("|--") or "Company" in line[:14]:
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 5:
+            continue
+        link = re.search(r'href="([^"]+)"[^>]*>\s*<img[^>]*alt="Apply"', line)
+        if not link:
+            continue
+        location = re.sub(r"\s*\+\d+$", "", _text(cells[2]))
+        jobs.append(make_job(company=_text(cells[0]), title=_text(cells[1]), url=link.group(1),
+                             locations=[location] if location else [], terms=["Summer 2027"],
+                             category=category, source=source))
+    return jobs
+
+
 def resolve_short_links(jobs: list[dict], limit: int = 400) -> list[dict]:
     """vanshb03 hides targets behind go.vansh.nyc; follow them when the host is reachable."""
     out, tried, dead_hosts = [], 0, set()
@@ -327,60 +365,119 @@ def resolve_short_links(jobs: list[dict], limit: int = 400) -> list[dict]:
 # Direct ATS board crawl (replaces the spec's site: search-engine queries)
 # --------------------------------------------------------------------------- #
 
-INTERN_TITLE = re.compile(r"\bintern(ship)?\b|\bco-?op\b", re.I)
+INTERN_TITLE = re.compile(r"\bintern(ship)?s?\b|\bco-?op\b", re.I)
+# Board APIs give no category or country, so board postings must look like software AND like a U.S. role.
+STRONG_SOFTWARE_TITLE = re.compile(
+    r"software|\bswe\b|\bsde\b|developer|full[- ]?stack|back[- ]?end|front[- ]?end|machine learning|\bml\b|"
+    r"\bai\b|artificial intelligence|computer vision|deep learning|\bnlp\b|data (engineer|scien)|"
+    r"\bcloud\b|devops|site reliability|\bplatform\b|infrastructure|\bweb\b|mobile|\bios\b|android|"
+    r"applied scientist|research engineer|founding engineer|forward deployed|firmware|embedded software", re.I)
+US_STATES_FULL = (
+    "Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|"
+    "Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|"
+    "Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|"
+    "Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|"
+    "West Virginia|Wisconsin|Wyoming")
+US_CITIES = (
+    "San Francisco|\\bSF\\b|Bay Area|New York|NYC|Seattle|Austin|Boston|Chicago|Los Angeles|Dallas|Houston|Denver|"
+    "Atlanta|Palo Alto|Mountain View|Sunnyvale|San Jose|San Mateo|Menlo Park|Santa Clara|Redwood City|San Diego|"
+    "Pittsburgh|Philadelphia|Miami|Washington,? D\\.?C|Cambridge, MA|Bellevue|Redmond|Boulder|Raleigh|Durham|"
+    "Salt Lake City|Portland|Phoenix|Detroit|Minneapolis|Nashville|El Segundo|Irvine|Santa Monica|Oakland|Brooklyn")
+US_POSITIVE = re.compile(rf",\s*(?:{US_STATE})\b|\b(?:{US_STATES_FULL})\b|United States|\bUSA?\b|\bU\.S\.|{US_CITIES}|"
+                         r"Remote[ ,(-]*(US|United States|USA|North America)", re.I)
+BOARD_HOSTS = {"job-boards.greenhouse.io": "Greenhouse", "boards.greenhouse.io": "Greenhouse",
+               "jobs.lever.co": "Lever", "jobs.ashbyhq.com": "Ashby"}
 
 
-def board_tokens(jobs: list[dict]) -> dict[str, dict[str, str]]:
-    """{"Greenhouse": {token: company}, "Lever": {...}, "Ashby": {...}} from known URLs."""
-    found: dict[str, dict[str, str]] = {"Greenhouse": {}, "Lever": {}, "Ashby": {}}
-    for j in jobs:
-        p = urlparse(j["url"])
-        parts = [s for s in p.path.split("/") if s]
-        if not parts:
+def board_tokens(listings: list[dict]) -> dict[str, dict[str, str]]:
+    """{"Greenhouse": {token: company}, ...} from every URL ever listed (dicts with url + company)."""
+    found: dict[str, dict[str, str]] = {"Greenhouse": {}, "Ashby": {}, "Lever": {}}
+    for j in listings:
+        p = urlparse(j.get("url") or "")
+        parts = [seg for seg in p.path.split("/") if seg]
+        ats = BOARD_HOSTS.get(p.netloc.lower())
+        if not ats or not parts or parts[0] == "embed":
             continue
-        if p.netloc in ("job-boards.greenhouse.io", "boards.greenhouse.io") and parts[0] not in ("embed",):
-            found["Greenhouse"].setdefault(parts[0], j["company"])
-        elif p.netloc == "jobs.lever.co":
-            found["Lever"].setdefault(parts[0], j["company"])
-        elif p.netloc == "jobs.ashbyhq.com":
-            found["Ashby"].setdefault(parts[0], j["company"])
+        token = parts[0].lower() if ats == "Greenhouse" else parts[0]
+        found[ats].setdefault(token, j.get("company") or j.get("company_name") or token)
     return found
 
 
-def crawl_boards(jobs: list[dict], max_boards: int = 600) -> list[dict]:
-    new: list[dict] = []
-    tokens = board_tokens(jobs)
-    n = 0
-    for ats, boards in tokens.items():
-        for token, company in boards.items():
-            if n >= max_boards:
-                return new
-            n += 1
-            try:
-                if ats == "Greenhouse":
-                    r = SESSION.get(f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs", timeout=20)
-                    posts = [(p["title"], p["absolute_url"], [(p.get("location") or {}).get("name", "")])
-                             for p in r.json().get("jobs", [])] if r.ok else []
-                elif ats == "Lever":
-                    r = SESSION.get(f"https://api.lever.co/v0/postings/{token}?mode=json", timeout=20)
-                    posts = [(p["text"], p["hostedUrl"], [(p.get("categories") or {}).get("location", "")])
-                             for p in r.json()] if r.ok else []
-                else:
-                    r = SESSION.get(f"https://api.ashbyhq.com/posting-api/job-board/{token}", timeout=20)
-                    posts = [(p["title"], p["jobUrl"], [p.get("location", "")])
-                             for p in r.json().get("jobs", [])] if r.ok else []
-            except (requests.RequestException, ValueError, KeyError) as exc:
-                print(f"  ! {ats} board {token}: {type(exc).__name__}", file=sys.stderr)
-                if isinstance(exc, requests.exceptions.ProxyError):
-                    print(f"  ! {ats} API host is blocked by the network policy — skipping {ats} crawl",
-                          file=sys.stderr)
-                    break
+def _board_postings(ats: str, token: str) -> list[tuple[str, str, list[str]]] | None:
+    """(title, url, locations) for every open posting on a board; None if the host is blocked."""
+    try:
+        if ats == "Greenhouse":
+            r = SESSION.get(f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs", timeout=25)
+            return [(p["title"], p["absolute_url"], [(p.get("location") or {}).get("name", "")])
+                    for p in r.json().get("jobs", [])] if r.ok else []
+        if ats == "Lever":
+            r = SESSION.get(f"https://api.lever.co/v0/postings/{token}?mode=json", timeout=25)
+            out = []
+            for p in (r.json() if r.ok else []):
+                cat = p.get("categories") or {}
+                title = p["text"] if INTERN_TITLE.search(p["text"]) or "intern" not in (cat.get("commitment") or "").lower() \
+                    else f"{p['text']} (Intern)"
+                out.append((title, p["hostedUrl"], [cat.get("location", "")]))
+            return out
+        r = SESSION.get(f"https://api.ashbyhq.com/posting-api/job-board/{token}", timeout=25)
+        out = []
+        for p in (r.json().get("jobs", []) if r.ok else []):
+            if p.get("isListed") is False:
                 continue
-            for title, url, locs in posts:
-                if INTERN_TITLE.search(title) and "2027" in title:
-                    new.append(make_job(company=company, title=title, url=url, locations=locs,
-                                        terms=["Summer 2027"], source=f"{ats.lower()}-board"))
-            time.sleep(0.15)
+            title = p["title"] if INTERN_TITLE.search(p["title"]) or p.get("employmentType") != "Intern" \
+                else f"{p['title']} (Intern)"
+            out.append((title, p["jobUrl"], [p.get("location") or ""]))
+        return out
+    except requests.exceptions.ProxyError:
+        return None
+    except (requests.RequestException, ValueError, KeyError, TypeError):
+        return []
+
+
+def crawl_boards(listings: list[dict], max_boards: int = 2000, workers: int = 8) -> list[dict]:
+    """Ask each known board for its open intern postings (titles are pre-qualified as usual).
+
+    Board postings carry no term, so they are marked term_unverified: the runner
+    only applies if the description itself mentions Summer or 2027.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    tasks = [(ats, token, company) for ats, boards in board_tokens(listings).items()
+             for token, company in boards.items()][:max_boards]
+    blocked: set[str] = set()
+
+    def fetch_board(task):
+        ats, token, company = task
+        if ats in blocked:
+            return []
+        posts = _board_postings(ats, token)
+        if posts is None:
+            blocked.add(ats)
+            return []
+        jobs = []
+        for title, url, locs in posts:
+            if not INTERN_TITLE.search(title):
+                continue
+            job = make_job(company=company, title=title, url=url, locations=locs, terms=[],
+                           source=f"{ats.lower()}-board")
+            job["term_unverified"] = True
+            if job["status"] == "pending":
+                where = " ; ".join(job["locations"])
+                if not STRONG_SOFTWARE_TITLE.search(title):
+                    job["status"], job["status_detail"] = "skipped_ineligible", "board posting: not clearly a software role"
+                elif not US_POSITIVE.search(where) or NON_US_LOCATION.search(where) and not re.search(
+                        r"United States|\bUSA?\b", where):
+                    job["status"], job["status_detail"] = "skipped_ineligible", "board posting: not clearly in the U.S."
+            jobs.append(job)
+        return jobs
+
+    new: list[dict] = []
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for jobs in pool.map(fetch_board, tasks):
+            new.extend(jobs)
+    for ats in blocked:
+        print(f"  ! {ats} API host is blocked by the network policy — its boards were not crawled", file=sys.stderr)
+    print(f"[ats-boards] asked {len(tasks)} boards")
     return new
 
 
@@ -416,6 +513,7 @@ def sort_queue(queue: list[dict]) -> list[dict]:
 
 def scrape(crawl: bool = False) -> list[dict]:
     scraped: list[dict] = []
+    ever_listed: list[dict] = []           # every URL the lists have carried, for board discovery
     for src in SOURCES:
         text = fetch(src["url"], optional=src.get("optional", False))
         if text is None:
@@ -423,7 +521,13 @@ def scrape(crawl: bool = False) -> list[dict]:
                 print(f"[{src['name']}] unavailable")
             continue
         try:
-            jobs = (parse_listings_json if src["kind"] == "listings_json" else parse_readme_tables)(text, src["name"])
+            if src["kind"] == "listings_json":
+                jobs = parse_listings_json(text, src["name"])
+                ever_listed += [{"url": x.get("url"), "company": x.get("company_name")} for x in json.loads(text)]
+            elif src["kind"] == "pipe_table":
+                jobs = parse_pipe_tables(text, src["name"], src.get("category", ""))
+            else:
+                jobs = parse_readme_tables(text, src["name"])
         except (ValueError, KeyError) as exc:
             print(f"[{src['name']}] could not parse: {exc}", file=sys.stderr)
             continue
@@ -432,8 +536,10 @@ def scrape(crawl: bool = False) -> list[dict]:
         print(f"[{src['name']}] {len(jobs)} active listings")
         scraped.extend(jobs)
     if crawl:
-        extra = crawl_boards(scraped)
-        print(f"[ats-boards] {len(extra)} 2027 intern postings found on boards directly")
+        ever_listed += [{"url": j["url"], "company": j["company"]} for j in scraped]
+        extra = crawl_boards(ever_listed)
+        print(f"[ats-boards] {len(extra)} open intern postings found on boards "
+              f"({sum(j['status'] == 'pending' for j in extra)} pass pre-qualification)")
         scraped.extend(extra)
     return scraped
 

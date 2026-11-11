@@ -10,7 +10,8 @@ dedup.py          internship_tracker.xlsx + applied_tracker.csv  ->  "already ap
 agent_runner.py   the loop: dedup -> open -> pre-qualify -> fill -> submit -> record
 answers.py        question -> answer engine (profile facts only, never guesses)
 ats/              form adapters: Greenhouse, Ashby, Lever
-llm.py            optional: Claude-drafted "Why this company?" answers
+essays.py         open-ended answers assembled from your resume projects (templates)
+llm.py            optional: Claude drafts those answers instead when ANTHROPIC_API_KEY is set
 llm_agent.py      optional: browser-use agent for portals without an adapter
 coverage_report.py  offline audit of what the engine would answer
 report.py         ready_to_submit.csv + blocking_questions.csv from the run logs
@@ -51,14 +52,22 @@ python agent_runner.py --dry-run --limit 10
 ```
 
 ```bash
-python agent_runner.py --assist
+python agent_runner.py --local-blitz --dedup-level role --max-per-company 3
 ```
 
 * `--dry-run` fills each form and saves a full-page screenshot to `logs/submitted/` without
   clicking submit. Start here and look at the screenshots.
-* `--assist` opens a visible browser. When a site asks to confirm you are human, the runner
-  beeps and waits (5 minutes by default) for you to do that one step; everything else is already
-  filled. This is the mode that actually gets applications submitted — see the next section.
+* `--local-blitz` is the mode that actually gets applications submitted. Run it on your own
+  machine: it opens your installed Chrome with a persistent `./chrome_profile` (so sign-ins and
+  cookies carry over between forms and runs), fills every field, uploads the resume and clicks
+  Submit. If the site then asks for a CAPTCHA or an emailed code, the terminal bell rings with
+  `[ACTION REQUIRED] ...` and the runner waits up to 120 seconds for you to do that one step:
+  solve the CAPTCHA, or paste the 8-character Greenhouse code (the code box is focused for you
+  and Submit is pressed once the code is in). On confirmation it writes the row to
+  `internship_tracker.xlsx` and moves to the next posting. `--assist SECONDS` is the same wait
+  with your own timeout; `--browser-channel` picks the browser.
+* `--dedup-level role --max-per-company N` allows several roles at one company, capped at N
+  counting what is already in the tracker.
 * Without `--assist` the runner is fully unattended: anything needing a human goes to
   `manual_review_queue.csv` with a screenshot in `logs/manual_review/`.
 * `--dedup-level company` (default) never applies to a company twice; `--dedup-level role` only
@@ -72,19 +81,38 @@ the rule that produced it, so any submission can be audited afterwards.
 
 ## What it will not do
 
-**It does not get past "confirm you're a human" checks.** Greenhouse answers an automated
+**It does not get past "confirm you're a human" checks on its own.** Greenhouse answers an automated
 submission with *"enter the 8-character code [emailed to you] to confirm you're a human"*; Ashby
 raises a reCAPTCHA image challenge on submit; Lever puts hCaptcha on every form. (The first two
 were observed on live submissions from a headless cloud browser.) The agent never solves a
-CAPTCHA and never fetches or types a verification code. Those steps are the sites asking for a
-person, so a person does them (`--assist`), or the posting goes to the manual-review queue. This
-is a deliberate difference from the original spec (steps 4.4 and 6).
+CAPTCHA, never reads a verification code out of your mailbox, and does not disguise the
+browser as non-automated. Those steps are the sites asking for a person, so a person does them
+(`--local-blitz` makes that a few seconds each), or the posting goes to the manual-review queue.
+This is a deliberate difference from the original spec (steps 4.4 and 6).
 
-**It does not invent answers.** `answers.py` answers a question only when
-`candidate_profile.json` states the fact. Citizenship, visa type, clearance, test scores, skill
-ratings, years of experience, "do you meet the qualifications", and company-specific essays are
-never guessed: if such a question is required, the form is not submitted and the question is
-listed in `manual_review_queue.csv`.
+**It does not invent answers.** `answers.py` answers a question only from
+`candidate_profile.json`: your stated facts and preferences (relocation, office order, salary,
+years of experience, preferred language, start date...). "Do you have experience with X?" is Yes
+only for skills on the resume and No for named technologies that are not. Open-ended prompts
+("Why this company?", "Tell us about a project", "What do you want out of this internship?") are
+written by `essays.py` from the `projects`, `experience` and `essays` sections of the profile, or
+by Claude under the same grounding rules when an API key is set.
+
+What still stops a form, because the profile does not say and a template cannot know:
+
+| Set this in `candidate_profile.json` | Unlocks questions like |
+|---|---|
+| `work_authorization.us_person` | ITAR / export-control postings and their status question |
+| `logistics.meets_basic_qualifications` | "Do you meet each of the basic qualifications?" |
+| `logistics.has_outstanding_offers` | "Do you have any outstanding offers or deadlines?" |
+| `logistics.has_prior_internship` | "Do you have prior internship or co-op experience?" |
+| `logistics.pursuing_further_education_after_degree` | "Are you considering further education after this degree?" |
+| `logistics.accept_arbitration_agreements` | mandatory arbitration acknowledgements |
+| `education.sat_score`, `act_score`, `school_email`, `transcript_path` | test scores, .edu address, transcript uploads |
+
+Citizenship status, visa category (F-1 / OPT / CPT), clearance, behavioural stories ("describe a
+time when...") and skill self-ratings have no profile field; answer the recurring ones once in
+`custom_answers.json` (below). Anything left goes to `manual_review_queue.csv` with the question.
 
 **It does not apply where the posting rules the candidate out.** Before filling a form it reads
 the job description (from the page, or the ATS's public posting API) and skips postings that
@@ -150,5 +178,7 @@ polarity, look-alike dropdown options, dated commitments) and run against a fict
 | Scraper, dedup, tracker sync | exercised against the live lists and a real tracker |
 | Greenhouse / Ashby / Lever form filling | exercised against live forms in dry-run |
 | Submission | no application has been submitted by this code yet: unattended runs stop at each site's human-verification step (see above) |
-| `--assist` human-in-the-loop wait | implemented; needs a machine with a display, not yet exercised |
+| `--local-blitz` / `--assist` human-in-the-loop wait | implemented; needs a machine with a display, so it has not been exercised yet. Expect to tune the first run. |
+| Essay templates | exercised offline against cached real questions; Claude drafting (`llm.py`) not yet run against the API |
+| Board crawl (`scraper.py --crawl-boards`) | exercised: ~1,080 Greenhouse / Ashby / Lever boards queried through their public APIs |
 | `llm.py`, `llm_agent.py` | written against anthropic 2.x and browser-use 1.0; construct and import cleanly, not yet run against the API |

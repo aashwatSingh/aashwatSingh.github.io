@@ -16,7 +16,11 @@ EXTRACT_JS = r"""
   const out = []; let n = 0;
   const tag = el => { const id = 'ia' + (n++); el.setAttribute('data-ia', id); return `[data-ia="${id}"]`; };
   const clean = s => (s || '').replace(/\s+/g, ' ').trim();
-  document.querySelectorAll('.ashby-application-form-field-entry').forEach(entry => {
+  // Plain fields are div.ashby-application-form-field-entry; radio, checkbox and dropdown groups are
+  // <fieldset class="..._fieldEntry_...">. Match both, outermost only.
+  const entries = [...document.querySelectorAll('.ashby-application-form-field-entry, [class*="_fieldEntry_"]')]
+    .filter(e => !e.parentElement.closest('.ashby-application-form-field-entry, [class*="_fieldEntry_"]'));
+  entries.forEach(entry => {
     const title = entry.querySelector(':scope > label, :scope > div > label[class*="_heading_"], label[class*="_heading_"]');
     if (!title) return;
     const label = clean(title.innerText);
@@ -79,7 +83,7 @@ EXTRACT_JS = r"""
 
 class AshbyAdapter(BaseAdapter):
     name = "Ashby"
-    form_ready_selector = ".ashby-application-form-field-entry"
+    form_ready_selector = ".ashby-application-form-field-entry, [class*='_fieldEntry_']"
     _boards: dict[str, dict] = {}
 
     @staticmethod
@@ -136,9 +140,18 @@ class AshbyAdapter(BaseAdapter):
             await inp.fill(typed)
             await page.wait_for_timeout(1500)
         try:
-            await page.wait_for_selector("[role=option]", timeout=4000)
+            await page.wait_for_selector("[role=option]", timeout=1500 if typed is None else 4000)
         except PWTimeout:
-            return []
+            # Dropdown-style fields open from their toggle button (or the arrow key), not a click on the input.
+            toggle = page.locator(f"{f.sel} button").first
+            try:
+                if await toggle.count():
+                    await toggle.click()
+                else:
+                    await inp.press("ArrowDown")
+                await page.wait_for_selector("[role=option]", timeout=3000)
+            except PWTimeout:
+                return []
         return [" ".join(t.split()) for t in await page.locator("[role=option]").all_inner_texts()]
 
     async def read_options(self, page: Page, f: FormField) -> list[str]:

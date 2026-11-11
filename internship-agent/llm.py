@@ -1,9 +1,13 @@
-"""Optional Claude-written "Why do you want to intern at <company>?" answers.
+"""Optional Claude-drafted answers to open-ended application questions.
 
-Only used when ANTHROPIC_API_KEY (or another Anthropic credential) is set, and
-only for that one question type, following the template in section 8.2 of the
-agent prompt. The draft is rejected (and the posting sent to manual review)
-unless it passes the zero-fabrication checks below.
+Used only when an Anthropic credential is set (ANTHROPIC_API_KEY). The model is
+given the candidate profile and the posting and must answer from those alone;
+its draft is then checked here (length, company named where relevant, nothing
+from skills.never_claim) and discarded if it fails. When the resume does not
+contain what the question asks for, the model replies INSUFFICIENT and the
+question goes back to the template generator or the candidate.
+
+Not yet exercised against the live API in this repository's history.
 """
 from __future__ import annotations
 
@@ -11,36 +15,35 @@ import json
 import os
 import re
 
-WHY_COMPANY = re.compile(
-    r"^why (do you want|are you interested|would you like|did you apply|us\b|.{1,40}\?$)|"
-    r"why .{0,40}(intern|work|join) (at|with|for)|what (interests|excites|attracts|draws) you (about|to)", re.I)
-
 MODEL = "claude-opus-5-5"
 
-SYSTEM = """You write one short answer to an internship application question on behalf of a candidate.
+SYSTEM = """You write one answer to an internship application question on behalf of a candidate.
 
 Rules that are never broken:
-- Use only facts from the candidate profile JSON you are given. Never add a skill, tool, employer, \
-metric, award or experience that is not in it.
+- Every statement about the candidate must come from the candidate profile JSON. Never add a skill, tool,
+  employer, metric, award, course, event or experience that is not in it, and never invent an anecdote.
 - Never mention any item in the profile's skills.never_claim list.
-- Mention the company by name and one specific product, system or team taken from the job description.
-- Pick the single most relevant experience or project from the profile and cite its real numbers.
-- 75 to 140 words, first person, plain text, one paragraph, no bullet points, no markdown.
-- If the job description gives you nothing specific to reference, reply with exactly: INSUFFICIENT"""
+- If the question is about the company or role, name the company and reference one specific product,
+  system or team from the job description.
+- Prefer the single most relevant project or experience and cite its real numbers.
+- First person, plain text, one paragraph, no bullet points, no markdown, no placeholders.
+- Stay within the word limit given. If none is given, write 75 to 140 words.
+- If the question asks for something the profile does not contain (a specific past situation, a test
+  score, experience in a field not on the resume), reply with exactly: INSUFFICIENT"""
 
 
 def available() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
 
 
-def why_company_answer(question: str, job: dict, job_text: str, profile: dict) -> str | None:
-    """Return a vetted answer, or None when it should go to a human instead."""
-    if not available() or not WHY_COMPANY.search(question.strip()):
+def open_answer(question: str, job: dict, job_text: str, profile: dict, limit: int | None = None) -> str | None:
+    """A vetted answer, or None when the question should be handled another way."""
+    if not available():
         return None
     import anthropic
 
-    facts = {k: profile[k] for k in ("education", "skills", "experience", "essays") if k in profile}
-    facts["projects_note"] = "Projects are described inside essays and experience; use nothing else."
+    facts = {k: profile[k] for k in ("education", "skills", "experience", "projects", "essays") if k in profile}
+    facts["education"] = {k: v for k, v in facts["education"].items() if k not in ("gpa", "gpa_scale")}
     client = anthropic.Anthropic()
     try:
         response = client.beta.messages.create(
@@ -52,7 +55,8 @@ def why_company_answer(question: str, job: dict, job_text: str, profile: dict) -
             fallbacks="default",
             system=SYSTEM,
             messages=[{"role": "user", "content": (
-                f"Company: {job['company']}\nRole: {job['title']}\n\n"
+                f"Company: {job.get('company', '')}\nRole: {job.get('title', '')}\n"
+                f"Word limit: {limit or 'none stated (75-140 words)'}\n\n"
                 f"Application question: {question}\n\n"
                 f"Candidate profile (JSON):\n{json.dumps(facts, ensure_ascii=False)}\n\n"
                 f"Job description:\n{job_text[:12000]}")}],
@@ -66,18 +70,16 @@ def why_company_answer(question: str, job: dict, job_text: str, profile: dict) -
     if response.stop_reason in ("refusal", "max_tokens"):
         return None
     text = " ".join(b.text for b in response.content if b.type == "text").strip()
-    return text if _acceptable(text, job, profile) else None
+    return text if acceptable(text, profile, limit) else None
 
 
-def _acceptable(text: str, job: dict, profile: dict) -> bool:
-    if not text or text.startswith("INSUFFICIENT"):
+def acceptable(text: str, profile: dict, limit: int | None = None) -> bool:
+    if not text or "INSUFFICIENT" in text:
         return False
     words = len(text.split())
-    if not 60 <= words <= 150:
+    if words < 8 or words > (limit or 160) * 1.05:
         return False
     low = text.lower()
-    if job["company"].lower() not in low:
-        return False
     for banned in profile.get("skills", {}).get("never_claim", []):
         if re.search(rf"\b{re.escape(banned.lower().rstrip('s'))}", low):
             return False
