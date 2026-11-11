@@ -87,7 +87,6 @@ def test_ambiguous_authorization_options_are_blocked():
     ("Why did you want to become an engineer in your respective discipline?", "textarea"),
     ("Why are you interested in Acme's Software Engineering Internship?", "textarea"),
     ("Is there any other context you'd like to share about your U.S. Immigration sponsorship needs?", "textarea"),
-    ("Do you have experience working, studying or collaborating remotely?", "select"),
     ("Are you able to be onsite in San Carlos, CA from Feb 1st - Feb 5th, 2027?", "select"),
     ("Are you comfortable working onsite 5 days a week and commit to 55 hours per week?", "select"),
     ("Why Acme?", "textarea"),
@@ -502,3 +501,99 @@ def test_short_fact_rules_do_not_answer_long_questions():
     blocked("Are you named in any pending investment-related civil action? If yes, please explain. If no, enter N/A.",
             kind="textarea")
     assert filled("What is your Github username?", kind="text") == "example"
+
+
+def test_round_seven_blockers():
+    sources = ["Company Website", "LinkedIn", "YouTube", "University – Career Services", "Glassdoor"]
+    assert filled("Select One", kind="radio", options=sources) == "Company Website"
+    blocked("Select One", kind="radio", options=["Red", "Green", "Blue"])
+    areas = ["iOS", "Backend", "Cloud infrastructure", "Android", "Machine Learning", "Data Science", "Product"]
+    assert filled("What best describes the type of opportunities you're interested in:", kind="checkbox_group",
+                  options=areas) == ["Backend"]
+    assert filled("Acceptance of Terms and Signature", kind="multiselect",
+                  options=["I have read and agree to this statement"]) == ["I have read and agree to this statement"]
+    remote = ["Yes, a remote internship aligns with my needs", "No, a remote internship does not align", "Unsure"]
+    assert filled("While interns will be invited to a 2-day in-person experience at HQ, the program is primarily "
+                  "remote. Does a remote internship structure align with your needs?", kind="radio",
+                  options=remote) == remote[0]
+    assert filled("Do you attest to the following statement? Acme is an equal opportunity employer and does not "
+                  "discriminate on the basis of race, religion, age or any other protected status.") == "Yes"
+    assert filled("Are you currently enrolled in an accredited undergraduate or graduate program? What's the name of "
+                  "the school / program? What is your expected graduation date?", kind="textarea") \
+        == "Yes. Example State University, B.S. in Computer Science, expected graduation May 2028."
+    blocked("Language Skill(s) (Check all that apply)", kind="checkbox_group", options=["English (ENG)", "Spanish (SPA)"])
+
+
+def test_itar_status_list_follows_us_person():
+    opts = ["I am a U.S. Citizen.", "I am a lawful permanent resident of the U.S.", "I am a refugee under 8 U.S.C. 1157.",
+            "I am an asylee under 8 U.S.C. 1158.", "None of the above."]
+    label = ("Acme complies with U.S. Government space technology export regulations, therefore will you state which "
+             "of the following applies to you:")
+    blocked(label, options=opts)                                   # us_person is not set in the fixture
+    profile = json.loads(json.dumps(PROFILE))
+    profile["work_authorization"]["us_person"] = False
+    d = AnswerEngine(profile, custom_answers=[]).resolve(Question(label, "select", True, opts), Context())
+    assert d.value == "None of the above."
+    profile["work_authorization"].update(us_person=True, citizenship_status="U.S. Citizen", requires_sponsorship=False)
+    d = AnswerEngine(profile, custom_answers=[]).resolve(Question(label, "select", True, opts), Context())
+    assert d.value == "I am a U.S. Citizen."
+
+
+def test_remote_collaboration_experience_follows_the_profile():
+    # the fixture lists a role whose location is "Remote"
+    assert filled("Do you have experience working, studying or collaborating remotely (e.g. online courses)?") == "Yes"
+    profile = json.loads(json.dumps(PROFILE))
+    profile["experience"][0]["location"] = "Austin, TX"
+    d = AnswerEngine(profile, custom_answers=[]).resolve(
+        Question("Do you have experience working, studying or collaborating remotely?", "select", True, YN), Context())
+    assert d.action == "unknown"
+
+
+def test_round_eight_blockers():
+    d = ask("We look for evidence of exceptional ability. Each bullet should capture the problem, solution, and result.",
+            kind="textarea")
+    assert d.rule != "address-2"                                   # "capture" used to match "apt"
+    assert filled("What is your strongest coding language?", kind="text") == "Python"
+    assert filled("Residing State", options=["Illinois", "Texas"]) == "Illinois"
+    assert filled("Previous Acme Employee") == "No"
+    assert filled("Did a current Acme employee refer you to this position and, if so, who was it?",
+                  kind="text") == "N/A"
+    blocked("Is your eligibility is based on a work visa?")
+    blocked("Provide your best result on ACT:", options=["<20", "21 - 25", "26 - 30"])
+
+
+def test_keywords_do_not_match_inside_other_words():
+    for label in ("What does excellence mean to you?", "Describe a miscellaneous project with a microphone array.",
+                  "What is your cancellation policy experience?"):
+        d = ask(label, kind="text")
+        assert d.value != PROFILE["identity"]["phone_formatted"], label
+    assert filled("Cell phone", kind="text") == PROFILE["identity"]["phone_formatted"]
+    assert filled("Mobile Number", kind="text") == PROFILE["identity"]["phone_formatted"]
+    blocked("Are you an international student?")
+
+
+def test_contact_facts_never_fill_long_prompts():
+    cases = [
+        ("What's the most interesting paper, blog post, or documentation you've read in the past month?", "textarea"),
+        ("At Acme we have two main Software Engineering roles: Forward Deployed Software Engineer and Software "
+         "Engineer (see our website). Which of these roles resonates the most with your job search and why?", "textarea"),
+        ("Acme's mission is to protect people with intelligent systems, and our values center on leading as a "
+         "servant and pursuing excellence. Tell us on the phone or here which value resonates with you.", "textarea"),
+        ("Our team works across many time zones and several states; please tell us in a few sentences how you like "
+         "to collaborate with colleagues you rarely meet in person and what city life means to you.", "textarea"),
+    ]
+    facts = {PROFILE["links"]["portfolio"], PROFILE["links"]["github"], PROFILE["identity"]["phone_formatted"],
+             PROFILE["address"]["city"], PROFILE["address"]["state"]}
+    for label, kind in cases:
+        d = ask(label, kind=kind)
+        assert d.value not in facts, (label, d)
+    # short link prompts still work, also in a textarea
+    assert filled("Please provide a link to a portfolio, website, or github:", kind="textarea") == PROFILE["links"]["github"]
+    assert filled("Website", kind="text") == PROFILE["links"]["portfolio"]
+    assert ask("Please list any additional address information here, such as an apartment, suite, or unit number, "
+               "if it applies to where you currently live.", kind="text", required=False).action == "skip"
+    assert filled("What is your current cumulative GPA? (Note: A minimum GPA of 3.5 is required for consideration on "
+                  "a 4.0 scale).", kind="text") == PROFILE["education"]["gpa"]
+    # a long address prompt is still an address prompt
+    assert filled("Please provide your permanent address (city, state, zip code). We use this information to determine "
+                  "eligibility for relocation assistance for the internship.", kind="text").startswith("1 Example Way")

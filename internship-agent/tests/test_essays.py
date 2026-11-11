@@ -90,3 +90,11 @@ def test_experience_summary_and_built_before():
     assert gen("Have you built or worked on any apps before? If yes, tell us briefly about one.")[1].startswith("Yes. ")
     assert gen("Have you built or modified an Android app before? If yes, what tools did you use?") is None
     assert gen("Describe your previous experience with robots.") is None
+
+
+def test_may_draft_rules():
+    assert essays.may_draft("Why Acme?", JOB, "no-rule")
+    assert not essays.may_draft("What is your citizenship status and why?", JOB, "x-citizenship")
+    # a fact rule tripped on a keyword inside an essay prompt: a recognised essay type may still be drafted
+    assert essays.may_draft("Please provide us with 3-4 examples highlighting your exceptional ability.", JOB, "address-2")
+    assert not essays.may_draft("Apartment or unit number", JOB, "address-2")

@@ -36,6 +36,17 @@ ESSAY_PROMPT = re.compile(
     r"^(why\b|describe\b|tell (us|me)\b|explain\b|share\b|in your own words|"
     r"what (excites|interests|motivates|drives|do you (hope|want|expect)|are you (most|looking)|would you)|"
     r"please (describe|share|tell|explain|provide a (summary|description|brief)))", re.I)
+# Contact details, links and other one-line facts. These rules may never answer a long free-text
+# prompt, whatever keyword it happens to contain ("...the best blog post you have read...").
+SHORT_FACT_RULES = {
+    "phone", "phone-type", "phone-country", "email", "linkedin", "github", "portfolio",
+    "zip", "city", "state", "country", "state-and-country", "residence-state", "residence-country", "location",
+    "address", "first-name", "last-name", "preferred-name", "preferred-last-name",
+    "school", "major", "degree", "class-standing", "coursework", "x-look-at", "x-employer",
+    "x-school-confirm", "x-grading-scale", "x-top-courses", "x-preferred-language",
+}
+LONG_PROMPT = {"textarea": 110, "text": 260}          # characters; single-line inputs often carry long notes
+
 ESSAY_RULES = {"essay-project", "essay-why-swe", "follow-up", "never-answer", "x-school-confirm",
                "x-legal-name", "x-top-courses"}
 
@@ -333,8 +344,12 @@ class AnswerEngine:
             return self._file(q, label)
 
         essay_prompt = bool(ESSAY_PROMPT.search(label)) and q.kind not in CHOICE_KINDS | {"checkbox"}
+        long_prompt = len(label) > LONG_PROMPT.get(q.kind, 10 ** 6)
         for name, pattern, handler in self._rules():
             if essay_prompt and name not in ESSAY_RULES:
+                continue
+            if long_prompt and name in SHORT_FACT_RULES and not (
+                    name == "address" and re.search(r"address", label[:60])):
                 continue
             if pattern.search(label) or (q.field_id and pattern.search(norm(q.field_id.replace("_", " ")))
                                          and name in _ID_RULES):
@@ -561,6 +576,8 @@ class AnswerEngine:
                 return Skip()
             if q.kind == "textarea" and not re.search(r"\bsignature\b|full legal name", label):
                 return None                                  # a name never belongs in an essay box
+            if q.kind in CHOICE_KINDS | {"checkbox"}:
+                return None                                  # an agreement to tick, not a name to type
             core = re.sub(r"[^a-z ]", "", label).strip()
             if core in {"name", "full name", "legal name", "full legal name", "your name", "what is your legal name",
                         "what is your full name", "what is your name", "what is your full legal name",
@@ -990,6 +1007,18 @@ class AnswerEngine:
 
         def citizenship(q, label, ctx):
             """Answered only when work_authorization.citizenship_status is set in the profile."""
+            listed = " ".join(q.options).lower()
+            if q.kind in CHOICE_KINDS and re.search(r"refugee|asylee|none of the above", listed):
+                # the standard ITAR list: citizen / permanent resident / refugee / asylee / none of the above
+                if is_citizen or is_pr:
+                    return Choice(status_patterns)
+                if auth.get("us_person") is False:
+                    return Choice([r"^none of the above", r"^none\b", r"not a u\.?s\.? person"])
+                return Unknown("set work_authorization.us_person (and citizenship_status) in the profile")
+            if "deemed export" in label and q.kind in CHOICE_KINDS:
+                if auth.get("us_person") is None:
+                    return Unknown("set work_authorization.us_person in the profile")
+                return YesNo(not auth["us_person"])
             if not status:
                 return Unknown("set work_authorization.citizenship_status in the profile")
             if re.search(r"north korea|syria|iran|cuba", label):
@@ -1040,6 +1069,8 @@ class AnswerEngine:
                     return Text(hit, [rf"^{re.escape(hit)}$"])
             if pick_yes_no(q.options, True) is None and re.search(
                     r"citizen|permanent resident|green card|visa|sponsor", " ".join(q.options).lower()):
+                if re.search(r"any employer|present employer", " ".join(q.options).lower()):
+                    return Unknown("choose which authorization statement applies to you (answer_blockers.py)")
                 if not status:
                     return Unknown("options ask how you are authorized: set work_authorization.citizenship_status")
                 hit = pick_pattern(q.options, status_patterns + ([r"non-?immigrant visa"] if not (is_citizen or is_pr) else []))
@@ -1113,8 +1144,12 @@ class AnswerEngine:
                            r"^intern(ship)?\b"], exclude=r"hardware|mechanical|electrical|sales|marketing|finance")
 
         def position_type(q, label, ctx):
+            if q.kind not in CHOICE_KINDS:
+                return None
+            if not any(re.search(r"intern|co-?op|full[- ]time|contract", o, re.I) for o in q.options):
+                return interest_area(q, label, ctx)          # the options are areas, not employment types
             return Choice([r"^intern(ship)?$", r"summer intern", r"\bintern(ship)?\b"],
-                          exclude=r"co-?op|full[- ]time|part[- ]time|contract") if q.kind in CHOICE_KINDS else None
+                          exclude=r"co-?op|full[- ]time|part[- ]time|contract")
 
         def post_internship(q, label, ctx):
             if q.kind not in CHOICE_KINDS:
@@ -1156,7 +1191,8 @@ class AnswerEngine:
              else accommodation(q, label, ctx)),
             ("x-demographic", r"household|parents? or guardians?|free school meals|socio-?economic|first[- ]generation|"
                               r"religio|marital|caring responsibilit|neurodiver|social mobility|age (range|group)",
-             lambda q, *_: Choice([DECLINE.pattern]) if q.kind in CHOICE_KINDS else Skip()),
+             lambda q, label, ctx: None if len(label) > 160 or re.search(r"attest|acknowledg|equal opportunity", label)
+             else Choice([DECLINE.pattern]) if q.kind in CHOICE_KINDS else Skip()),
             ("x-degree-after-graduation", r"level of education .{0,60}(once|when|after|upon) .{0,25}graduat|"
                                           r"degree (will you|you will) (have|hold|earn|receive)",
              lambda q, *_: Choice([r"bachelor", r"undergrad", r"^b\.?s\.?\b"], text=edu["degree"],
@@ -1182,6 +1218,28 @@ class AnswerEngine:
             ("x-alt-email", r"(alternate|secondary|other|backup) e-?mail", lambda q, *_: Text(edu["school_email"])
              if edu.get("school_email") else (Unknown("set education.school_email") if q.required else Skip())),
             ("x-look-at", r"^what can we look at", t(links["portfolio"])),
+            ("x-attest-statement", r"^(do you |i )?(hereby )?attest\b|attest to the following (statement|policy)",
+             lambda q, label, ctx: None if re.search(
+                 r"citizen|clearance|felony|convict|criminal|authorized to work|sponsor|experience|qualif|degree|"
+                 r"\bgpa\b|enrolled", label) else Check()),
+            ("x-source-by-options", r"^(please )?(select|choose)( one)?:?$", lambda q, label, ctx:
+             heard(q, label, ctx) if q.kind in CHOICE_KINDS and sum(bool(re.search(
+                 r"linkedin|company website|glassdoor|indeed|handshake|referral|job board|career", o, re.I))
+                 for o in q.options) >= 3 else None),
+            ("x-spoken-languages", r"language skill|languages? (do )?you speak|spoken languages?|languages? .{0,20}fluent",
+             lambda q, *_: Multi(p["spoken_languages"]) if p.get("spoken_languages")
+             else Unknown("set spoken_languages in the profile")),
+            ("x-remote-fit", r"remote (internship|work|role|position|program)\w* .{0,60}(align|work for you|suit|fit)",
+             lambda q, *_: YesNo(log["remote"], [r"^yes\b"]) if q.kind in CHOICE_KINDS else None),
+            ("x-remote-experience", r"experience (working|studying|collaborating)[a-z, ]{0,40}remote",
+             lambda q, *_: YesNo(True) if q.kind in CHOICE_KINDS and any(
+                 "remote" in (x.get("location") or "").lower() for x in p.get("experience") or []) else None),
+            ("x-extracurricular-projects", r"extra-?c\w*ricular .{0,30}projects?",
+             lambda q, *_: YesNo(True) if q.kind in CHOICE_KINDS and any(
+                 {"hackathon", "club", "team"} & set(x.get("focus", [])) for x in p.get("projects") or []) else None),
+            ("x-enrollment-summary", r"currently enrolled .{0,80}(name of the school|which school|what school).{0,120}graduat",
+             lambda q, *_: Text(f"Yes. {edu['school']}, {edu['degree_short']} in {edu['major']}, expected graduation "
+                                f"{grad_month} {edu['grad_year']}.") if q.kind in ("text", "textarea") else None),
             ("x-defense-work", r"(military|defen[cs]e|government|warfighter|dod\b|national security).{0,260}"
                                r"(comfortable|willing|agree|support|contribut|objection|aligned|ok with)|"
                                r"(comfortable|willing).{0,80}(military|defen[cs]e|government) (customers?|projects?|work)",
@@ -1190,7 +1248,8 @@ class AnswerEngine:
             ("x-clearance", r"(hold|have|possess|held|maintain)\w* .{0,40}clearance|active .{0,40}clearance|"
                             r"clearance\(s\)|clearance (level|status|eligibility)|eligible to obtain .{0,40}clearance",
              clearance),
-            ("x-test-scores", r"\bsat\b|\bact\b (score|result)|\bact score|standardized test|\bgre\b score",
+            ("x-test-scores", r"\bsat\b|\bact\b (score|result)|\bact score|standardized test|\bgre\b score|"
+                              r"(result|score) (on|for) (the )?(sat|act)\b",
              test_score),
             ("x-essential-functions", r"perform the (essential|duties|functions)|essential functions|"
                                       r"reason why you would not be able to perform",
@@ -1240,7 +1299,8 @@ class AnswerEngine:
              lambda q, *_: Text(edu["high_school_graduation"]) if edu.get("high_school_graduation")
              else Unknown("set education.high_school_graduation")),
             ("x-citizenship", r"citizen|u\.?s\.? person|permanent residen|green card|work authorization status|"
-                              r"\bitar\b|export (control|license)", lambda q, label, ctx:
+                              r"\bitar\b|export (control|license|regulation)|deemed export|"
+                              r"based on an? (work )?visa", lambda q, label, ctx:
              None if re.search(r"sponsor", label) and not re.search(r"citizen|person|residen", label)
              else citizenship(q, label, ctx)),
             ("x-arbitration", r"arbitration", flag("accept_arbitration_agreements", "legal agreement needs your decision")),
@@ -1306,7 +1366,8 @@ class AnswerEngine:
             ("x-position-type", r"type of (position|role|employment) are you (applying|seeking|looking)|"
                                 r"type of opportunit(y|ies) .{0,30}interested",
              position_type),
-            ("x-preferred-language", r"(which|what|preferred|favorite|primary|strongest) .{0,25}(programming |coding )?"
+            ("x-preferred-language", r"(strongest|primary|preferred|favorite|best) (programming |coding )language|"
+                                     r"(which|what|preferred|favorite|primary|strongest) .{0,25}(programming |coding )?"
                                      r"language.{0,40}(prefer|like to (work|use)|most comfortable|strongest|primary)|"
                                      r"preferred (programming |coding )?language",
              lambda *_: Text(p["skills"].get("preferred_language") or p["skills"]["languages"][0],
@@ -1318,7 +1379,7 @@ class AnswerEngine:
             ("x-office", r"location preference|preferred (work |office )?location|(which|what) .{0,20}(office|location)|"
                          r"office preference|where would you (like|prefer) to work|location.{0,20}(apply|interested)|"
                          r"work location", office),
-            ("x-interest-area", r"(areas?|teams?|service lines?|tracks?|disciplines?|functions?) .{0,40}interest|"
+            ("x-interest-area", r"(areas?|teams?|departments?|service lines?|tracks?|disciplines?|functions?) .{0,40}interest|"
                                 r"which team (best )?(fits|interests|matches)|type of (engineering|intern) role|"
                                 r"which (specific )?(role|position|team) .{0,40}interest", interest_area),
             ("x-employer", r"(current|most recent|previous|last|prior) .{0,25}(employer|company|job title|"
@@ -1347,7 +1408,8 @@ class AnswerEngine:
             ("never-answer", r"citizen|u\.?s\.? person|\bitar\b|export control|\bear\b|green card|"
                              r"permanent resident|visa (status|type|category)|immigration status|"
                              r"(current|type of|which|what) visa|work visa|\bopt\b(?! ?-?(in|out))|\bcpt\b|clearance|"
-                             r"country of (birth|citizenship|origin)|national(ity)?\b|date of birth|\bdob\b|"
+                             r"country of (birth|citizenship|origin)|\bnational(ity)?\b|"
+                             r"international (student|candidate|applicant)|date of birth|\bdob\b|"
                              r"social security|\bssn\b|criminal|convicted|felony|background check|drug|"
                              r"civil action|lawsuit|litigation|pending investigation|regulatory (action|proceeding)|"
                              r"disciplinary|bankrupt|arrest|charged with|sanction(s|ed)\b|terminated|dismissed from",
@@ -1379,10 +1441,10 @@ class AnswerEngine:
             ("phone-type", r"phone (device )?type", t(ident["phone_type"])),
             ("phone-country", r"country (calling )?code|phone country", lambda *_: Choice(
                 [r"united states.*\+1|\+1.*united states", r"^united states", r"^\+1$"], text=ident["country_code"])),
-            ("phone", r"phone|mobile( number)?$|cell", t(ident["phone_formatted"])),
+            ("phone", r"\b(tele)?phone\b|\bmobile( number)?$|\bcell\b|\bcell ?phone\b", t(ident["phone_formatted"])),
 
             # --- address ----------------------------------------------------
-            ("address-2", r"address (line )?2|apt|apartment|suite|unit\b", skip),
+            ("address-2", r"address (line )?2|\bapt\b|\bapartment\b|\bsuite\b|\bunit\b", skip),
             ("address", r"address", address),
             ("zip", r"\bzip\b|postal", t(addr["postal_code"])),
             ("residence-country", r"^(what|which|please select).{0,25}country.{0,30}(resid|live|located|based)",
@@ -1397,7 +1459,7 @@ class AnswerEngine:
             ("city", r"^(current )?city$|city of residence|^city\b(?!.*state)|which city do you|"
                      r"^what city .{0,30}(resid|live|located|based)",
              t(addr["city"])),
-            ("state", r"^(current |home )?state$|state/province|^province|state of residence|^state\b(?!ment)|"
+            ("state", r"^(current |home |residing )?state$|state/province|^province|state of residence|^state\b(?!ment)|"
                       r"state .{0,40}work(ing)? (remotely )?from",
              lambda *_: Text(addr["state"], [rf"^{addr['state_abbr']}$", rf"^{addr['state']}\b"])),
             ("country", r"^country$|country of residence|country (where|in which) you|^country\b|"
@@ -1413,8 +1475,9 @@ class AnswerEngine:
                 links["github"].rstrip("/").rsplit("/", 1)[-1] if re.search(r"username|handle|user ?name", label)
                 else links["github"])),
             ("social", r"twitter|\bx\.com|instagram|facebook|tiktok", skip),
-            ("portfolio", r"website|portfolio|personal (site|page|url)|other (link|url)|\bblog\b",
-             t(links["portfolio"])),
+            ("portfolio", r"website|portfolio|personal (site|page|url)|other (link|url)|your blog\b",
+             lambda q, label, ctx: None if q.kind == "textarea" and not re.search(
+                 r"link|url|portfolio|website|github", label) else Text(links["portfolio"])),
 
             # --- education --------------------------------------------------
             ("gpa", r"\bgpa\b|grade point", gpa),
@@ -1469,7 +1532,7 @@ class AnswerEngine:
             ("compensation", r"salary|compensation|hourly rate|pay (expectation|rate|range)|\bwage", compensation),
             ("heard-about", r"(how|where) (did )?you (first )?(hear|heard|find|found|learn|learned|come across|"
                             r"discover|see)|how were you referred|referral source|source of", heard),
-            ("referral", r"referr|referred by|who referred|employee referral",
+            ("referral", r"referr|referred by|who referred|employee referral|\brefer you\b",
              lambda q, *_: YesNo(False) if q.kind in CHOICE_KINDS
              else (Text("N/A") if q.required and q.kind in ("text", "textarea") else Skip())),
 
@@ -1491,7 +1554,7 @@ class AnswerEngine:
                               r".{0,60}(worked|employed|employee|interned|contractor)|former employee|"
                               r"(worked|employed|interned) (by|at|for|with) .{0,50}(before|previously|in the past)|"
                               r"worked (for|at|with) .{0,50}(before|previously|in the past)|"
-                              r"worked (with|for) us\b|currently working (as|with|at|for)|"
+                              r"worked (with|for) us\b|currently working (as|with|at|for)|^previous .{0,30}employee$|"
                               r"engaged to perform services",
              lambda *_: YesNo(log["previously_worked_or_applied"])),
             ("non-compete", r"non-?compete|restrictive covenant|non-?solicit|prohibited or limited|"
@@ -1525,6 +1588,7 @@ class AnswerEngine:
 
             # --- acknowledgements (last, and only for genuine notices) -----------
             ("consent", r"privacy|terms (and|&) conditions|data (protection|processing)|\bcertify\b|acknowledg|"
+                        r"acceptance of terms|terms of (use|service)|\battest\b|"
                         r"true,? (complete|correct|and accurate)|true and (correct|complete|accurate)|"
                         r"accurate to the best|code of conduct|"
                         r"i understand that|i have read|candidate (notice|policy)|non-?disclos|not disclos|\bconsent\b",

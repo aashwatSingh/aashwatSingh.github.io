@@ -51,6 +51,16 @@ class ApplyResult:
     learned: list[dict] = field(default_factory=list)     # answers the candidate typed in the browser
 
 
+@dataclass
+class FormState:
+    """What has been decided on a form so far (shared across the pages of a multi-step portal)."""
+    answers: list[dict] = field(default_factory=list)
+    unknowns: list[str] = field(default_factory=list)
+    unknown_fields: list[FormField] = field(default_factory=list)
+    handled: set[str] = field(default_factory=set)
+    own_words_only: bool = False      # the form carries an AI-use / authorship attestation
+
+
 class FillError(RuntimeError):
     pass
 
@@ -195,6 +205,65 @@ class BaseAdapter:
         return await self.page_text(page)
 
     # ---- shared flow ------------------------------------------------------
+    def check_eligibility(self, text: str, engine: AnswerEngine, job: dict) -> ApplyResult | None:
+        """Posting-level blockers read from the description; None when the posting is eligible."""
+        if not text.strip():
+            return ApplyResult(MANUAL_REVIEW, "NO_JOB_DESCRIPTION",
+                               "could not read the posting text to check eligibility")
+        if job.get("term_unverified") and not re.search(r"2027|\bsummer\b", text, re.I):
+            return ApplyResult(SKIPPED_INELIGIBLE, "posting does not mention Summer or 2027")
+        blocked = prequalify_text(text, engine.p, job)
+        if blocked:
+            status, reason = blocked
+            detail = ("the posting is limited to U.S. persons (ITAR / export control); set "
+                      "work_authorization.us_person in the profile") if reason == "US_PERSON_REQUIRED" else ""
+            return ApplyResult(status, reason, detail)
+        return None
+
+    async def answer_form(self, page: Page, job: dict, engine: AnswerEngine, ctx: Context, text: str,
+                          state: FormState) -> None:
+        """Answer and fill every field currently on the page, re-reading it as answers reveal new fields."""
+        for _ in range(4):
+            fields = await self.extract(page)
+            fresh = [f for f in fields if f.key not in state.handled]
+            if not fresh:
+                break
+            ctx.labels = [f.question.label for f in fields]
+            state.own_words_only = state.own_words_only or any(AI_POLICY.search(f.question.label) for f in fields)
+            for f in fresh:
+                state.handled.add(f.key)
+                q = f.question
+                decision = self.special(f, engine.p)
+                if decision is None:
+                    if f.extra.get("lazy_options") and not q.options:
+                        try:
+                            q.options = await self.read_options(page, f)
+                        except Exception as exc:          # noqa: BLE001 - widget quirks
+                            q.options = []
+                            f.extra["options_error"] = str(exc)[:120]
+                    decision = engine.resolve(q, ctx)
+                if decision.action != "fill" and q.kind in ("textarea", "text") and self.write_essays \
+                        and not state.own_words_only and essays.may_draft(q.label, job, decision.rule):
+                    draft = await asyncio.to_thread(
+                        essays.generate, q.label, job, text, engine.p, q.description, q.required,
+                        38 if q.kind == "text" else None)        # single-line inputs: keep it short
+                    if draft:
+                        decision = Decision("fill", draft[1], draft[0])
+                if decision.action == "fill":
+                    try:
+                        await self.fill(page, f, decision.value, engine.p)
+                    except Exception as exc:              # noqa: BLE001
+                        note = f"could not fill: {type(exc).__name__}: {str(exc)[:140]}"
+                        decision = Decision("unknown" if q.required else "skip", rule=decision.rule, note=note)
+                state.answers.append({"label": q.label, "kind": q.kind, "required": q.required,
+                                      "options": [o[:80] for o in q.options[:250]],
+                                      "action": decision.action, "value": _loggable(decision.value),
+                                      "rule": decision.rule, "note": decision.note})
+                if decision.action == "unknown":
+                    state.unknowns.append(q.label)
+                    state.unknown_fields.append(f)
+            await page.wait_for_timeout(400)
+
     async def apply(self, page: Page, job: dict, engine: AnswerEngine, ctx: Context,
                     *, dry_run: bool, shot_path: str) -> ApplyResult:
         resp = await page.goto(self.form_url(job), wait_until="domcontentloaded",
@@ -213,65 +282,14 @@ class BaseAdapter:
         if _CLOSED.search((await self.page_text(page))[:3000]):
             return ApplyResult(CLOSED, "posting closed")
         text = await self.job_text(page, job)
-        if not text.strip():
-            return ApplyResult(MANUAL_REVIEW, "NO_JOB_DESCRIPTION",
-                               "could not read the posting text to check eligibility")
-        if job.get("term_unverified") and not re.search(r"2027|\bsummer\b", text, re.I):
-            return ApplyResult(SKIPPED_INELIGIBLE, "posting does not mention Summer or 2027")
-        blocked = prequalify_text(text, engine.p, job)
+        blocked = self.check_eligibility(text, engine, job)
         if blocked:
-            status, reason = blocked
-            detail = ("the posting is limited to U.S. persons (ITAR / export control); set "
-                      "work_authorization.us_person in the profile") if reason == "US_PERSON_REQUIRED" else ""
-            return ApplyResult(status, reason, detail)
+            return blocked
 
         ctx.job_text = text
-        answers: list[dict] = []
-        unknowns: list[str] = []
-        unknown_fields: list[FormField] = []
-        handled: set[str] = set()
-        own_words_only = False       # the form carries an AI-use / authorship attestation
-        for _ in range(4):                       # re-extract: answers can reveal new fields
-            fields = await self.extract(page)
-            fresh = [f for f in fields if f.key not in handled]
-            if not fresh:
-                break
-            ctx.labels = [f.question.label for f in fields]
-            own_words_only = own_words_only or any(AI_POLICY.search(f.question.label) for f in fields)
-            for f in fresh:
-                handled.add(f.key)
-                q = f.question
-                decision = self.special(f, engine.p)
-                if decision is None:
-                    if f.extra.get("lazy_options") and not q.options:
-                        try:
-                            q.options = await self.read_options(page, f)
-                        except Exception as exc:          # noqa: BLE001 - widget quirks
-                            q.options = []
-                            f.extra["options_error"] = str(exc)[:120]
-                    decision = engine.resolve(q, ctx)
-                if decision.action != "fill" and q.kind in ("textarea", "text") and self.write_essays \
-                        and not own_words_only \
-                        and decision.rule in ("no-rule", "experience", "follow-up", "essay-project", "essay-why-swe"):
-                    draft = await asyncio.to_thread(
-                        essays.generate, q.label, job, text, engine.p, q.description, q.required,
-                        38 if q.kind == "text" else None)        # single-line inputs: keep it short
-                    if draft:
-                        decision = Decision("fill", draft[1], draft[0])
-                if decision.action == "fill":
-                    try:
-                        await self.fill(page, f, decision.value, engine.p)
-                    except Exception as exc:              # noqa: BLE001
-                        note = f"could not fill: {type(exc).__name__}: {str(exc)[:140]}"
-                        decision = Decision("unknown" if q.required else "skip", rule=decision.rule, note=note)
-                answers.append({"label": q.label, "kind": q.kind, "required": q.required,
-                                "options": [o[:80] for o in q.options[:30]],
-                                "action": decision.action, "value": _loggable(decision.value),
-                                "rule": decision.rule, "note": decision.note})
-                if decision.action == "unknown":
-                    unknowns.append(q.label)
-                    unknown_fields.append(f)
-            await page.wait_for_timeout(400)
+        state = FormState()
+        await self.answer_form(page, job, engine, ctx, text, state)
+        answers, unknowns, unknown_fields = state.answers, state.unknowns, state.unknown_fields
 
         if not answers:
             return ApplyResult(MANUAL_REVIEW, "FORM_NOT_FOUND", "no form fields detected")

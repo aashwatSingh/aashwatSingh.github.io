@@ -247,6 +247,24 @@ def template_answer(question: str, job: dict, job_text: str, profile: dict, desc
     return kind, fit(text, limit, sentence_limit(question, description))
 
 
+# Rules that decline on purpose: an essay must never be written into these fields.
+NEVER_DRAFT = {"never-answer", "x-human-only", "x-citizenship", "x-clearance", "sponsorship", "x-accommodation",
+               "x-test-scores", "x-arbitration", "x-background-check", "x-interview-recording", "work-auth",
+               "x-work-auth-detail", "x-offers", "x-school-email", "x-alt-email", "x-hs-graduation", "x-high-school",
+               "x-travel", "x-spoken-languages", "gpa", "file", "custom"}
+OPEN_RULES = {"no-rule", "experience", "follow-up", "essay-project", "essay-why-swe"}
+
+
+def may_draft(question: str, job: dict, rule: str) -> bool:
+    """Should the essay generator be tried for a question the fact rules did not answer?"""
+    if rule in NEVER_DRAFT:
+        return False
+    if rule in OPEN_RULES:
+        return True
+    # some other rule matched a keyword inside a long prompt: only a recognised essay type may override it
+    return classify(question, job.get("company", "")) not in (None, "skip")
+
+
 def generate(question: str, job: dict, job_text: str, profile: dict, description: str = "",
              required: bool = True, limit: int | None = None) -> tuple[str, str] | None:
     """Best available answer: Claude (grounded, vetted) when a key is set, else a template.

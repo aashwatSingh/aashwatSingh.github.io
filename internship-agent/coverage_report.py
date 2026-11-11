@@ -63,8 +63,7 @@ def main() -> None:
         for q in qs:
             d = engine.resolve(q, ctx)
             rule, value = d.rule, d.value
-            if d.action != "fill" and q.kind in ("textarea", "text") \
-                    and d.rule in ("no-rule", "experience", "follow-up", "essay-project", "essay-why-swe"):
+            if d.action != "fill" and q.kind in ("textarea", "text") and essays.may_draft(q.label, job, d.rule):
                 draft = essays.generate(q.label, job, text, profile, q.description, q.required,
                                         38 if q.kind == "text" else None)
                 if draft:

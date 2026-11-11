@@ -17,6 +17,16 @@ except ImportError:
     pass
 
 
+try:
+    from ats.workday import WorkdayAdapter
+    ADAPTERS["Workday"] = WorkdayAdapter()         # experimental past the login screen: opt in with --ats
+except ImportError:
+    pass
+
+# Portals attempted when --ats is not given. Workday is deliberately not in this list.
+DEFAULT_ATS = "Greenhouse,Ashby,Lever"
+
+
 def adapter_for(url: str):
     for adapter in ADAPTERS.values():
         if adapter.matches(url):

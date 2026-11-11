@@ -31,7 +31,7 @@ import config
 import dedup
 import scraper
 from answers import AnswerEngine, Context, load_custom_answers, remember_answers
-from ats import ADAPTERS, adapter_for
+from ats import ADAPTERS, DEFAULT_ATS, adapter_for
 from ats.base import (CLOSED, DRY_RUN_OK, ERROR, MANUAL_REVIEW, SKIPPED_INELIGIBLE, SUBMITTED, ApplyResult)
 
 APPLICATION_TIMEOUT_S = 240       # whole form, including uploads and option lookups (+ --assist wait)
@@ -86,7 +86,8 @@ async def apply_one(context, job: dict, engine: AnswerEngine, ledger: dedup.Ledg
             return await llm_agent.apply(context, job, engine.p, dry_run=dry_run, shot_path=shot)
         return await asyncio.wait_for(
             adapter.apply(page, job, engine, ctx, dry_run=dry_run, shot_path=shot),
-            timeout=APPLICATION_TIMEOUT_S + (2 * adapter.human_wait_s + 180 if adapter.human_wait_s else 0))
+            timeout=getattr(adapter, "timeout_s", APPLICATION_TIMEOUT_S)
+            + ((8 if adapter.name == "Workday" else 2) * max(adapter.human_wait_s, 180) if adapter.human_wait_s else 0))
     except asyncio.TimeoutError:
         await _safe_shot(page, shot)
         return ApplyResult(MANUAL_REVIEW, "TIMEOUT", f"gave up after {APPLICATION_TIMEOUT_S}s", screenshot=shot)
@@ -159,6 +160,9 @@ async def run(args) -> int:
     for adapter in ADAPTERS.values():
         adapter.human_wait_s = args.assist
         adapter.write_essays = not args.no_essays
+        if hasattr(adapter, "create_accounts"):
+            adapter.create_accounts = args.workday_create_accounts
+            adapter.try_sign_in = not args.workday_manual_sign_in
     if args.assist:
         args.headed = True
     if not args.dry_run and not args.assist:
@@ -272,8 +276,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--target", type=int, default=config.TARGET_TOTAL, help="stop when the ledger reaches this")
     ap.add_argument("--limit", type=int, default=0, help="stop after this many postings (0 = no limit)")
     ap.add_argument("--max-minutes", type=float, default=0, help="stop after this long (0 = no limit)")
-    ap.add_argument("--ats", default=",".join(ADAPTERS),
-                    help="comma list of ATS names, or 'all' (others need the LLM agent)")
+    ap.add_argument("--ats", default=DEFAULT_ATS,
+                    help=f"comma list of portals (adapters: {', '.join(ADAPTERS)}), or 'all'. Workday is "
+                         "experimental past its login screen and must be named explicitly")
+    ap.add_argument("--workday-manual-sign-in", action="store_true",
+                    help="Workday only: never type the portal password; wait for you to sign in yourself "
+                         "(use this if you sign in with Google or use different passwords per site)")
+    ap.add_argument("--workday-create-accounts", action="store_true",
+                    help="Workday only: when your portal password is not accepted on a site, create an "
+                         "account there with the profile's e-mail and password (off by default)")
     ap.add_argument("--dedup-level", choices=["company", "role"], default="company",
                     help="company: never apply to a company twice; role: only skip the same role/URL")
     ap.add_argument("--max-per-company", type=int, default=0,

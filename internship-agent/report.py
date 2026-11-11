@@ -2,6 +2,7 @@
 
     python report.py                              # everything in logs/applications
     python report.py --since 2026-11-11T10:30     # only attempts logged at or after this time
+    python report.py --rescore                    # re-answer the logged questions with today's rules/answers
 
 ready_to_submit.csv      postings where every required question was answered; they only need the
                          human-verification step (run `python agent_runner.py --local-blitz`).
@@ -19,9 +20,10 @@ import re
 from collections import Counter, defaultdict
 
 import config
+from answers import AI_POLICY as AI_POLICY_RE
 
 HUMAN_GATES = ("CAPTCHA", "EMAIL_VERIFICATION_CODE")
-_KEY = re.compile(r"\bset ((?:work_authorization|logistics|education|skills)\.[a-z_]+)")
+_KEY = re.compile(r"\bset ((?:work_authorization|logistics|education|skills)\.[a-z_]+|spoken_languages)")
 # Rules whose unanswered questions map to one profile key even though the note does not name it.
 RULE_KEYS = {
     "x-citizenship": "work_authorization.citizenship_status",
@@ -38,6 +40,7 @@ RULE_KEYS = {
     "x-school-email": "education.school_email",
     "x-alt-email": "education.school_email",
     "x-test-scores": "education.sat_score / act_score",
+    "x-spoken-languages": "spoken_languages",
 }
 FILE_KEYS = {"transcript": "education.transcript_path (a transcript.pdf file)",
              "cover letter": "logistics.cover_letter_path (a cover letter file)"}
@@ -60,6 +63,59 @@ def load_attempts(since: str | None = None) -> list[dict]:
         if since and d.get("when", "") < since:
             continue
         out.append(d)
+    return out
+
+
+ADAPTER_RULES = ("gh-", "ashby-", "lever-", "wd-")
+
+
+def rescore(attempts: list[dict]) -> list[dict]:
+    """Re-answer every logged question with the current profile, rules and custom answers.
+
+    Lets you see the effect of a rule change, a new profile value or answer_blockers.py without
+    opening a browser again. Approximate in one way: a follow-up question that a form only shows
+    after a newly answered question was never recorded, so it cannot be counted.
+    """
+    import essays
+    from answers import AnswerEngine, Context, Question
+
+    profile = config.load_profile()
+    engine = AnswerEngine(profile)
+    out = []
+    for d in attempts:
+        answerable = d["status"] in ("dry_run_ok",) or (d["status"] == "manual_review"
+                                                        and d.get("reason") == "UNANSWERED_REQUIRED")
+        if not answerable or not d.get("answers"):
+            out.append(d)
+            continue
+        job = d["job"]
+        ctx = Context(company=job.get("company", ""), title=job.get("title", ""),
+                      locations=list(job.get("locations") or []), labels=[a["label"] for a in d["answers"]])
+        own_words = any(AI_POLICY_RE.search(a["label"]) for a in d["answers"])
+        redone = []
+        for a in d["answers"]:
+            if (a.get("rule") or "").startswith(ADAPTER_RULES) or "could not fill" in (a.get("note") or ""):
+                redone.append(a)                       # decided by the adapter or by the live widget, not the rules
+                continue
+            q = Question(label=a["label"], kind=a.get("kind") or "text", required=bool(a.get("required")),
+                         options=list(a.get("options") or []))
+            if q.kind in ("select", "multiselect", "radio", "checkbox_group") and a["action"] == "fill" \
+                    and (not q.options or len(q.options) in (30, 250)):
+                redone.append(a)                       # option list missing or cut short in the log: keep the outcome
+                continue
+            dec = engine.resolve(q, ctx)
+            action, value, rule, note = dec.action, dec.value, dec.rule, dec.note
+            if action != "fill" and q.kind in ("textarea", "text") and not own_words \
+                    and essays.may_draft(q.label, job, rule):
+                draft = essays.generate(q.label, job, "", profile, "", q.required, 38 if q.kind == "text" else None)
+                if draft:
+                    action, value, rule = "fill", draft[1], draft[0]
+            redone.append({**a, "action": action, "value": value if not isinstance(value, str) else value[:160],
+                           "rule": rule, "note": note})
+        stuck = [a for a in redone if a["action"] == "unknown"]
+        out.append({**d, "answers": redone,
+                    "status": "manual_review" if stuck else "dry_run_ok",
+                    "reason": "UNANSWERED_REQUIRED" if stuck else "all required questions answered (re-scored)"})
     return out
 
 
@@ -117,8 +173,17 @@ def write_files(summary: dict) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--since", help="ISO time; ignore attempts logged before it")
+    ap.add_argument("--rescore", action="store_true",
+                    help="re-answer the logged questions with the current profile, rules and custom answers")
+    ap.add_argument("--ats", help="only these portals, comma separated (e.g. Greenhouse,Ashby,Lever)")
     args = ap.parse_args()
-    summary = summarise(load_attempts(args.since))
+    attempts = load_attempts(args.since)
+    if args.ats:
+        wanted = {x.strip().lower() for x in args.ats.split(",")}
+        attempts = [d for d in attempts if (d["job"].get("ats") or "").lower() in wanted]
+    if args.rescore:
+        attempts = rescore(attempts)
+    summary = summarise(attempts)
     write_files(summary)
 
     print(f"{'ATS':<12}{'eligible':>9}{'auto-filled':>13}{'share':>7}   other outcomes")
