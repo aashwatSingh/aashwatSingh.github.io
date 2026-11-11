@@ -54,15 +54,18 @@
   "class_standing_text": "Junior (3rd Year by Summer 2027)",
   "sat_score": null,
   "act_score": null,
-  "transcript_path": null,
-  "school_email": null
+  "transcript_path": "./transcript.pdf",
+  "school_email": null,
+  "high_school_graduation": null
  },
  "work_authorization": {
   "authorized_to_work_us": true,
   "requires_sponsorship": true,
   "over_18": true,
   "us_person": null,
-  "apply_when_no_sponsorship": false
+  "apply_when_no_sponsorship": false,
+  "citizenship_status": null,
+  "has_security_clearance": false
  },
  "logistics": {
   "willing_to_relocate": true,
@@ -95,11 +98,19 @@
   "government_official": false,
   "notice_period_or_start_restrictions": false,
   "professional_licenses": [],
-  "has_outstanding_offers": null,
+  "has_outstanding_offers": false,
   "accept_arbitration_agreements": null,
-  "meets_basic_qualifications": null,
+  "meets_basic_qualifications": true,
   "pursuing_further_education_after_degree": null,
-  "has_prior_internship": null
+  "has_prior_internship": null,
+  "can_perform_essential_functions": true,
+  "comfortable_with_defense_work": true,
+  "prior_internship_count": null,
+  "travel_percentage": null,
+  "consents_to_background_check": null,
+  "consents_to_interview_recording": null,
+  "outside_business_activities": null,
+  "cover_letter_path": null
  },
  "eeo": {
   "gender": "Female",
@@ -181,5 +192,14 @@
    "summary": "a Python data pipeline at Example Labs that cut manual review time by 40%",
    "detail": "Built a Python data pipeline with Pytest coverage that cut manual review time by 40%."
   }
- ]
+ ],
+ "student_organizations": [
+  "Robotics Club"
+ ],
+ "behavioral": {
+  "challenge": "At Example Labs I debugged a flaky data pipeline and cut review time by 40%.",
+  "teamwork": "On a four-person hackathon team I integrated the front end with the backend.",
+  "initiative": "I built Ledgerly on my own from an empty repository.",
+  "learning": "In an eight-week program I learned a new framework and shipped a pipeline."
+ }
 }

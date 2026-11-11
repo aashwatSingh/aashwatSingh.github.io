@@ -29,8 +29,10 @@ KINDS = [
                 r"favorite (work )?project|proud(est)? .{0,30}(technical|project|work|accomplishment|achievement)|"
                 r"technical (accomplishment|challenge|project)|something you('ve| have)? built|"
                 r"most impressive thing you('ve| have)? (ever )?(accomplished|done|built)|work you('re| are) proudest of"),
+    ("ai_experience", r"describe your (ai|ml|machine learning|artificial intelligence)( and ml|/ml)? experience"),
     ("goals", r"(want|hope|expect|looking) to (get out of|gain|learn|achieve|accomplish) .{0,60}(intern|program|role|"
               r"experience|position)|get out of (the|this|your) .{0,40}(intern|program)|"
+              r"end of (this|the|your) internship.{0,60}hope to|hope to walk away with|"
               r"most excited to (work on|learn|build) .{0,40}intern|goals? for (this|the|your) internship"),
     ("why_swe", r"aspect of software engineering|why (software engineering|computer science|engineering)\b(?!.{0,30}\bat\b)|"
                 r"why .{0,30}become an? (software )?engineer|"
@@ -44,8 +46,40 @@ _WHY_ROLE = (r"why .{0,50}(this|the|our) (role|position|internship|company|oppor
              r"what makes .{0,40}(attractive|appealing|a good fit)")
 
 
+# Behavioural ("describe a time when...") prompts map to four prepared stories in profile["behavioral"].
+# Prompts about failure, conflict, disagreement or criticism have no prepared story and stay with the candidate.
+_BEHAVIORAL = re.compile(
+    r"(describe|tell (us|me) about|give (us |me )?(an )?example|share|walk us through|talk about) .{0,40}"
+    r"(a time|an example|a situation|an instance|an experience|when you|where you)|\ba time (when|you|where)\b|"
+    r"example of (a time|when)")
+_NO_STORY = re.compile(r"conflict|disagree|fail|mistake|wrong|criticism|negative feedback|difficult (person|"
+                       r"teammate|coworker|manager)|ethical|not on your (cv|resume)|outside of (work|school)")
+_STORIES = [
+    ("learning", r"learn\w* .{0,60}(new|quick|fast|on your own|yourself)|new (skill|tool|technology|language|domain)|"
+                 r"tight deadline|short (time|deadline|timeline)|under (time )?pressure|pick(ed)? up|ramp(ed)? up"),
+    ("teamwork", r"\bteam\b|teammates?|collaborat|\bled\b|\blead\b|leadership|worked with others|group project"),
+    ("initiative", r"initiative|from scratch|ambigu|on your own|self-?start|ownership|above and beyond|proactive|"
+                   r"without (being asked|direction|guidance)|unclear requirements"),
+    ("challenge", r"challeng|obstacle|\bbug\b|debug|hard(est)? (technical )?problem|difficult (technical )?problem|"
+                  r"technical problem|setback|overc[ao]me|stuck"),
+]
+
+
+def behavioral_kind(question: str) -> str | None:
+    q = " ".join(question.lower().replace("’", "'").split())
+    if not _BEHAVIORAL.search(q) or _NO_STORY.search(q):
+        return None
+    for kind, pattern in _STORIES:
+        if re.search(pattern, q):
+            return kind
+    return None
+
+
 def classify(question: str, company: str = "") -> str | None:
     q = " ".join(question.lower().replace("’", "'").split())
+    story = behavioral_kind(q)
+    if story:
+        return f"behavioral_{story}"
     for kind, pattern in KINDS:
         if re.search(pattern, q):
             return kind
@@ -148,6 +182,17 @@ def template_answer(question: str, job: dict, job_text: str, profile: dict, desc
     tech = _join(_shared_tech(profile, job_text, project))
     school = profile["education"]["school"]
 
+    if kind.startswith("behavioral_"):
+        story = (profile.get("behavioral") or {}).get(kind.split("_", 1)[1])
+        return (kind, fit(story, limit, sentence_limit(question, description))) if story else None
+    if kind == "ai_experience":
+        ai = [x for x in profile["projects"] if {"ai", "ml", "vision"} & set(x.get("focus", []))]
+        exp = [x for x in profile.get("experience") or [] if re.search(r"\bai\b|ml|vision|research", x["title"], re.I)]
+        parts = [f"As {x['title']} at {x['company']} I {x['bullets'][-1][0].lower()}{x['bullets'][-1][1:]}" for x in exp[:2]]
+        if not ai and not parts:
+            return None
+        lead = f"I {ai[0]['detail'][0].lower()}{ai[0]['detail'][1:]}" if ai else ""
+        return kind, fit(" ".join(x for x in [lead, *parts] if x), limit, sentence_limit(question, description))
     if kind == "why_company":
         text = (f"I am excited to apply for this internship at {company} because of your engineering team's "
                 f"focus on {_FOCUS_PHRASE[focus]}. Having built {project['summary']}, I have hands-on experience "

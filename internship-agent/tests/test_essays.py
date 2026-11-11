@@ -56,3 +56,18 @@ def test_why_questions_about_other_things_are_not_treated_as_why_company():
     assert gen("What excites you about this opportunity?")[0] == "essay-why_company"
     assert gen("Tell us about your proudest accomplishment")[0] == "essay-project"
     assert gen("Please summarise your top two accomplishments.")[1].startswith("First, I built")
+
+
+def test_behavioral_questions_map_to_the_prepared_stories():
+    b = PROFILE["behavioral"]
+    assert gen("Describe a time you had to learn a new skill or tool entirely on your own to complete a project. "
+               "What was your strategy?") == ("essay-behavioral_learning", b["learning"])
+    assert gen("Tell us about a time you worked on a team to deliver something.")[1] == b["teamwork"]
+    assert gen("Describe a time you took initiative on an ambiguous problem.")[1] == b["initiative"]
+    assert gen("Tell me about a time you faced a difficult technical problem and how you overcame it.")[1] == b["challenge"]
+
+
+def test_behavioral_questions_without_a_matching_story_stay_with_the_candidate():
+    assert gen("Tell us about a time you failed and what you learned.") is None
+    assert gen("Describe a time you disagreed with a teammate.") is None
+    assert gen("Tell me an example of excellence you have demonstrated that is NOT on your CV.") is None

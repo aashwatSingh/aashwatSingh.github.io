@@ -171,6 +171,12 @@ def pick_yes_no(options: list[str], want_yes: bool) -> str | None:
     no = [o for o in opts if re.match(r"\s*(no|false|n)\b", o, re.I)]
     if len(yes) == 1 and len(no) == 1:
         return yes[0] if want_yes else no[0]
+    # several qualified variants ("Yes", "Yes, but ..."): only the bare one is unambiguous
+    bare = [o for o in (yes if want_yes else no) if re.fullmatch(r"\s*(yes|no|true|false|y|n)\.?\s*", o, re.I)]
+    if len(bare) == 1 and (yes and no):
+        return bare[0]
+    if not want_yes and len(no) == 1 and yes:
+        return no[0]                         # one "No", many kinds of "Yes - I was a ..."
     if not yes and not no and len(opts) == 2:
         neg = [o for o in opts if NEGATION.search(o)]
         if len(neg) == 1:
@@ -329,8 +335,9 @@ class AnswerEngine:
                                        exclude=r"\b(do not|don't|cannot|unable|disagree)\b")
                 return Decision("fill", wrap(hit), rule) if hit else unknown(
                     f"wanted {'Yes' if intent.yes else 'No'} but options are {q.options}")
-            if q.kind == "text" and re.match(
-                    r"(are|do|does|will|would|have|has|can|could|is|did|were)\b", norm(q.label)):
+            if q.kind == "text" and (re.match(
+                    r"(are|do|does|will|would|have|has|can|could|is|did|were)\b", norm(q.label)) or re.search(
+                    r"\b(are|do|will|would|can|could) you\b[^.?]*\?\s*$", norm(q.label))):
                 return Decision("fill", "Yes" if intent.yes else "No", rule)
             return unknown("yes/no answer does not fit this field type")
 
@@ -395,8 +402,17 @@ class AnswerEngine:
 
     # -- files ------------------------------------------------------------------
     def _file(self, q: Question, label: str) -> Decision:
-        if re.search(r"resume|\bcv\b|curriculum", label) and "cover" not in label:
+        both = re.search(r"resume.{0,12}(or|/|and/or).{0,12}transcript|transcript.{0,12}(or|/).{0,12}resume", label)
+        if re.search(r"resume|\bcv\b|curriculum", label) and "cover" not in label and not (
+                "transcript" in label and not both):
             return Decision("fill", self.p["resume_path"], "resume")
+        for word, key in (("transcript", "transcript_path"), ("cover letter", "cover_letter_path")):
+            if word in label:
+                path = existing_file(self.p["education" if key == "transcript_path" else "logistics"].get(key))
+                if path:
+                    return Decision("fill", path, word.split()[0])
+                if both and q.required:
+                    return Decision("fill", self.p["resume_path"], "resume-or-transcript")
         if q.required:
             return Decision("unknown", rule="file", note=f"required upload not on file: {q.label}")
         return Decision("skip", rule="file")
@@ -542,11 +558,15 @@ class AnswerEngine:
             return YesNo(True)
 
         def onsite(q, label, ctx):
-            if q.kind not in CHOICE_KINDS | {"checkbox"}:
+            if q.kind not in CHOICE_KINDS | {"checkbox", "text"}:
                 return None
             # a dated or extra-hours commitment is not the same as "willing to work on-site"
             if _within_window(label, log) is False or re.search(r"\b(4[1-9]|[5-9]\d)\+? hours", label):
                 return Unknown("on-site question bundles a dated or extra-hours commitment")
+            if q.kind in CHOICE_KINDS and not re.search(home, label, re.I):
+                moving = pick_pattern(q.options, [r"^yes\b.{0,30}(relocat|move)"])
+                if moving and log["willing_to_relocate"]:
+                    return Text(moving, [rf"^{re.escape(moving)}$"])     # truthful for someone not yet local
             return YesNo(log["onsite"] and log["hybrid"])
 
         def compensation(q, label, ctx):
@@ -783,6 +803,7 @@ class AnswerEngine:
                        r"flask|spring boot|\.net|\bphp\b|matlab|verilog|\bros\b|unity|unreal|salesforce|"
                        r"tableau|power ?bi|snowflake|hadoop|objective-c|\bperl\b|haskell|\bcuda\b")
         _GENERIC_YES = (r"programming language|object[- ]oriented|relational database|version control|"
+                        r"software development|personal project|"
                         r"machine learning|computer vision|web development|full[- ]stack|unit test|"
                         r"\bsql\b|back ?end|front ?end|data structures|algorithms")
 
@@ -790,7 +811,8 @@ class AnswerEngine:
             """'Do you have experience with X?' - Yes only for skills on the resume, No for named others."""
             if q.kind not in CHOICE_KINDS or pick_yes_no(q.options, True) is None:
                 return None
-            if not re.search(r"experience|proficien|familiar|knowledge of|worked with|used|comfortable", label):
+            if not re.search(r"experience|proficien|familiar|knowledge of|worked with|used|comfortable|built|using",
+                             label) or re.search(r"\bindustry\b|professional", label):
                 return None
             if any(re.search(rf"\b{re.escape(n)}", label) for n in never):
                 return YesNo(False)
@@ -820,6 +842,62 @@ class AnswerEngine:
                     else [rf"^{value}\b"])
                 return Text(hit, [rf"^{re.escape(hit)}$"]) if hit else Unknown("no matching experience range")
             return Text(value)
+
+        status = (auth.get("citizenship_status") or "").lower()
+        is_citizen = bool(re.search(r"\bcitizen\b", status)) and "non" not in status
+        is_pr = bool(re.search(r"permanent resident|green card|\blpr\b", status))
+        status_patterns = ([r"u\.?s\.? citizen|^citizen"] if is_citizen else
+                           [r"permanent resident|green card"] if is_pr else
+                           [r"f-?1|student visa|\bopt\b|\bcpt\b"] if re.search(r"f-?1|student", status) else
+                           [re.escape(status)] if status else [])
+
+        def citizenship(q, label, ctx):
+            """Answered only when work_authorization.citizenship_status is set in the profile."""
+            if not status:
+                return Unknown("set work_authorization.citizenship_status in the profile")
+            if re.search(r"north korea|syria|iran|cuba", label):
+                return YesNo(bool(re.search(r"north korea|syria|iran|cuba", status)))
+            if q.kind in CHOICE_KINDS and pick_yes_no(q.options, True):
+                wants_citizen = re.search(r"citizen", label)
+                wants_pr = re.search(r"permanent resident|green card|u\.?s\.? person|lawful", label)
+                if wants_citizen or wants_pr:
+                    return YesNo((is_citizen and bool(wants_citizen)) or ((is_citizen or is_pr) and bool(wants_pr)))
+                return None
+            if q.kind in CHOICE_KINDS:
+                return Choice(status_patterns) if status_patterns else None
+            return Text(auth["citizenship_status"]) if q.kind == "text" else None
+
+        def clearance(q, label, ctx):
+            has = auth.get("has_security_clearance")
+            if has is None:
+                return Unknown("set work_authorization.has_security_clearance in the profile")
+            if re.search(r"eligib|able to obtain|obtain and maintain|willing to (obtain|undergo)", label):
+                return YesNo(True) if is_citizen else Unknown("clearance eligibility depends on citizenship status")
+            if has:
+                return Unknown("clearance level needs a human answer")
+            if q.kind in CHOICE_KINDS:
+                return YesNo(False, [r"^none\b|^no clearance|^n/?a\b|not applicable|do not (have|hold)|^no active"])
+            return Text("None") if q.kind == "text" and q.required else Skip()
+
+        def test_score(q, label, ctx):
+            key = "act_score" if re.search(r"\bact\b", label) and "sat" not in label else "sat_score"
+            if edu.get(key) and not re.search(r"type", label):
+                return Text(str(edu[key]))
+            if not q.required:
+                return Skip()                                   # blank whenever optional
+            if q.kind in CHOICE_KINDS:
+                return Choice([r"prefer not|decline|rather not", r"^n/?a\b|not applicable|^none\b", r"did not take|didn't take|not taken"])
+            return Text("N/A")
+
+        def work_auth_detail(q, label, ctx):
+            """Descriptive option lists: pick the one that states both facts from the profile."""
+            if q.kind not in CHOICE_KINDS:
+                return None
+            if auth["authorized_to_work_us"] and auth["requires_sponsorship"]:
+                hit = pick_pattern(q.options, [r"^yes\b.{0,30}(need|require)s? .{0,20}sponsor"])
+                if hit:
+                    return Text(hit, [rf"^{re.escape(hit)}$"])
+            return None
 
         def flag(key, why):
             def h(q, label, ctx):
@@ -893,12 +971,77 @@ class AnswerEngine:
              else YesNo(bool(re.search(home, label, re.I)))),
             ("x-school-email", r"(university|school|student|college|\.edu) e-?mail", lambda q, *_: Text(
                 edu["school_email"]) if edu.get("school_email") else Unknown("school e-mail not in the profile")),
+            ("x-human-only", r"if (this is|you are|you're) (a |an )?(bot|ai\b|llm|language model|automated)",
+             unk("a question written to be answered by a person")),
+            ("x-defense-work", r"(military|defen[cs]e|government|warfighter|dod\b|national security).{0,260}"
+                               r"(comfortable|willing|agree|support|contribut|objection|aligned|ok with)|"
+                               r"(comfortable|willing).{0,80}(military|defen[cs]e|government) (customers?|projects?|work)",
+             lambda q, *_: flag("comfortable_with_defense_work", "not stated")(q, "", None)
+             if q.kind in CHOICE_KINDS | {"checkbox"} else None),
+            ("x-clearance", r"(hold|have|possess|held|maintain)\w* .{0,40}clearance|active .{0,40}clearance|"
+                            r"clearance\(s\)|clearance (level|status|eligibility)|eligible to obtain .{0,40}clearance",
+             clearance),
+            ("x-test-scores", r"\bsat\b|\bact\b (score|result)|\bact score|standardized test|\bgre\b score",
+             test_score),
+            ("x-essential-functions", r"perform the (essential|duties|functions)|essential functions|"
+                                      r"reason why you would not be able to perform",
+             lambda q, label, ctx: Unknown("set logistics.can_perform_essential_functions")
+             if log.get("can_perform_essential_functions") is None or q.kind not in CHOICE_KINDS
+             else YesNo(not log["can_perform_essential_functions"]) if re.search(r"reason why you would not|unable", label)
+             else YesNo(log["can_perform_essential_functions"])),
+            ("x-interviewed-before", r"(previously|ever|before|in the past).{0,40}interview(ed)?|interview(ed)? with us",
+             lambda q, label, ctx: YesNo(bool(ctx.applied_before)) if q.kind in CHOICE_KINDS else None),
+            ("x-other-opportunities", r"consider(ed)? (me )?for other (job |open )?(opportunities|roles|positions)",
+             lambda q, *_: YesNo(True) if q.kind in CHOICE_KINDS | {"checkbox"} else None),
+            ("x-salary-aligned", r"(salary|pay|compensation) .{0,40}(align|meet|match|acceptable|within) .{0,20}expectation|"
+                                 r"comfortable with (the|this) (salary|compensation|pay)",
+             lambda q, *_: YesNo(True) if q.kind in CHOICE_KINDS else None),
+            ("x-fulltime-after-graduation", r"interested in full[- ]time .{0,50}(upon|after) graduation",
+             lambda q, *_: YesNo(True) if q.kind in CHOICE_KINDS else None),
+            ("x-enrolled-program", r"enrolled in an? (undergraduate|bachelor)|current program type|still (a )?student",
+             lambda q, *_: Check() if q.kind == "checkbox" else YesNo(True, [r"^undergrad|bachelor"])
+             if q.kind in CHOICE_KINDS else None),
+            ("x-relocate-ok", r"\b(okay|ok|comfortable|fine) (with )?(spending|living|relocating|being based|working) .{0,60}"
+                              r"\bin [a-z]", lambda q, *_: YesNo(log["willing_to_relocate"])
+             if q.kind in CHOICE_KINDS | {"text"} else None),
+            ("x-prop-trading", r"internship experience at an? (proprietary trading|prop trading|trading|hedge fund|quant)",
+             lambda q, *_: YesNo(False) if q.kind in CHOICE_KINDS and not re.search(
+                 r"trading|hedge|quant", " ".join(x["company"] for x in p.get("experience") or []).lower()) else None),
+            ("x-ai-tools", r"ai[- ]specific technologies|ai (tools|technologies|frameworks) .{0,30}(comfortable|used|familiar)",
+             lambda q, *_: Multi([x for x in skills_all if re.search(r"pytorch|opencv|llamaindex|claude|gemini|tensorflow", x, re.I)])),
+            ("x-frameworks", r"frameworks? .{0,50}(experience|used|familiar|comfortable)",
+             lambda q, *_: Multi([re.sub(r"\s*\(.*\)", "", x) for x in skills_all],
+                                 text=", ".join(x for x in ("React", "Node.js", "PyTorch") if x in skills_all) or None)),
+            ("x-student-orgs", r"student organizations?|clubs?,? or competition teams|extracurricular (activities|groups)",
+             lambda q, *_: Text("; ".join(p.get("student_organizations") or []))
+             if q.kind in FREE_KINDS and p.get("student_organizations") else None),
+            ("x-prior-internship-count", r"how many (prior|previous) .{0,20}internships",
+             lambda q, *_: Unknown("set logistics.prior_internship_count") if log.get("prior_internship_count") is None
+             else Text(str(log["prior_internship_count"]), [rf"^{log['prior_internship_count']}\b"])),
+            ("x-travel", r"percentage of (the )?time .{0,30}travel|willing to travel",
+             lambda q, *_: Unknown("set logistics.travel_percentage") if log.get("travel_percentage") is None
+             else Text(str(log["travel_percentage"]), [rf"\b{log['travel_percentage']}\b"])),
+            ("x-background-check", r"background (check|screen|investigation)",
+             flag("consents_to_background_check", "consent needs your decision")),
+            ("x-interview-recording", r"(record|transcri|ai note ?tak)\w* .{0,60}interview|interview.{0,60}(recorded|notetak)",
+             flag("consents_to_interview_recording", "consent needs your decision")),
+            ("x-outside-business", r"own, operate, or provide services to any other business|outside business",
+             flag("outside_business_activities", "not stated")),
+            ("x-hs-graduation", r"graduate from high school|high school graduation",
+             lambda q, *_: Text(edu["high_school_graduation"]) if edu.get("high_school_graduation")
+             else Unknown("set education.high_school_graduation")),
+            ("x-citizenship", r"citizen|u\.?s\.? person|permanent residen|green card|work authorization status|"
+                              r"\bitar\b|export (control|license)", lambda q, label, ctx:
+             None if re.search(r"sponsor", label) and not re.search(r"citizen|person|residen", label)
+             else citizenship(q, label, ctx)),
             ("x-arbitration", r"arbitration", flag("accept_arbitration_agreements", "legal agreement needs your decision")),
-            ("x-qualifications", r"meet (each|all|the) .{0,30}(basic |minimum |required )?qualifications|"
+            ("x-qualifications", r"meet (each|all|the) .{0,30}(basic |minimum |required )?(qualifications|requirements)|"
                                  r"demonstrated experience in the specified discipline",
              flag("meets_basic_qualifications", "self-assessment against the posting")),
             ("x-offers", r"(outstanding|competing|other|active|current(ly)? have any) offers?\b|offer deadline|"
-                         r"recruiting-process deadline", flag("has_outstanding_offers", "offer status not stated")),
+                         r"recruiting-process deadline", lambda q, label, ctx:
+             Text("N/A") if log.get("has_outstanding_offers") is False and q.kind in ("text", "textarea")
+             else flag("has_outstanding_offers", "offer status not stated")(q, label, ctx)),
             ("x-further-education", r"further education|graduate school (immediately )?after",
              flag("pursuing_further_education_after_degree", "post-degree plans not stated")),
             ("x-notice-period", r"notice period|restrictions on your availability to start",
@@ -924,8 +1067,11 @@ class AnswerEngine:
              lambda q, *_: Choice([r"high school|secondary", r"some college"]) if q.kind in CHOICE_KINDS else None),
             ("x-class-next-fall", r"class (year|standing) .{0,40}(entering|be) .{0,12}fall 2027|"
                                   r"(entering|be) .{0,20}fall 2027 as an?",
-             lambda q, *_: Choice([r"^senior\b", r"\b(4th|fourth)[- ]year"]) if (edu["grad_year"], edu["grad_month"])
-             in ((2028, 5), (2028, 6)) and q.kind in CHOICE_KINDS else None),
+             lambda q, *_: Choice([r"^senior\b", r"\b(4th|fourth)[- ]year"], text="Senior")
+             if (edu["grad_year"], edu["grad_month"]) in ((2028, 5), (2028, 6)) else None),
+            ("x-fulltime-ready-year", r"ready for full[- ]time employment in (20\d\d)",
+             lambda q, label, ctx: YesNo(edu["grad_year"] <= int(re.search(r"in (20\d\d)", label).group(1)))
+             if q.kind in CHOICE_KINDS else None),
             ("x-us-residence", r"primary residence .{0,40}(united states|u\.s\.)",
              lambda q, *_: YesNo(addr["country"].lower().startswith("united states"))
              if q.kind in CHOICE_KINDS | {"checkbox"} else None),
@@ -939,6 +1085,7 @@ class AnswerEngine:
             ("x-post-internship", r"full[- ]time (role|position|employment) .{0,30}(post|after|following)[- ]?"
                                   r"(the |your )?internship|immediately post-?internship", post_internship),
             ("x-season", r"season you are applying|which (term|season|semester)|intern(ship)? season|"
+                         r"academic terms? .{0,40}available|"
                          r"season .{0,20}interested|"
                          r"spring co-?op,? summer internship|internship (term|season)", season),
             ("x-position-type", r"type of (position|role|employment) are you (applying|seeking|looking)",
@@ -950,11 +1097,13 @@ class AnswerEngine:
                              [rf"^{re.escape(x)}\b" for x in ([p["skills"].get("preferred_language")] if
                               p["skills"].get("preferred_language") else []) + p["skills"]["languages"]])),
             ("x-years-experience", r"years? of .{0,50}experience|how (many|much) .{0,30}experience", years_experience),
-            ("x-skill-yes-no", r"experience|proficien|familiar|knowledge of|worked with|comfortable", skill_yes_no),
-            ("x-office", r"location preference|preferred (work |office )?location|(which|what) (office|location)|"
+            ("x-skill-yes-no", r"experience|proficien|familiar|knowledge of|worked with|comfortable|built .{0,30}using",
+             skill_yes_no),
+            ("x-office", r"location preference|preferred (work |office )?location|(which|what) .{0,20}(office|location)|"
                          r"office preference|where would you (like|prefer) to work|location.{0,20}(apply|interested)|"
                          r"work location", office),
             ("x-interest-area", r"(areas?|teams?|service lines?|tracks?|disciplines?|functions?) .{0,40}interest|"
+                                r"which team (best )?(fits|interests|matches)|type of (engineering|intern) role|"
                                 r"which (specific )?(role|position|team) .{0,40}interest", interest_area),
             ("x-employer", r"(current|most recent|previous|last|prior) .{0,25}(employer|company|job title|"
                            r"position title|role title)\b", employer),
@@ -971,6 +1120,7 @@ class AnswerEngine:
              if q.kind in FREE_KINDS else None),
 
             # --- work authorization -----------------------------------------
+            ("x-work-auth-detail", r"authoriz(ed|ation) to (lawfully |legally )?work|legally authorized", work_auth_detail),
             ("work-auth-us", r"authoriz(ed|ation) to (lawfully |legally )?work|valid authorization to work|"
                              r"legally (permitted|authorized) to .{0,20}work", lambda q, label, ctx:
              work_auth(q, label, ctx) if not re.search(r"sponsor|citizen(?!.{0,40}e\.g)|permanent basis", label)
@@ -1051,7 +1201,7 @@ class AnswerEngine:
              lambda q, *_: Text(f"{edu['degree_short']} in {edu['major']}") if q.kind in FREE_KINDS else None),
             ("graduation", r"graduat|degree completion|completion date|conferral|degree date", graduation),
             ("minor", r"\bminor\b", skip),
-            ("major", r"\bmajor\b|field of study|discipline|area of study|degree program|concentration",
+            ("major", r"\bmajor\b|fields? of study|discipline|area of study|degree program|concentration",
              lambda *_: Text(edu["major"], [r"^computer science\b"])),
             ("class-standing", r"class standing|year in school|current (school |academic )?year|academic "
                                r"(year|level|standing)|what year are you|classification|grade level|"
@@ -1061,7 +1211,8 @@ class AnswerEngine:
             ("edu-start", r"(school|education|degree|university|enrollment) start|start date.*(school|degree)",
              lambda q, *_: Text(_fmt_date(start_edu_iso, q))),
             ("degree", r"degree|level of (study|education)|education level|highest (level of )?education", degree),
-            ("returning-to-school", r"return(ing)? to (school|university|college|your (degree|program|studies))|"
+            ("returning-to-school", r"return(ing)? to (school|university|college|your (degree|program|studies)|"
+                                    r"an? degree[- ]seeking program)|"
                                     r"(semester|quarter|term|year)s? (remaining|left) (of|in|after)|"
                                     r"continu(e|ing) (your |in your )?(education|studies|degree) after",
              lambda *_: YesNo((edu["grad_year"], edu["grad_month"]) > (2027, 8))),
@@ -1116,7 +1267,8 @@ class AnswerEngine:
                               r".{0,60}(worked|employed|employee|interned|contractor)|former employee|"
                               r"(worked|employed|interned) (by|at|for|with) .{0,50}(before|previously|in the past)|"
                               r"worked (for|at|with) .{0,50}(before|previously|in the past)|"
-                              r"worked (with|for) us\b",
+                              r"worked (with|for) us\b|currently working (as|with|at|for)|"
+                              r"engaged to perform services",
              lambda *_: YesNo(log["previously_worked_or_applied"])),
             ("non-compete", r"non-?compete|restrictive covenant|non-?solicit|prohibited or limited|"
                             r"agreement.{0,60}(restrict|prohibit|limit|prevent)",
@@ -1152,8 +1304,11 @@ class AnswerEngine:
                         r"true,? (complete|correct|and accurate)|true and (correct|complete|accurate)|"
                         r"accurate to the best|code of conduct|"
                         r"i understand that|i have read|candidate (notice|policy)|non-?disclos|not disclos|\bconsent\b",
-             lambda q, label, ctx: None if re.search(
-                 r"\bdates?\b|availab|prefer|suitable|relocat|commit|\bqualif|\bexperience\b", label) else Check()),
+             lambda q, label, ctx: Check() if re.search(
+                 r"true,? (and )?(complete|correct|accurate)|\bcertify\b.{0,80}(true|accurate|complete)|"
+                 r"information (i|you) provide.{0,40}true", label) else None if re.search(
+                 r"\bdates?\b|availab|prefer|suitable|relocat|commit|\bqualif|\bexperience\b|background check|"
+                 r"record(ed|ing)|arbitration|release", label) else Check()),
             ("x-na-fallback", r"(enter|type|write|put|state|answer) [\"'“]?n/?a\b|n/a if (not applicable|none)",
              na_fallback),
         ]
@@ -1167,6 +1322,16 @@ _ID_RULES = {"first-name", "last-name", "preferred-name", "email", "phone", "lin
 def _char_limit(q: Question) -> int | None:
     m = re.search(r"(?:max(?:imum)?|limit|up to)\D{0,12}(\d{2,5})\s*char", f"{q.label} {q.description}", re.I)
     return int(m.group(1)) if m else None
+
+
+def existing_file(path: str | None) -> str | None:
+    """Absolute path of an optional profile file (transcript, cover letter) if it is really there."""
+    if not path:
+        return None
+    p = Path(path)
+    if not p.is_absolute():
+        p = config.BASE / p
+    return str(p) if p.is_file() else None
 
 
 def load_custom_answers(path: Path | None = None) -> list[dict]:

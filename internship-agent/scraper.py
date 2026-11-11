@@ -6,7 +6,8 @@ Sources
   3. vanshb03/Summer2027-Internships      (listings.json; short links resolved when reachable)
   4. speedyapply 2027 SWE and AI college-jobs lists (markdown tables)
   5. Direct ATS boards (--crawl-boards): every Greenhouse / Lever / Ashby board
-     that has ever appeared in the lists (any season, open or closed) is queried
+     that has ever appeared in the internship or new-grad lists (any season, open
+     or closed), plus the boards of hiring Y Combinator companies, is queried
      through that ATS's public job-board API for intern postings that are open
      now. This replaces search-engine "site:" queries: it asks the three ATS
      hosts directly, so nothing depends on scraping a search results page.
@@ -55,6 +56,22 @@ SOURCES = [
     {"name": "zero2sudo", "kind": "readme_table", "optional": True,
      "url": f"{RAW}/zero2sudo/Summer2027-Internships/main/README.md"},
 ]
+
+# Read only to learn which companies have a Greenhouse / Ashby / Lever board; their own postings
+# (new-grad roles, non-U.S. internships) are not queued.
+BOARD_DISCOVERY_SOURCES = [
+    {"name": "simplify-newgrad", "kind": "listings_json",
+     "url": f"{RAW}/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json"},
+    {"name": "vanshb03-newgrad", "kind": "listings_json",
+     "url": f"{RAW}/vanshb03/New-Grad-2027/dev/.github/scripts/listings.json"},
+    {"name": "speedyapply-newgrad", "kind": "links", "url": f"{RAW}/speedyapply/2027-SWE-College-Jobs/main/NEW_GRAD_USA.md"},
+    {"name": "speedyapply-intl", "kind": "links", "url": f"{RAW}/speedyapply/2027-SWE-College-Jobs/main/INTERN_INTL.md"},
+    {"name": "speedyapply-ai-newgrad", "kind": "links", "url": f"{RAW}/speedyapply/2027-AI-College-Jobs/main/NEW_GRAD_USA.md"},
+]
+# Y Combinator companies that are hiring (yc-oss open dataset): board slugs are guessed from the
+# company slug / name / domain and kept only if the ATS confirms a board exists there.
+YC_HIRING_URL = f"{RAW}/yc-oss/api/main/companies/hiring.json"
+BOARD_CACHE = config.CACHE_DIR / "boards.json"
 
 SESSION = requests.Session()
 SESSION.headers["User-Agent"] = "Mozilla/5.0 (compatible; internship-queue-builder)"
@@ -434,7 +451,86 @@ def _board_postings(ats: str, token: str) -> list[tuple[str, str, list[str]]] | 
         return []
 
 
-def crawl_boards(listings: list[dict], max_boards: int = 2000, workers: int = 8) -> list[dict]:
+def discovery_listings() -> list[dict]:
+    """URLs from the board-discovery sources, as {"url", "company"} dicts."""
+    out: list[dict] = []
+    for src in BOARD_DISCOVERY_SOURCES:
+        text = fetch(src["url"], optional=True)
+        if not text:
+            continue
+        try:
+            if src["kind"] == "listings_json":
+                found = [{"url": x.get("url"), "company": x.get("company_name")} for x in json.loads(text)]
+            else:
+                found = [{"url": html.unescape(u), "company": ""} for u in re.findall(r'href="(https?://[^"]+)"', text)]
+        except ValueError:
+            continue
+        print(f"[{src['name']}] {len(found)} links read for board discovery")
+        out += found
+    return out
+
+
+def _slug_candidates(company: dict) -> list[str]:
+    squash = lambda t: re.sub(r"[^a-z0-9]", "", t.lower())
+    host = urlparse(company.get("website") or "").netloc.lower().removeprefix("www.")
+    names = [company.get("slug", ""), squash(company.get("name", "")), host.split(".")[0],
+             re.sub(r"[^a-z0-9]+", "-", company.get("name", "").lower()).strip("-")]
+    return list(dict.fromkeys(n for n in names if len(n) >= 3))
+
+
+def _probe_board(ats: str, token: str) -> bool:
+    """Does this ATS host a job board under this slug? (one small public API request)"""
+    url = {"Greenhouse": f"https://boards-api.greenhouse.io/v1/boards/{token}",
+           "Ashby": f"https://api.ashbyhq.com/posting-api/job-board/{token}",
+           "Lever": f"https://api.lever.co/v0/postings/{token}?mode=json&limit=1"}[ats]
+    try:
+        r = SESSION.get(url, timeout=15, stream=True)
+        ok = r.status_code == 200
+        r.close()
+        return ok
+    except requests.RequestException:
+        return False
+
+
+def yc_boards(known: dict[str, dict[str, str]], workers: int = 12) -> dict[str, dict[str, str]]:
+    """Boards of hiring YC companies, found by probing slug guesses. Results are cached on disk."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    text = fetch(YC_HIRING_URL, optional=True)
+    if not text:
+        return {}
+    cache = json.loads(BOARD_CACHE.read_text()) if BOARD_CACHE.exists() else {}
+    have = {t.lower() for boards in known.values() for t in boards}
+    companies = [c for c in json.loads(text) if "United States" in str(c.get("regions")) or "Remote" in str(c.get("regions"))]
+
+    def probe(company):
+        key = company.get("slug") or company.get("name")
+        if key in cache:
+            return key, cache[key]
+        for token in _slug_candidates(company):
+            if token.lower() in have:
+                return key, None                       # already known from the lists
+            for ats in ("Ashby", "Greenhouse", "Lever"):
+                if _probe_board(ats, token):
+                    return key, [ats, token, company.get("name", token)]
+        return key, []
+
+    found: dict[str, dict[str, str]] = {"Greenhouse": {}, "Ashby": {}, "Lever": {}}
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for key, hit in pool.map(probe, companies):
+            if hit is not None:
+                cache[key] = hit
+            if hit:
+                found[hit[0]][hit[1]] = hit[2]
+    config.ensure_dirs()
+    BOARD_CACHE.write_text(json.dumps(cache))
+    print(f"[yc-hiring] {len(companies)} companies checked, {sum(len(v) for v in found.values())} boards found "
+          f"that the lists did not have")
+    return found
+
+
+def crawl_boards(listings: list[dict], max_boards: int = 5000, workers: int = 8,
+                 extra: dict[str, dict[str, str]] | None = None) -> list[dict]:
     """Ask each known board for its open intern postings (titles are pre-qualified as usual).
 
     Board postings carry no term, so they are marked term_unverified: the runner
@@ -442,7 +538,11 @@ def crawl_boards(listings: list[dict], max_boards: int = 2000, workers: int = 8)
     """
     from concurrent.futures import ThreadPoolExecutor
 
-    tasks = [(ats, token, company) for ats, boards in board_tokens(listings).items()
+    boards_by_ats = board_tokens(listings)
+    for ats, boards in (extra or {}).items():
+        for token, company in boards.items():
+            boards_by_ats[ats].setdefault(token, company)
+    tasks = [(ats, token, company) for ats, boards in boards_by_ats.items()
              for token, company in boards.items()][:max_boards]
     blocked: set[str] = set()
 
@@ -537,7 +637,8 @@ def scrape(crawl: bool = False) -> list[dict]:
         scraped.extend(jobs)
     if crawl:
         ever_listed += [{"url": j["url"], "company": j["company"]} for j in scraped]
-        extra = crawl_boards(ever_listed)
+        ever_listed += discovery_listings()
+        extra = crawl_boards(ever_listed, extra=yc_boards(board_tokens(ever_listed)))
         print(f"[ats-boards] {len(extra)} open intern postings found on boards "
               f"({sum(j['status'] == 'pending' for j in extra)} pass pre-qualification)")
         scraped.extend(extra)

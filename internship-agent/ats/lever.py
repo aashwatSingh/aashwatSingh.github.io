@@ -132,6 +132,9 @@ class LeverAdapter(BaseAdapter):
             return
         raise NotImplementedError(f.widget)
 
+    async def confirmed(self, page: Page) -> str | None:
+        return page.url if "/thanks" in page.url else None
+
     async def submit(self, page: Page) -> tuple[str, str, str]:
         has_widget = await page.evaluate("() => typeof window.hcaptcha !== 'undefined'")
         if not has_widget and await page.locator("#h-captcha, .h-captcha").count():

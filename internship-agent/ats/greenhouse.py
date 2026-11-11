@@ -256,6 +256,15 @@ class GreenhouseAdapter(BaseAdapter):
             await page.wait_for_timeout(150)
 
     # ---- submit ---------------------------------------------------------------
+    async def confirmed(self, page: Page) -> str | None:
+        if "/confirmation" in page.url:
+            return page.url
+        body = (await page.inner_text("body")).lower()
+        if re.search(r"thank you for applying|application has been (submitted|received)|"
+                     r"thanks for applying|we('ve| have) received your application", body):
+            return "confirmation text"
+        return None
+
     async def submit(self, page: Page) -> tuple[str, str, str]:
         button = page.locator("#application-form button[type=submit], button:has-text('Submit application')").first
         await button.scroll_into_view_if_needed()

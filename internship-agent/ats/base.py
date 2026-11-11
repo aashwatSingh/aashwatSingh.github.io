@@ -141,6 +141,28 @@ class BaseAdapter:
         """Click submit. Returns (status, reason, detail)."""
         raise NotImplementedError
 
+    async def confirmed(self, page: Page) -> str | None:
+        """Evidence that the application went through (a URL or phrase), else None."""
+        return None
+
+    async def wait_for_human_finish(self, page: Page, unknowns: list[str]) -> tuple[str, str, str] | None:
+        """Blitz mode: the candidate answers what the profile could not, then submits in the browser."""
+        wait = max(self.human_wait_s, 180)
+        print("\a[ACTION REQUIRED] Answer these in the browser window, then click Submit "
+              f"(waiting up to {wait}s; everything else is filled):", flush=True)
+        for u in unknowns[:8]:
+            print(f"      - {u[:110]}", flush=True)
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            await page.wait_for_timeout(700)
+            try:
+                proof = await self.confirmed(page)
+            except Exception:                              # noqa: BLE001 - page navigating
+                continue
+            if proof:
+                return SUBMITTED, "completed by the candidate in the browser", proof
+        return None
+
     async def page_text(self, page: Page) -> str:
         try:
             return await page.inner_text("body", timeout=5000)
@@ -228,6 +250,10 @@ class BaseAdapter:
             return ApplyResult(MANUAL_REVIEW, "FORM_NOT_FOUND", "no form fields detected")
         await _screenshot(page, shot_path)
         if unknowns:
+            if self.human_wait_s and not dry_run:
+                done = await self.wait_for_human_finish(page, unknowns)
+                if done:
+                    return ApplyResult(*done, answers, unknowns, shot_path)
             return ApplyResult(MANUAL_REVIEW, "UNANSWERED_REQUIRED",
                                " | ".join(u[:90] for u in unknowns[:8]), answers, unknowns, shot_path)
         if dry_run:

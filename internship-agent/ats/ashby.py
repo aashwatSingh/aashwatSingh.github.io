@@ -218,6 +218,15 @@ class AshbyAdapter(BaseAdapter):
             raise LookupError(f"option {hit!r} vanished")
         raise NotImplementedError(f.widget)
 
+    async def confirmed(self, page: Page) -> str | None:
+        if await page.locator(".ashby-application-form-success-container").count():
+            return "success panel"
+        body = (await page.inner_text("body")).lower()
+        if re.search(r"application (was|has been) (successfully )?(submitted|received)|"
+                     r"thanks? for (applying|your application)|thank you for applying", body):
+            return "confirmation text"
+        return None
+
     async def submit(self, page: Page) -> tuple[str, str, str]:
         button = page.locator("button.ashby-application-form-submit-button, button:has-text('Submit Application')").first
         await button.scroll_into_view_if_needed()

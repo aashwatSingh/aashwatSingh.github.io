@@ -115,3 +115,8 @@ def test_board_tokens_from_any_listing():
 def test_other_cohorts_are_skipped():
     assert job(title="High School Software Intern")["status"] == "skipped_ineligible"
     assert job(title="Software Engineer Intern - Summer 2026")["status"] == "skipped_ineligible"
+
+
+def test_slug_candidates_for_board_probing():
+    c = {"name": "Acme Robotics, Inc.", "slug": "acme-robotics", "website": "https://www.acmerobotics.ai/careers"}
+    assert scraper._slug_candidates(c) == ["acme-robotics", "acmeroboticsinc", "acmerobotics", "acme-robotics-inc"]

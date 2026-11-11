@@ -86,7 +86,7 @@ async def apply_one(context, job: dict, engine: AnswerEngine, ledger: dedup.Ledg
             return await llm_agent.apply(context, job, engine.p, dry_run=dry_run, shot_path=shot)
         return await asyncio.wait_for(
             adapter.apply(page, job, engine, ctx, dry_run=dry_run, shot_path=shot),
-            timeout=APPLICATION_TIMEOUT_S + adapter.human_wait_s)
+            timeout=APPLICATION_TIMEOUT_S + (2 * adapter.human_wait_s + 180 if adapter.human_wait_s else 0))
     except asyncio.TimeoutError:
         await _safe_shot(page, shot)
         return ApplyResult(MANUAL_REVIEW, "TIMEOUT", f"gave up after {APPLICATION_TIMEOUT_S}s", screenshot=shot)
