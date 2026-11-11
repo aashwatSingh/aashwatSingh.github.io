@@ -56,7 +56,8 @@
   "act_score": null,
   "transcript_path": "./transcript.pdf",
   "school_email": null,
-  "high_school_graduation": null
+  "high_school_graduation": null,
+  "high_school_name": null
  },
  "work_authorization": {
   "authorized_to_work_us": true,
@@ -65,7 +66,10 @@
   "us_person": null,
   "apply_when_no_sponsorship": false,
   "citizenship_status": null,
-  "has_security_clearance": false
+  "has_security_clearance": false,
+  "internship_work_authorization": null,
+  "future_sponsorship_visa": null,
+  "requires_sponsorship_now": null
  },
  "logistics": {
   "willing_to_relocate": true,
@@ -201,5 +205,6 @@
   "teamwork": "On a four-person hackathon team I integrated the front end with the backend.",
   "initiative": "I built Ledgerly on my own from an empty repository.",
   "learning": "In an eight-week program I learned a new framework and shipped a pipeline."
- }
+ },
+ "spoken_languages": null
 }

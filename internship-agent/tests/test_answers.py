@@ -359,3 +359,146 @@ def test_transcript_upload_rules(tmp_path, monkeypatch):
     (tmp_path / "transcript.pdf").write_bytes(b"%PDF-1.4")
     assert filled("Undergraduate Transcript", kind="file").endswith("transcript.pdf")
     assert filled("Resume/CV", kind="file") == PROFILE["resume_path"]
+
+
+# --- round six: questions that blocked forms in the Ashby/Lever and Greenhouse sweeps ----------
+def test_heard_about_phrasings():
+    opts = ["Employee referral", "Company Website", "University event"]
+    assert filled("Where did you first hear about this job?", options=opts) == "Company Website"
+    assert filled("Please tell us how you heard about this internship opportunity.", options=opts) == "Company Website"
+
+
+def test_sponsorship_phrased_as_a_petition():
+    assert filled("Will you now or in the future require our company to file a petition or application for "
+                  "employment - based immigration status on your behalf") == "Yes"
+    assert filled("Employment eligibility status",
+                  options=["Yes, will require firm sponsorship", "No. already has permanent work authorization"]) \
+        == "Yes, will require firm sponsorship"
+    assert filled("Do you need work visa sponsorship now or any time in the future? (if yes, please provide details)",
+                  kind="textarea") == "Yes"
+
+
+def test_visa_category_options_need_the_profile_keys():
+    blocked("For this specific internship, will you require any of the below sponsorship for employment?",
+            options=["J1", "F1", "None", "Other"], kind="radio")
+    profile = json.loads(json.dumps(PROFILE))
+    profile["work_authorization"].update(internship_work_authorization="F1", future_sponsorship_visa="H1B",
+                                         requires_sponsorship_now=False)
+    eng = AnswerEngine(profile, custom_answers=[])
+    d = eng.resolve(Question("For this specific internship, will you require any of the below sponsorship for "
+                             "employment?", "radio", True, ["J1", "F1", "None", "Other"]), Context())
+    assert d.value == "F1"
+    d = eng.resolve(Question("Will you now or at any time in the future require sponsorship for employment visa "
+                             "status (e.g. H1B, OPT)?", "radio", True, ["OPT", "H1B", "TN", "None", "Other"]), Context())
+    assert d.value == "H1B"
+    opts = ["Yes, I will require immigration sponsorship now", "Yes, I will require immigration sponsorship in the future",
+            "No, I do not and will not require immigration sponsorship"]
+    d = eng.resolve(Question("Will you now or in the future require company sponsorship to retain or extend your work "
+                             "authorization?", "select", True, opts), Context())
+    assert d.value == opts[1]
+
+
+def test_graduation_option_windows():
+    ranges = ["I've already graduated", "August 2027 - December 2027", "January 2028 - July 2028",
+              "August 2028 - December 2028", "After January 2029"]
+    assert filled("Please re-confirm your expected graduation date", options=ranges) == "January 2028 - July 2028"
+    crystal = ["Spring 2026", "Fall 2026", "Winter 2026/27 (on or before Jan 31, 2027)", "Before 2026",
+               "After Jan 31, 2027", "N/A - Not pursuing higher education"]
+    assert filled("What is your expected graduation date?", options=crystal) == "After Jan 31, 2027"
+    assert filled("Field of Study in your Undergraduate degree", options=["Computer Science", "Physics"]) \
+        == "Computer Science"
+    assert ask("Field of Study in your Postgraduate degree", options=["Computer Science", "Physics"],
+               required=False).action == "skip"
+    assert filled("Level of education completed once you’ve graduated?",
+                  options=["Associate's", "Bachelor's", "Master's", "PhD"]) == "Bachelor's"
+    assert filled("Have you completed your junior year of study (i.e., are you entering your senior year) or are "
+                  "you a graduate student?") == "Yes"
+    assert filled("Do you intend to return to a degree-seeking program at the conclusion of the internship for at "
+                  "least 1 more term?") == "Yes"
+
+
+def test_accommodation_only_blocks_when_it_is_the_question():
+    assert filled("We work from our offices on Mondays, Tuesdays, and Thursdays (Anchor Days). If you need an "
+                  "accommodation, we’ll partner with you and explore reasonable options consistent with applicable "
+                  "law. Are you able to commit to working from one of our offices on Anchor Days each week?",
+                  kind="boolean", options=YN) == "Yes"
+    blocked("Do you require any reasonable adjustments or accommodations to participate in the recruitment process?")
+
+
+def test_ai_attestations_are_left_to_the_candidate():
+    blocked("AI Policy for Application", kind="boolean", options=YN)
+    blocked("Trust is one of our values. I confirm that the information I provide is true, complete, and reflects my "
+            "own experience and thinking.", kind="checkbox")
+    # an ordinary truth certification is still acknowledged
+    assert filled("I certify that the information in this application is true and correct.", kind="checkbox") is True
+
+
+def test_option_lists_with_one_negative_statement():
+    opts = ["I have not previously been employed at Acme", "I have been employed at Acme as a full-time employee",
+            "I have been employed at Acme as an intern"]
+    assert filled("Have you previously been employed at Acme for any length of time?", options=opts) == opts[0]
+
+
+def test_pay_buckets_and_offices():
+    buckets = ["less than 25k", "26-30k", "71-75k", "76-80k", "81-85k"]
+    assert filled("Target Compensation", options=buckets) == "76-80k"
+    assert filled("Desired hourly rate", options=["$20 - $29", "$30 - $39", "$40 - $49"]) == "$40 - $49"
+    assert filled("Location Preference", options=["Chicago", "London"]) == "Chicago"
+    states = ["Alabama", "Illinois", "Texas"]
+    assert filled("To be eligible for this position, your primary residence must be located in the United States. "
+                  "Please indicate the state in which you currently reside.", options=states) == "Illinois"
+
+
+def test_skill_lists_and_ratings():
+    opts = ["Frontend Frameworks (e.g., React, Angular, Vue.js)", "Backend Frameworks (e.g., Django, Flask)",
+            "Mobile Development (e.g., React Native, Swift)", "Testing Frameworks (e.g., Jest, PyTest)"]
+    profile = json.loads(json.dumps(PROFILE))
+    profile["skills"]["tools"] = ["Git", "React", "Pytest"]
+    eng = AnswerEngine(profile, custom_answers=[])
+    d = eng.resolve(Question("Which web or application frameworks do you have hands-on experience using?",
+                             "checkbox_group", True, opts), Context())
+    assert d.value == [opts[0], opts[3]]                      # not "React Native"
+    assert filled("Please rank your proficiency in Swift from 1 - 10 (1 being least proficient)", kind="number") == "1"
+    blocked("Please rank your proficiency in Python from 1 - 10", kind="number")
+    assert filled("Do you have experience with Android, Jetpack Compose, Kotlin, or other mobile development "
+                  "technologies?", kind="text") == "No"
+    assert filled("How many full-time, semester-long co-op rotations have you completed prior to this application?",
+                  options=["0 Co-ops (First-time applicant)", "1 Co-op", "2 Co-ops"]) == "0 Co-ops (First-time applicant)"
+
+
+def test_misc_round_six():
+    orgs = ["Formula SAE / Electric Vehicle Racing", "Rocketry Team", "None of the Above"]
+    assert filled("Please indicate any engineering or project-based student organizations you have been involved "
+                  "with:", kind="checkbox_group", options=orgs) == ["None of the Above"]
+    assert filled("What best describes the type of opportunities you're interested in:", kind="checkbox_group",
+                  options=["Full-time", "Internship", "Contract"]) == ["Internship"]
+    assert filled("What type of intern role are you interested?", options=["Backend", "Full stack", "Either"]) == "Either"
+    assert filled("If 'Yes' to above, are you actively maintaining any security licenses?") == "No"
+    assert filled("Were you eligible for free school meals at any point during your school years?",
+                  options=["Yes", "No", "Don't know", "Prefer not to say"]) == "Prefer not to say"
+    assert filled("Candidate's Company", kind="text") == f"Student, {PROFILE['education']['school']}"
+    assert filled("What can we look at?", kind="text") == PROFILE["links"]["portfolio"]
+    assert filled("Education History Still Student?", kind="checkbox") is True
+    blocked("Alternate Email", kind="text")
+
+
+def test_design_is_not_a_signature():
+    # "designed" used to match the e-sign pattern and the prompt was answered with the candidate's name
+    d = ask("We look for evidence of exceptional ability. Please provide us with 3-4 examples. We recommend starting "
+            "with an action word (designed, led, built, launched, created, etc.).", kind="textarea")
+    assert d.value != PROFILE["identity"]["full_name"]
+    d = ask("Describe a design decision you are proud of.", kind="text")
+    assert d.value != PROFILE["identity"]["full_name"]
+    assert filled("E-Signature", kind="text") == PROFILE["identity"]["full_name"]
+    assert filled("Signature", kind="text") == PROFILE["identity"]["full_name"]
+
+
+def test_short_fact_rules_do_not_answer_long_questions():
+    blocked("If you are in a Bachelor's program, do you plan to pursue a Master's program after you graduate?",
+            kind="textarea")
+    assert filled("Have you executed any agreement with your current or prior employer which imposes any restriction, "
+                  "limitation or condition on your work activities or employment (e.g. non-compete)?",
+                  kind="textarea") == "No"
+    blocked("Are you named in any pending investment-related civil action? If yes, please explain. If no, enter N/A.",
+            kind="textarea")
+    assert filled("What is your Github username?", kind="text") == "example"

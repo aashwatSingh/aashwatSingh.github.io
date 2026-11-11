@@ -18,7 +18,7 @@ from playwright.async_api import Page, TimeoutError as PWTimeout
 
 import config
 import essays
-from answers import AnswerEngine, Context, Decision, Question
+from answers import AI_POLICY, AnswerEngine, Context, Decision, Question
 
 SUBMITTED = "submitted"
 DRY_RUN_OK = "dry_run_ok"
@@ -205,15 +205,18 @@ class BaseAdapter:
                       "work_authorization.us_person in the profile") if reason == "US_PERSON_REQUIRED" else ""
             return ApplyResult(status, reason, detail)
 
+        ctx.job_text = text
         answers: list[dict] = []
         unknowns: list[str] = []
         handled: set[str] = set()
+        own_words_only = False       # the form carries an AI-use / authorship attestation
         for _ in range(4):                       # re-extract: answers can reveal new fields
             fields = await self.extract(page)
             fresh = [f for f in fields if f.key not in handled]
             if not fresh:
                 break
             ctx.labels = [f.question.label for f in fields]
+            own_words_only = own_words_only or any(AI_POLICY.search(f.question.label) for f in fields)
             for f in fresh:
                 handled.add(f.key)
                 q = f.question
@@ -227,6 +230,7 @@ class BaseAdapter:
                             f.extra["options_error"] = str(exc)[:120]
                     decision = engine.resolve(q, ctx)
                 if decision.action != "fill" and q.kind in ("textarea", "text") and self.write_essays \
+                        and not own_words_only \
                         and decision.rule in ("no-rule", "experience", "follow-up", "essay-project", "essay-why-swe"):
                     draft = await asyncio.to_thread(
                         essays.generate, q.label, job, text, engine.p, q.description, q.required,
@@ -240,6 +244,7 @@ class BaseAdapter:
                         note = f"could not fill: {type(exc).__name__}: {str(exc)[:140]}"
                         decision = Decision("unknown" if q.required else "skip", rule=decision.rule, note=note)
                 answers.append({"label": q.label, "kind": q.kind, "required": q.required,
+                                "options": [o[:80] for o in q.options[:30]],
                                 "action": decision.action, "value": _loggable(decision.value),
                                 "rule": decision.rule, "note": decision.note})
                 if decision.action == "unknown":

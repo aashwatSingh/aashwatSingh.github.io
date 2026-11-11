@@ -23,6 +23,17 @@ import re
 KINDS = [
     ("skip", r"^(additional|other|any other|anything else).{0,40}(information|comments?|details|share|like us to know)|"
              r"^(additional information|comments?|notes?|values)$|cover letter|is there anything"),
+    ("example_1", r"provide .{0,40}(\d\s*(-|–|to)\s*\d|\d|several|a few) examples .{0,80}(exceptional|ability|impact)|"
+                  r"^first example"),
+    ("example_2", r"^second example"),
+    ("example_3", r"^third example"),
+    ("example_4", r"^fourth example"),
+    ("bullets", r"bullet points? .{0,70}(exceptional|accomplish|achiev|ability|impact)|"
+                r"(exceptional|accomplish|achiev).{0,60}bullet points?"),
+    ("experience_summary", r"^(please )?(share|describe|list|summari[sz]e|tell us about) your (previous |prior |relevant |"
+                           r"past )?(internship|work|research|professional|engineering|technical)"
+                           r"[a-z ,/&-]{0,90}experience\.?:?$"),
+    ("built_before", r"^have you built (or worked on )?(any |an? )?(apps?|projects?|products?|software|websites?) before"),
     ("achievements", r"(top|two|2|three|3) .{0,90}(accomplishments|achievements)"),
     ("project", r"(project|problem|thing|piece|work) .{0,40}you('ve| have| are|'re)? (built|worked on|solved|shipped|"
                 r"completed|made|created|most proud of)|tell us about .{0,40}project|describe .{0,40}project|"
@@ -182,6 +193,26 @@ def template_answer(question: str, job: dict, job_text: str, profile: dict, desc
     tech = _join(_shared_tech(profile, job_text, project))
     school = profile["education"]["school"]
 
+    by_impact = sorted(profile["projects"], key=lambda x: not re.search(r"\d", x.get("summary", "")))
+    if kind.startswith("example_"):
+        n = int(kind[-1]) - 1
+        if n >= len(by_impact):
+            return None
+        return kind, fit(by_impact[n]["detail"], limit, sentence_limit(question, description))
+    if kind == "bullets":
+        lines = [f"- Built {x['summary']}." for x in by_impact[:3]]
+        return kind, "\n".join(lines)
+    if kind == "experience_summary":
+        exp = profile.get("experience") or []
+        if not exp:
+            return None
+        lines = [f"{x['title']}, {x['company']} ({x['start']} to {x['end'] or 'present'}): {x['bullets'][0]}"
+                 for x in exp[:3] if x.get("bullets")]
+        return kind, fit(" ".join(lines), limit)
+    if kind == "built_before":
+        if re.search(r"android|\bios\b|mobile|game|hardware|robot|embedded|firmware", question.lower()):
+            return None
+        return kind, fit("Yes. " + profile["essays"]["challenging_project"], limit, sentence_limit(question, description))
     if kind.startswith("behavioral_"):
         story = (profile.get("behavioral") or {}).get(kind.split("_", 1)[1])
         return (kind, fit(story, limit, sentence_limit(question, description))) if story else None

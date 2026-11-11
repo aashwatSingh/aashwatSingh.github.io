@@ -71,3 +71,22 @@ def test_behavioral_questions_without_a_matching_story_stay_with_the_candidate()
     assert gen("Tell us about a time you failed and what you learned.") is None
     assert gen("Describe a time you disagreed with a teammate.") is None
     assert gen("Tell me an example of excellence you have demonstrated that is NOT on your CV.") is None
+
+
+def test_multi_part_examples_and_bullets_come_from_projects():
+    first = gen("We look for evidence of exceptional ability. Please provide us with 3-4 examples highlighting your "
+                "exceptional ability, using quantitative metrics.")
+    second, third = gen("Second example:"), gen("Third example:")
+    assert first[0] == "essay-example_1" and second[0] == "essay-example_2"
+    assert first[1] != second[1] and third is None            # the fixture has only two projects
+    rule, text = gen("Please provide 2-3 bullet points showcasing exceptional ability.")
+    assert rule == "essay-bullets" and text.count("\n- ") == 1 and text.startswith("- Built ")
+
+
+def test_experience_summary_and_built_before():
+    rule, text = gen("Please share your previous internship, co-curricular, research and/or hands-on engineering "
+                     "experience:")
+    assert rule == "essay-experience_summary" and "Example Labs" in text
+    assert gen("Have you built or worked on any apps before? If yes, tell us briefly about one.")[1].startswith("Yes. ")
+    assert gen("Have you built or modified an Android app before? If yes, what tools did you use?") is None
+    assert gen("Describe your previous experience with robots.") is None

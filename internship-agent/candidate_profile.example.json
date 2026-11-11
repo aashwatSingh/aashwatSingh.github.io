@@ -54,7 +54,8 @@
     "act_score": null,
     "transcript_path": null,
     "school_email": null,
-    "high_school_graduation": null
+    "high_school_graduation": null,
+    "high_school_name": null
   },
   "work_authorization": {
     "authorized_to_work_us": true,
@@ -63,7 +64,10 @@
     "us_person": null,
     "apply_when_no_sponsorship": false,
     "citizenship_status": null,
-    "has_security_clearance": null
+    "has_security_clearance": null,
+    "internship_work_authorization": null,
+    "future_sponsorship_visa": null,
+    "requires_sponsorship_now": null
   },
   "logistics": {
     "willing_to_relocate": true,
@@ -147,5 +151,6 @@
   ],
   "_projects_notes": "projects feed the essay templates: summary is one clause that follows 'Having built ...'; focus tags (ai, ml, data, python, backend, fullstack, web, database) decide which project matches a role.",
   "student_organizations": [],
-  "behavioral": {}
+  "behavioral": {},
+  "spoken_languages": null
 }
