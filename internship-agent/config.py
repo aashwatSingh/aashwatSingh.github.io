@@ -64,6 +64,21 @@ def load_profile(path: Path | None = None) -> dict:
     return profile
 
 
+def load_dotenv(path: Path | None = None) -> None:
+    """KEY=value lines from .env (git-ignored) into the environment; existing variables win."""
+    path = path or BASE / ".env"
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip().removeprefix("export ").strip(), value.strip().strip("'\""))
+
+
+load_dotenv()
+
+
 def ensure_dirs() -> None:
     for d in (LOG_DIR, MANUAL_REVIEW_DIR, SUBMITTED_DIR, CACHE_DIR):
         d.mkdir(parents=True, exist_ok=True)

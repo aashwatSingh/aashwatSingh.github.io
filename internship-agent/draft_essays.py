@@ -1,8 +1,12 @@
 """Draft the open-ended questions that still block forms, with any model, and feed the answers back.
 
+    python draft_essays.py                       # draft what can be drafted and store it (see below)
     python draft_essays.py --export              # essay_requests.json: every blocking essay question + its prompt
-    python draft_essays.py --gemini              # draft them with GEMINI_API_KEY and store the ones that pass vetting
-    python draft_essays.py --import answers.json # store answers drafted elsewhere (e.g. Gemini through Composio)
+    python draft_essays.py --import answers.json # store answers drafted elsewhere
+
+With no flag it uses GEMINI_API_KEY or ANTHROPIC_API_KEY when one is set (in the environment or in .env),
+and otherwise the local templates in essays.py, which need no key and no network: they name the company and
+answer from your resume projects, for the question types they recognise. Anything else stays with you.
 
 answers.json is a list of {"company", "question", "answer"}. Every answer is vetted (length, nothing from
 skills.never_claim, no placeholders) and stored in custom_answers.json for that company only, so the next
@@ -66,7 +70,6 @@ def store(answers: list[dict]) -> tuple[int, list[str]]:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--export", action="store_true")
-    ap.add_argument("--gemini", action="store_true")
     ap.add_argument("--import", dest="import_file")
     args = ap.parse_args()
     if args.import_file:
@@ -76,16 +79,23 @@ def main() -> None:
             print("  rejected:", r)
         return
     reqs = requests_from_logs()
-    if args.gemini:
+    if not args.export:
+        import essays
         profile = config.load_profile()
+        source = "a model (API key found)" if llm.available() else "local templates (no API key set)"
         done = []
         for r in reqs:
-            text = llm.gemini_answer(r["question"], {"company": r["company"], "title": r["role"]}, "", profile,
-                                     r["word_limit"])
-            if text:
-                done.append({**r, "answer": text})
+            job = {"company": r["company"], "title": r["role"]}
+            hit = essays.generate(r["question"], job, "", profile, "", True, r["word_limit"])
+            if hit:
+                done.append({**r, "answer": hit[1], "word_limit": None})
         kept, rejected = store(done)
-        print(f"{len(reqs)} questions, {kept} drafted and stored, {len(reqs) - kept} left for you")
+        print(f"{len(reqs)} blocking essay questions; {kept} drafted with {source} and stored in "
+              f"{config.CUSTOM_ANSWERS_JSON.name}; {len(reqs) - kept} left for you:")
+        stored = {(d["company"], d["question"]) for d in done}
+        for r in reqs:
+            if (r["company"], r["question"]) not in stored:
+                print(f"  {r['company']}: {r['question'][:100]}")
         return
     (config.BASE / "essay_requests.json").write_text(json.dumps(reqs, indent=1, ensure_ascii=False), encoding="utf-8")
     print(f"essay_requests.json: {len(reqs)} questions")

@@ -99,6 +99,24 @@ def test_logistics_text_answers():
                   "and Non-Procurement Programs?", options=["Yes", "No"]) == "No"
 
 
+def test_round_nine_user_answers():
+    ctx_labels = ["Company name", "Title", "Start date month", "Start date year"]
+    q = Question(label="Company name", kind="text", required=True)
+    assert ENGINE.resolve(q, Context(company="Acme", labels=ctx_labels)).action == "fill"
+    q = Question(label="Title", kind="text", required=True)       # alone, "Title" is not an employment field
+    assert ENGINE.resolve(q, Context(company="Acme", labels=["Title"])).action != "fill"
+    buckets = ["0%", "1-10%", "11-20%", "21-30%", "31-40%"]
+    d = ask("What percentage of the time are you willing to travel?", options=buckets)
+    assert d.action in ("fill", "unknown") and (d.action == "unknown" or d.value in buckets)
+    assert filled("What is your availability for a winter/spring internship (approximate dates)?", kind="text")
+    assert filled("Which of the following best describes how you use AI tools today?", options=[
+        "I do not use AI tools", "I regularly use AI tools to speed up existing tasks",
+        "I design or automate workflows with AI tools"]).startswith("I regularly")
+    blocked("AI Policy for Application", kind="radio", options=["Yes", "No"])     # label alone says nothing
+    blocked("I confirm these answers are my own work and written without the use of AI", kind="radio",
+            options=["Yes", "No"])
+
+
 # --- things that must not be answered by keyword accident --------------------
 @pytest.mark.parametrize("label,kind", [
     ("Why did you want to become an engineer in your respective discipline?", "textarea"),

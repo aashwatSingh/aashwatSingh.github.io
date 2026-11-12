@@ -1,150 +1,5 @@
 [
  {
-  "label": "Company name",
-  "kind": "text",
-  "options": [],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 4,
-  "companies": [
-   "Coinbase",
-   "Samsung Semiconductor"
-  ]
- },
- {
-  "label": "Cover Letter",
-  "kind": "file",
-  "options": [],
-  "rule": "file",
-  "note": "required upload not on file: Cover Letter",
-  "profile_key": "logistics.cover_letter_path (a cover letter file)",
-  "count": 4,
-  "companies": [
-   "The New York Times",
-   "Crystal Dynamics",
-   "Xaira Therapeutics",
-   "Allen Control Systems"
-  ]
- },
- {
-  "label": "Title",
-  "kind": "text",
-  "options": [],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 4,
-  "companies": [
-   "Coinbase",
-   "Samsung Semiconductor"
-  ]
- },
- {
-  "label": "What about our mission excites you?",
-  "kind": "textarea",
-  "options": [],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 4,
-  "companies": [
-   "Hermeus"
-  ]
- },
- {
-  "label": "At Astranis, we value in-person collaboration and a strong work ethic. Are you comfortable with working onsite at our San Francisco HQ 5 days a week and commit to 55 hours per week?",
-  "kind": "select",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "onsite",
-  "note": "on-site question bundles a dated or extra-hours commitment",
-  "profile_key": "",
-  "count": 3,
-  "companies": [
-   "Astranis"
-  ]
- },
- {
-  "label": "Please confirm receipt of the above linked Global Data Privacy Notice and US Arbitration Agreement.",
-  "kind": "select",
-  "options": [
-   "Confirmed"
-  ],
-  "rule": "x-arbitration",
-  "note": "legal agreement needs your decision (set logistics.accept_arbitration_agreements in the profile)",
-  "profile_key": "logistics.accept_arbitration_agreements",
-  "count": 3,
-  "companies": [
-   "Coinbase"
-  ]
- },
- {
-  "label": "What is your availability for a winter/spring internship (approximate dates)?",
-  "kind": "text",
-  "options": [],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 3,
-  "companies": [
-   "Formlabs"
-  ]
- },
- {
-  "label": "What percentage of the time are you willing to travel?",
-  "kind": "select",
-  "options": [
-   "0%",
-   "1-10%",
-   "11-20%",
-   "21-30%",
-   "31-40%",
-   "41-50%",
-   "50-75%",
-   "75%+"
-  ],
-  "rule": "x-travel",
-  "note": "set logistics.travel_percentage",
-  "profile_key": "logistics.travel_percentage",
-  "count": 3,
-  "companies": [
-   "National Information Solutions Cooperative"
-  ]
- },
- {
-  "label": "What's the most interesting paper, blog post, or documentation you've read in the past month?",
-  "kind": "textarea",
-  "options": [],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 3,
-  "companies": [
-   "Cybernetic Labs"
-  ]
- },
- {
-  "label": "Which of the following best describes how you use AI tools today?",
-  "kind": "select",
-  "options": [
-   "I am opposed to using AI tools in my workflow and prefer traditional/manual work",
-   "I do not use AI tools for my work but I am not against it.",
-   "I have experimented with AI tools (professionally and/or personally).",
-   "I regularly use AI tools to speed up existing tasks (e.g., drafting, summarizing",
-   "I design or automate workflows with AI tools (e.g., building agents, integrating"
-  ],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 3,
-  "companies": [
-   "Coinbase"
-  ]
- },
- {
   "label": "AI Policy for Application",
   "kind": "boolean",
   "options": [
@@ -157,48 +12,6 @@
   "count": 2,
   "companies": [
    "Talos"
-  ]
- },
- {
-  "label": "Alternate Email",
-  "kind": "text",
-  "options": [],
-  "rule": "x-alt-email",
-  "note": "set education.school_email",
-  "profile_key": "education.school_email",
-  "count": 2,
-  "companies": [
-   "Chicago Trading Company"
-  ]
- },
- {
-  "label": "Are you interested in our Women's Winternship program?",
-  "kind": "select",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 2,
-  "companies": [
-   "Virtu Financial"
-  ]
- },
- {
-  "label": "Do you have fundamental knowledge of computer architecture and networks?",
-  "kind": "boolean",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 2,
-  "companies": [
-   "The Exploration Company"
   ]
  },
  {
@@ -639,6 +452,22 @@
   ]
  },
  {
+  "label": "Are you interested in a Spring Co-Op, Summer Internship, or Both?",
+  "kind": "multiselect",
+  "options": [
+   "Spring 2027 Co-Op",
+   "Summer 2027 Internship",
+   "Both"
+  ],
+  "rule": "x-winter-spring",
+  "note": "no matching option among ['Spring 2027 Co-Op', 'Summer 2027 Internship', 'Both']",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Rugged Robotics"
+  ]
+ },
+ {
   "label": "Are you legally authorised to work full-time in the country where this job is based?",
   "kind": "select",
   "options": [
@@ -679,21 +508,6 @@
   "count": 1,
   "companies": [
    "Tower Research Capital"
-  ]
- },
- {
-  "label": "Are you willing to work from the Lincoln, NE Olsson office during the Spring 2027 semseter for this internship?",
-  "kind": "select",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "onsite",
-  "note": "on-site question bundles a dated or extra-hours commitment",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Olsson"
   ]
  },
  {
@@ -1590,20 +1404,6 @@
   ]
  },
  {
-  "label": "The Mutual Arbitration Agreement (\"Arbitration Agreement\") is legally binding on you and the company and waives your right to bring covered claims as a class, in court, or before a jury. By selecting \"I Have Read and Agree to the Mutual Arbitration Agreement\" and clicking \"Submit,\" I confirm I accessed and reviewed the Arbitration Agreement at the link below, and I knowingly and voluntarily accept its terms and that this is my electronic signature. Please copy and paste the following link into a separate browser and read the Arbitration Agreement carefully before accepting: https://www.weareroku.com/roku-mutual-arbitration-agreement",
-  "kind": "select",
-  "options": [
-   "I Agree I Have Read and Agree to the Mutual Arbitration Agreement"
-  ],
-  "rule": "x-arbitration",
-  "note": "legal agreement needs your decision (set logistics.accept_arbitration_agreements in the profile)",
-  "profile_key": "logistics.accept_arbitration_agreements",
-  "count": 1,
-  "companies": [
-   "Roku"
-  ]
- },
- {
   "label": "The Working in Technology (WiT) Internship Program emphasizes technology, community engagement, professional development, and mentorship. Please describe any experiences, activities, organizations, volunteer work, or leadership roles that have contributed to your interest in these areas and explain how they have influenced your personal, academic, or professional development.",
   "kind": "textarea",
   "options": [],
@@ -1629,18 +1429,6 @@
   "count": 1,
   "companies": [
    "Lyft"
-  ]
- },
- {
-  "label": "Trust is one of Sierra’s values. I confirm that the information I provide is true, complete, and reflects my own experience and thinking, and I understand that an offer may be withdrawn, or employment ended, if Sierra learns otherwise.",
-  "kind": "checkbox",
-  "options": [],
-  "rule": "x-human-only",
-  "note": "an AI-use or authorship attestation: answer it yourself",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Sierra"
   ]
  },
  {

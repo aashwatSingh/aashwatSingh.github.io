@@ -330,6 +330,9 @@ class AnswerEngine:
     def __init__(self, profile: dict, custom_answers: list[dict] | None = None):
         self.p = profile
         self.custom = custom_answers if custom_answers is not None else load_custom_answers()
+        # answers kept in the profile travel with it (same format as custom_answers.json)
+        self.custom = list(self.custom) + [e for e in profile.get("custom_answers") or []
+                                           if isinstance(e, dict) and e.get("pattern")]
 
     # -- public ------------------------------------------------------------
     def resolve(self, q: Question, ctx: Context | None = None) -> Decision:
@@ -481,6 +484,8 @@ class AnswerEngine:
         for word, key in (("transcript", "transcript_path"), ("cover letter", "cover_letter_path")):
             if word in label:
                 path = existing_file(self.p["education" if key == "transcript_path" else "logistics"].get(key))
+                if path and key == "cover_letter_path" and not q.required:
+                    return Decision("skip", rule="file", note="cover letter is uploaded only when required")
                 if path:
                     return Decision("fill", path, word.split()[0])
                 if both and q.required:
@@ -1183,6 +1188,67 @@ class AnswerEngine:
         def na_fallback(q, label, ctx):
             return Text("N/A") if q.required and q.kind in ("text", "textarea") else None
 
+        def ai_policy_ack(q, label, ctx):
+            """Acknowledging an employer's candidate AI policy. Anything asking whether AI was used stays manual."""
+            text = f"{label} {norm(q.description or '')}"
+            if q.kind not in CHOICE_KINDS | {"checkbox"} or not log.get("acknowledge_ai_policies"):
+                return None
+            if re.search(r"(did|have|do|will) you use|was .{0,30}(written|generated)|my own (work|words|writing)|"
+                         r"without (the )?(use|help|assistance)|\bbot\b|language model", text):
+                return None
+            if not re.search(r"acknowledg|agree|comply|compliance|have read|understand|adhere|abide", text):
+                return None
+            return Check() if q.kind == "checkbox" else YesNo(True, [r"acknowledge|agree|i (have read|understand)"])
+
+        def travel(q):
+            pct = int(re.sub(r"\D", "", str(log["travel_percentage"])) or 0)
+            if q.kind not in CHOICE_KINDS:
+                return Text(f"{pct}%")
+            if pick_yes_no(q.options, True) and len(q.options) <= 3:
+                return YesNo(pct > 0)
+            best = None
+            for o in q.options:                              # the bucket that contains the percentage
+                nums = [int(n) for n in re.findall(r"\d+", o)]
+                if not nums:
+                    continue
+                lo, hi = (0, nums[0]) if re.search(r"up to|less than|under|<", o, re.I) else \
+                         (nums[0], 100) if len(nums) == 1 and re.search(r"\+|more|over|>", o) else \
+                         (nums[0], nums[-1])
+                if lo <= pct <= hi and (best is None or hi - lo < best[0]):
+                    best = (hi - lo, o)
+            return Text(best[1], [rf"^{re.escape(best[1])}$"]) if best else Unknown("no travel bucket matches")
+
+        def employment_block(q, label, ctx):
+            """Greenhouse's 'Employment' section: Company name / Title / Start and End date belong to a past job."""
+            jobs = p.get("experience") or []
+            if not jobs or not any(norm(x) == "company name" for x in ctx.labels or [label]):
+                return None
+            job = jobs[0]
+            months = ["january", "february", "march", "april", "may", "june", "july", "august", "september",
+                      "october", "november", "december"]
+            if label == "company name":
+                return Text(job["company"])
+            if label == "title":
+                return Text(job["title"])
+            when = job.get("start") if label.startswith("start") else job.get("end")
+            if not when:
+                return Skip()
+            year, month = when.split("-")
+            if label.endswith("year"):
+                return Text(year, [rf"^{year}$"])
+            name = months[int(month) - 1]
+            return Text(name.title(), [rf"^{name}", rf"^0?{int(month)}$"])
+
+        def winter_spring(q, label, ctx):
+            if log.get("winter_spring_available") is not False:
+                return None
+            if re.search(r"summer", label) and not re.search(r"winter|spring", label.split("summer")[0]):
+                return None
+            if q.kind in CHOICE_KINDS:
+                return Choice([r"^no\b", r"not available", r"summer (20\d\d )?only"])
+            return Text(log.get("winter_spring_text") or "Available full-time for Summer 2027 only.") \
+                if q.kind in ("text", "textarea") else None
+
         yes, no = (lambda *_: YesNo(True)), (lambda *_: YesNo(False))
         t = lambda v: (lambda *_: Text(v))
         skip = lambda *_: Skip()
@@ -1215,6 +1281,7 @@ class AnswerEngine:
              else YesNo(bool(re.search(home, label, re.I)))),
             ("x-school-email", r"(university|school|student|college|\.edu) e-?mail", lambda q, *_: Text(
                 edu["school_email"]) if edu.get("school_email") else Unknown("school e-mail not in the profile")),
+            ("x-ai-policy-ack", AI_POLICY.pattern, ai_policy_ack),
             ("x-human-only", AI_POLICY.pattern, unk("an AI-use or authorship attestation: answer it yourself")),
             ("x-accommodation", r"accommodations?\b|reasonable adjustments?", lambda q, label, ctx:
              None if re.search(r"(secure|arrange|find|obtain|have) .{0,40}accommodations? in\b|housing", label)
@@ -1317,7 +1384,7 @@ class AnswerEngine:
              else Text(str(log["prior_internship_count"]), [rf"^{log['prior_internship_count']}\b"])),
             ("x-travel", r"percentage of (the )?time .{0,30}travel|willing to travel",
              lambda q, *_: Unknown("set logistics.travel_percentage") if log.get("travel_percentage") is None
-             else Text(str(log["travel_percentage"]), [rf"\b{log['travel_percentage']}\b"])),
+             else travel(q)),
             ("x-background-check", r"background (check|screen|investigation)",
              flag("consents_to_background_check", "consent needs your decision")),
             ("x-interview-recording", r"(record|transcri|ai note ?tak)\w* .{0,60}interview|"
@@ -1333,7 +1400,13 @@ class AnswerEngine:
                               r"based on an? (work )?visa", lambda q, label, ctx:
              None if re.search(r"sponsor", label) and not re.search(r"citizen|person|residen", label)
              else citizenship(q, label, ctx)),
-            ("x-arbitration", r"arbitration", flag("accept_arbitration_agreements", "legal agreement needs your decision")),
+            ("x-arbitration", r"arbitration",
+             lambda q, *_: Unknown("legal agreement needs your decision (set logistics.accept_arbitration_agreements)")
+             if log.get("accept_arbitration_agreements") is None
+             else Check() if q.kind == "checkbox" and log["accept_arbitration_agreements"]
+             else Choice([r"confirm|i (have read and )?agree|accept|acknowledg", r"^yes\b"])
+             if q.kind in CHOICE_KINDS and log["accept_arbitration_agreements"] and not pick_yes_no(q.options, True)
+             else YesNo(bool(log["accept_arbitration_agreements"]))),
             ("x-qualifications", r"meet (each|all|the) .{0,30}(basic |minimum |required )?(qualifications|requirements)|"
                                  r"demonstrated experience in the specified discipline",
              flag("meets_basic_qualifications", "self-assessment against the posting")),
@@ -1379,6 +1452,13 @@ class AnswerEngine:
              else Text(addr["state"], [rf"^{addr['state']}$", rf"^{addr['state_abbr']}$"])
              if match_option(q.options, addr["state"]) or match_option(q.options, addr["state_abbr"])
              else YesNo(addr["country"].lower().startswith("united states"))),
+            ("x-employment-block", r"^(company name|title|(start|end) date (month|year))$", employment_block),
+            ("x-winter-spring", r"(winter|spring)(/| or | and )?(winter|spring)? .{0,30}(internship|co-?op|term)|"
+                                r"availab\w+ .{0,40}(winter|spring) (20\d\d|internship|co-?op|term|semester)",
+             winter_spring),
+            ("x-ai-usage", r"how (do )?you use ai tools|describes? how you use ai|use of ai tools today",
+             lambda q, *_: Choice([r"\bdaily\b|every day", r"\bregularly\b", r"design or automate|integrat|build"])
+             if q.kind in CHOICE_KINDS else None),
             ("x-contact-method", r"(best|preferred) (way|method|means) (to|of) (contact|reach|communicat)\w*( with)? you|"
                                  r"preferred (contact|communication) method|how (should|can) we (best )?(contact|reach) you",
              lambda q, *_: Choice([r"e-?mail"]) if q.kind in CHOICE_KINDS

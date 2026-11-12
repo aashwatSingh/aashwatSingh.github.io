@@ -170,21 +170,28 @@ submitting is also remembered in `custom_answers.json` for the next form. Questi
 to attest to authorship or AI use are never auto-answered, never remembered, and stop essay
 drafting on that form.
 
+## Cover letter
+
+```bash
+python make_cover_letter.py
+```
+
+Builds a reusable one-page `cover_letter.pdf` from the profile (git-ignored). With `logistics.cover_letter_path`
+set, it is uploaded only where a form marks the cover letter as required.
+
 ## Essays a template cannot write
 
 ```bash
-python draft_essays.py --export
+python draft_essays.py
 ```
 
-```bash
-python draft_essays.py --gemini
-```
-
-`--export` writes `essay_requests.json`: every open-ended question that still blocks a form, with the grounded
-prompt for it (resume facts only: no name, contact details or GPA). `--gemini` drafts them with `GEMINI_API_KEY`
-and stores the ones that pass vetting in `custom_answers.json` for that company; `--import answers.json` stores
-answers drafted anywhere else. Forms that ask you to attest the answers are your own are never exported. Read
-`custom_answers.json` before a live run.
+Drafts every open-ended question that still blocks a form and stores the result in `custom_answers.json` for
+that company. It uses `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` when one is set (environment or a git-ignored
+`.env` file with `KEY=value` lines); with neither it uses the local templates, which need no network and only
+cover the question types they recognise (why this company, its mission, a project, goals, behavioural stories).
+`--export` writes the questions and their grounded prompts (resume facts only: no name, contact details or GPA)
+to `essay_requests.json`; `--import answers.json` stores answers drafted anywhere else. Forms that ask you to
+attest the answers are your own are never drafted. Read `custom_answers.json` before a live run.
 
 ## Workday (experimental)
 

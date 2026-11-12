@@ -115,7 +115,10 @@
     "latest_start": null,
     "consents_to_drug_screening": null,
     "consents_to_reference_checks": null,
-    "excluded_from_federal_programs": null
+    "excluded_from_federal_programs": null,
+    "winter_spring_available": null,
+    "winter_spring_text": "",
+    "acknowledge_ai_policies": null
   },
   "eeo": {
     "gender": "",
@@ -165,5 +168,6 @@
   "_projects_notes": "projects feed the essay templates: summary is one clause that follows 'Having built ...'; focus tags (ai, ml, data, python, backend, fullstack, web, database) decide which project matches a role.",
   "student_organizations": [],
   "behavioral": {},
-  "spoken_languages": null
+  "spoken_languages": null,
+  "custom_answers": []
 }

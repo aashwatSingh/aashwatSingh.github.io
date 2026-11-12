@@ -123,7 +123,10 @@
     "latest_start": null,
     "consents_to_drug_screening": true,
     "consents_to_reference_checks": true,
-    "excluded_from_federal_programs": false
+    "excluded_from_federal_programs": false,
+    "winter_spring_available": false,
+    "winter_spring_text": "",
+    "acknowledge_ai_policies": true
   },
   "eeo": {
     "gender": "Female",
@@ -215,5 +218,6 @@
     "initiative": "I built Ledgerly on my own from an empty repository.",
     "learning": "In an eight-week program I learned a new framework and shipped a pipeline."
   },
-  "spoken_languages": null
+  "spoken_languages": null,
+  "custom_answers": []
 }

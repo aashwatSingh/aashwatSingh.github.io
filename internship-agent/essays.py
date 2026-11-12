@@ -41,6 +41,9 @@ KINDS = [
                 r"technical (accomplishment|challenge|project)|something you('ve| have)? built|"
                 r"most impressive thing you('ve| have)? (ever )?(accomplished|done|built)|work you('re| are) proudest of"),
     ("ai_experience", r"describe your (ai|ml|machine learning|artificial intelligence)( and ml|/ml)? experience"),
+    ("mission", r"(our|the company'?s?|\w+'s) mission\b.{0,60}(excit|interest|resonat|appeal|matter|mean)|"
+                r"(excit|interest|resonat|appeal)\w* .{0,60}(our|the company'?s?) mission|"
+                r"why .{0,30}(our|the) mission"),
     ("goals", r"(want|hope|expect|looking) to (get out of|gain|learn|achieve|accomplish) .{0,60}(intern|program|role|"
               r"experience|position)|get out of (the|this|your) .{0,40}(intern|program)|"
               r"end of (this|the|your) internship.{0,60}hope to|hope to walk away with|"
@@ -231,6 +234,16 @@ def template_answer(question: str, job: dict, job_text: str, profile: dict, desc
                 f"designing and shipping production-ready systems with {tech}. I would love to bring my focus on "
                 f"clean architecture, automated testing, and performance optimization to {company}'s engineering "
                 f"team next summer. I also built {other['summary']}, which taught me to own a system end to end.")
+    elif kind == "mission":
+        # No claim about what the company does: only why dependable engineering matters to the candidate.
+        ai = _pick_project(profile, "ai")
+        web = _pick_project(profile, "fullstack")
+        second = f" On my own I built {web['summary']}." if web is not ai else ""
+        text = (f"What excites me about {company}'s mission is that it depends on software people can trust, and "
+                f"building high-reliability systems is the work I enjoy most. I built {ai['summary']}.{second} "
+                f"Both taught me to measure a system, pin its failures with tests, and make it dependable before "
+                f"calling it done. I want to bring that discipline to {company}'s engineering team, and learn how "
+                f"you build and verify systems at a scale I have not worked at yet.")
     elif kind == "project":
         text = profile["essays"]["challenging_project"]
     elif kind == "achievements":
