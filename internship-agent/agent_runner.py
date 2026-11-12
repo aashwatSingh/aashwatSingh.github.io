@@ -134,6 +134,17 @@ def select_jobs(queue: list[dict], args) -> list[dict]:
     statuses = {"pending"} | ({"manual_review", "error"} if args.retry_manual else set())
     jobs = [j for j in queue if j.get("status", "pending") in statuses
             and (wanted is None or j["ats"].lower() in wanted)]
+    if args.skip_logged_since:                                 # resume an interrupted dry-run sweep
+        import glob, json as _json
+        done = set()
+        for path in glob.glob(str(config.LOG_DIR / "applications" / "*.json")):
+            try:
+                d = _json.load(open(path, encoding="utf-8"))
+            except ValueError:
+                continue
+            if d.get("when", "") >= args.skip_logged_since:
+                done.add(dedup.canonical_url(d["job"]["url"]))
+        jobs = [j for j in jobs if dedup.canonical_url(j["url"]) not in done]
     if args.only_ready:
         path = config.BASE / "ready_to_submit.csv"
         if not path.exists():
@@ -315,6 +326,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="run on your own machine: visible browser with a persistent ./chrome_profile, fill and "
                          "submit everything, and when a site asks for a CAPTCHA or an emailed code ring the "
                          "bell and wait up to 120 s for you to do that one step, then record and move on")
+    ap.add_argument("--skip-logged-since", metavar="ISO_TIME",
+                    help="skip postings already attempted at or after this time (resume a dry-run sweep)")
     ap.add_argument("--only-ready", action="store_true",
                     help="only postings listed in ready_to_submit.csv (fully filled in the last dry-run sweep)")
     ap.add_argument("--only-url", help="apply to this single posting")
