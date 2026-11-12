@@ -77,18 +77,6 @@
   ]
  },
  {
-  "label": "Tell me an example of excellence you have demonstrated that is NOT on your CV (could be academic or non academic related!)",
-  "kind": "textarea",
-  "options": [],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 2,
-  "companies": [
-   "Talos"
-  ]
- },
- {
   "label": "What excites you about the opportunity to join Talos?",
   "kind": "text",
   "options": [],
@@ -200,22 +188,6 @@
   "count": 1,
   "companies": [
    "Brain Co."
-  ]
- },
- {
-  "label": "Are you considering or committed to pursuing further education immediately after completing your current academic studies?",
-  "kind": "select",
-  "options": [
-   "No",
-   "I am considering further education after my current program",
-   "I have committed to another degree after my current program"
-  ],
-  "rule": "x-further-education",
-  "note": "post-degree plans not stated (set logistics.pursuing_further_education_after_degree in the profile)",
-  "profile_key": "logistics.pursuing_further_education_after_degree",
-  "count": 1,
-  "companies": [
-   "Five Rings Capital"
   ]
  },
  {
@@ -352,39 +324,6 @@
   ]
  },
  {
-  "label": "Have you participated in any of the following mathematics competitions?",
-  "kind": "checkbox_group",
-  "options": [
-   "IMO or EGMO",
-   "USAMO, USAJMO, or foreign National Olympiad",
-   "Putnam",
-   "USACO, IOI, or ICPC",
-   "I have not participated in any of these competitions"
-  ],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Aquatic Capital Management"
-  ]
- },
- {
-  "label": "Have you tutored or TA'd for any classes?",
-  "kind": "select",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "PDT Partners"
-  ]
- },
- {
   "label": "I certify that the facts set forth in this Application for Employment are true and complete to the best of my knowledge. I understand that if I am employed, false statements, omissions or misrepresentations may result in my dismissal. I authorize the Employer to make an investigation of any of the facts set forth in this application and release the Employer from any liability. The employer may contact any provided references.",
   "kind": "text",
   "options": [],
@@ -472,8 +411,8 @@
   "label": "Name pronounciation",
   "kind": "text",
   "options": [],
-  "rule": "pronouns",
-  "note": "free-text field with no stated answer",
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
   "profile_key": "",
   "count": 1,
   "companies": [
@@ -529,18 +468,6 @@
   ]
  },
  {
-  "label": "Please provide 1-2 sentences regarding why you're interested in supporting our US Government business out of our Honolulu, HI office location.",
-  "kind": "textarea",
-  "options": [],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Palantir"
-  ]
- },
- {
   "label": "Please select the month you will be able to start your internship.",
   "kind": "select",
   "options": [
@@ -589,27 +516,6 @@
   "count": 1,
   "companies": [
    "Rocket Lab USA"
-  ]
- },
- {
-  "label": "Select the primary team you'd like to be considered for:",
-  "kind": "select",
-  "options": [
-   "Base (SF): Build L2 integrations and developer tools",
-   "Consumer (SF): Build crypto apps and trading experiences",
-   "Developer (SF): Build APIs for payments and wallets",
-   "Institutional (SF): Build custody and staking solutions",
-   "Platform (SF): Build systems powering Coinbase products",
-   "Enterprise Engineering (SF): Build internal tools and automation",
-   "Enterprise AI (SF): Build AI tools for productivity",
-   "Security (NYC): Build security and privacy solutions"
-  ],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Coinbase"
   ]
  },
  {
@@ -714,23 +620,6 @@
   ]
  },
  {
-  "label": "What are your preferred pronouns?",
-  "kind": "select",
-  "options": [
-   "He/Him/His",
-   "She/Her/Hers",
-   "They/Them/Theirs",
-   "Other"
-  ],
-  "rule": "pronouns",
-  "note": "no matching option among ['He/Him/His', 'She/Her/Hers', 'They/Them/Theirs', 'Other']",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Xantium"
-  ]
- },
- {
   "label": "What did you contribute to it?",
   "kind": "textarea",
   "options": [],
@@ -767,50 +656,7 @@
   ]
  },
  {
-  "label": "What state and country do you currently reside in?",
-  "kind": "select",
-  "options": [
-   "BRA",
-   "CAN-NL",
-   "CAN-PE",
-   "CAN-NW",
-   "CAN-NB",
-   "CAN-QC",
-   "CAN-ON",
-   "CAN-MB",
-   "CAN-SK",
-   "CAN-AB",
-   "CAN-BC",
-   "CAN-YT",
-   "CAN-NT",
-   "CAN-NU",
-   "COL",
-   "CHL",
-   "MEX",
-   "USA-AL",
-   "USA-AK",
-   "USA-AZ",
-   "USA-AR",
-   "USA-CA",
-   "USA-CO",
-   "USA-CT",
-   "USA-DE",
-   "USA-DC",
-   "USA-FL",
-   "USA-GA",
-   "USA-HI",
-   "USA-ID"
-  ],
-  "rule": "residence-country",
-  "note": "'United States' not among ['BRA', 'CAN-NL', 'CAN-PE', 'CAN-NW', 'CAN-NB', 'CAN-QC', 'CAN-ON', 'CAN-MB', 'CAN-SK', 'CAN-AB', 'CAN-BC', 'CAN-YT', 'CAN-NT', 'CAN-NU', 'COL', 'CHL', 'MEX', 'USA-AL', 'USA-AK', 'USA-AZ', 'USA-AR', 'USA-CA', 'USA-CO', 'USA-CT', 'USA-DE', 'USA-DC', 'USA-FL', 'USA-GA', 'USA-HI', 'USA-ID']",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Toshiba Global Commerce Solutions"
-  ]
- },
- {
-  "label": "Which of our 5 Focus Areas resonates with you and why?",
+  "label": "What qualities do you believe make someone a great Agent Engineer, and how do your skills and experiences make you the best candidate for this role?",
   "kind": "textarea",
   "options": [],
   "rule": "no-rule",
@@ -818,7 +664,7 @@
   "profile_key": "",
   "count": 1,
   "companies": [
-   "Strada Education Foundation"
+   "Sierra"
   ]
  },
  {

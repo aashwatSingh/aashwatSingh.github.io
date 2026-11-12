@@ -11,7 +11,8 @@
     "phone_dashed": "555-010-0199",
     "phone_digits": "5550100199",
     "phone_type": "Mobile",
-    "country_code": "+1"
+    "country_code": "+1",
+    "pronouns": "He/Him"
   },
   "address": {
     "line1": "1 Example Way",
@@ -127,7 +128,8 @@
     "winter_spring_available": false,
     "winter_spring_text": "",
     "acknowledge_ai_policies": true,
-    "requires_housing": false
+    "requires_housing": false,
+    "further_education_text": ""
   },
   "eeo": {
     "gender": "Female",

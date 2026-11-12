@@ -17,6 +17,7 @@ answer to custom_answers.json.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import date
@@ -57,6 +58,8 @@ AI_POLICY = re.compile(
     r"reflects my own|written by (me|you)\b|without (the )?(use|help|assistance) of (generative )?ai|"
     r"(ai|llm) (tools?|assistance) (in|for|on|during|to complete) (this|the|your) application|"
     r"if (this is|you are|you're) (a |an )?(bot|ai\b|llm|language model|automated)", re.I)
+
+NO_AI_NOTE = re.compile(r"(do not|don.t|refrain from|without) us(e|ing) (of )?(an? )?ai\b|non-ai-assisted", re.I)
 
 US_CITY = (r"san francisco|bay area|new york|\bnyc\b|seattle|austin|boston|chicago|los angeles|dallas|houston|denver|"
            r"atlanta|palo alto|mountain view|sunnyvale|san jose|san mateo|menlo park|santa clara|redwood city|"
@@ -333,7 +336,7 @@ class AnswerEngine:
         self.p = profile
         self.custom = custom_answers if custom_answers is not None else load_custom_answers()
         # answers kept in the profile travel with it (same format as custom_answers.json)
-        self.custom = list(self.custom) + [e for e in profile.get("custom_answers") or []
+        self.custom = list(self.custom) + [e for e in [*(profile.get("custom_answers") or []), *load_shared_answers()]
                                            if isinstance(e, dict) and e.get("pattern")]
 
     # -- public ------------------------------------------------------------
@@ -464,6 +467,8 @@ class AnswerEngine:
             answer = entry.get("answer")
             if answer is None:
                 continue
+            if entry.get("drafted") and any(AI_POLICY.search(l) or NO_AI_NOTE.search(l) for l in [*ctx.labels, q.description or ""]):
+                continue                                     # the employer asked for answers written without AI
             if isinstance(answer, bool):
                 intent = YesNo(answer)
             elif isinstance(answer, list):
@@ -825,6 +830,15 @@ class AnswerEngine:
 
         def decline_only(q, label, ctx):
             return Choice([DECLINE.pattern])
+
+        def pronouns(q, label, ctx):
+            mine = (ident.get("pronouns") or "").strip()
+            if not mine or re.search(r"pronunc|pronounc", label):
+                return decline_only(q, label, ctx) if q.kind in CHOICE_KINDS else None
+            first = re.escape(mine.split("/")[0].strip())
+            if q.kind in CHOICE_KINDS:
+                return Choice([rf"^{first}\s*/", rf"^{first}\b"])
+            return Text(mine) if q.kind == "text" else None
 
         def orientation(q, label, ctx):
             return Choice([r"heterosexual|straight", DECLINE.pattern])
@@ -1437,7 +1451,13 @@ class AnswerEngine:
             ("x-further-education", r"further education|graduate school (immediately )?after|"
                                     r"(plan|intend|expect) to pursue an? (master|graduate|ph\.?d|doctor)|"
                                     r"pursue .{0,30}(master'?s|graduate|ph\.?d) (program|degree) after",
-             flag("pursuing_further_education_after_degree", "post-degree plans not stated")),
+             lambda q, label, ctx: Unknown("post-degree plans not stated (set logistics.pursuing_further_education_after_degree)")
+             if log.get("pursuing_further_education_after_degree") is None
+             else Choice([r"^no\b"]) if q.kind in CHOICE_KINDS and not log["pursuing_further_education_after_degree"]
+             and not pick_yes_no(q.options, True)
+             else YesNo(bool(log["pursuing_further_education_after_degree"])) if q.kind in CHOICE_KINDS
+             else Text(log.get("further_education_text") or ("Yes" if log["pursuing_further_education_after_degree"] else "No"))
+             if q.kind in ("text", "textarea") else None),
             ("x-notice-period", r"notice period|restrictions on your availability to start",
              flag("notice_period_or_start_restrictions", "not stated")),
             ("x-licenses", r"licenses? or registrations?|series 7|\bfinra\b|security licenses?|actively maintaining",
@@ -1634,7 +1654,7 @@ class AnswerEngine:
             ("school", r"\b(school|university|college|institution)\b(?!.{0,30}\b(year|gpa|email|location|"
                        r"city|state|graduat\w*|start|end|major|degree)\b)", school),
             ("name", r"\bname\b|\bsignature\b|\be-?sign(ature)?\b", name),
-            ("pronouns", r"pronoun", decline_only),
+            ("pronouns", r"pronoun", pronouns),
             ("email", r"^e-?mail|e-?mail address", t(ident["email"])),
             ("phone-type", r"phone (device )?type", t(ident["phone_type"])),
             ("phone-country", r"country (calling )?code|phone country", lambda *_: Choice(
@@ -1673,7 +1693,8 @@ class AnswerEngine:
                 links["github"].rstrip("/").rsplit("/", 1)[-1] if re.search(r"username|handle|user ?name", label)
                 else links["github"])),
             ("social", r"twitter|\bx\.com|instagram|facebook|tiktok", skip),
-            ("portfolio", r"website|portfolio|personal (site|page|url)|other (link|url)|your blog\b",
+            ("portfolio", r"website|portfolio|personal (site|page|url)|other (link|url)|your blog\b|"
+                          r"code sample|samples? of (your )?(code|work)|program link",
              lambda q, label, ctx: None if q.kind == "textarea" and not re.search(
                  r"link|url|portfolio|website|github", label) else Text(links["portfolio"])),
 
@@ -1850,6 +1871,17 @@ def existing_file(path: str | None) -> str | None:
     if not p.is_absolute():
         p = config.BASE / p
     return str(p) if p.is_file() else None
+
+
+def load_shared_answers() -> list[dict]:
+    """Answers kept in git (shared_answers.json): essays and preferences with nothing private in them."""
+    path = config.BASE / "shared_answers.json"
+    if not path.exists() or os.environ.get("INTERNSHIP_AGENT_NO_SHARED"):
+        return []
+    try:
+        return list(json.loads(path.read_text(encoding="utf-8")).get("custom_answers") or [])
+    except ValueError:
+        return []
 
 
 def load_custom_answers(path: Path | None = None) -> list[dict]:

@@ -11,7 +11,8 @@
     "phone_dashed": "",
     "phone_digits": "",
     "phone_type": "",
-    "country_code": ""
+    "country_code": "",
+    "pronouns": ""
   },
   "address": {
     "line1": "",
@@ -119,7 +120,8 @@
     "winter_spring_available": null,
     "winter_spring_text": "",
     "acknowledge_ai_policies": null,
-    "requires_housing": null
+    "requires_housing": null,
+    "further_education_text": ""
   },
   "eeo": {
     "gender": "",

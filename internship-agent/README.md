@@ -172,6 +172,18 @@ submitting is also remembered in `custom_answers.json` for the next form. Questi
 to attest to authorship or AI use are never auto-answered, never remembered, and stop essay
 drafting on that form.
 
+## Where answers live
+
+| File | In git? | Holds |
+|---|---|---|
+| `candidate_profile.json` | no | identity, contact, address, work authorization, demographics, logistics, and any `custom_answers` that touch those |
+| `shared_answers.json` | yes | essays, behavioural stories and preference answers with nothing private in them; loaded automatically |
+| `custom_answers.json` | no | answers learned from what you type during `--local-blitz` |
+
+Order of precedence: `custom_answers.json`, then the profile, then `shared_answers.json`, then the built-in rules.
+Entries marked `"drafted": true` were written with AI help; they are withheld on any form that asks for answers
+written without AI, and the agent never ticks an "I did not use AI" attestation for you.
+
 ## Cover letter
 
 ```bash

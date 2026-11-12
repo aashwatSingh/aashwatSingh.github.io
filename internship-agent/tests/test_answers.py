@@ -133,6 +133,20 @@ def test_workday_question_wordings():
             options=["Yes", "No"])
 
 
+def test_pronouns_and_drafted_answers():
+    assert filled("What are your preferred pronouns?", options=["She/Her", "He/Him", "They/Them", "Prefer not to say"]) == "He/Him"
+    assert filled("Pronouns", options=["He/him/his", "She/her/hers", "They/them/theirs"]) == "He/him/his"
+    from answers import AnswerEngine
+    import copy
+    profile = copy.deepcopy(ENGINE.p)
+    profile["custom_answers"] = [{"pattern": "why this team", "answer": "A drafted paragraph about the team.", "drafted": True}]
+    engine = AnswerEngine(profile, custom_answers=[])
+    q = Question(label="Why this team?", kind="textarea", required=True)
+    assert engine.resolve(q, Context(company="Acme", labels=["Why this team?"])).action == "fill"
+    held = engine.resolve(q, Context(company="Acme", labels=["Why this team?", "AI Policy for Application"]))
+    assert held.rule != "custom"                          # withheld where the employer asks for non-AI answers
+
+
 # --- things that must not be answered by keyword accident --------------------
 @pytest.mark.parametrize("label,kind", [
     ("Why did you want to become an engineer in your respective discipline?", "textarea"),

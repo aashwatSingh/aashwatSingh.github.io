@@ -57,6 +57,18 @@ def load_profile(path: Path | None = None) -> dict:
     if not resume.is_absolute():
         resume = BASE / resume
     profile["resume_path"] = str(resume)
+    # Essays and behavioural stories can live in the git-tracked shared_answers.json; the profile wins.
+    shared = BASE / "shared_answers.json"
+    if shared.exists():
+        try:
+            data = json.loads(shared.read_text(encoding="utf-8"))
+        except ValueError:
+            data = {}
+        for block in ("essays", "behavioral"):
+            merged = dict(data.get(block) or {})
+            merged.update(profile.get(block) or {})
+            if merged:
+                profile[block] = merged
     # Password may come from the environment instead of the file.
     env_pw = os.environ.get("ATS_PORTAL_PASSWORD")
     if env_pw:
