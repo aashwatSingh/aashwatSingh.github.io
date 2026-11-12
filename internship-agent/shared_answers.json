@@ -1,0 +1,313 @@
+{
+ "_note": "Git-tracked answers: essays and preferences only. Nothing about contact details, address, immigration status or demographics belongs here; those stay in candidate_profile.json. 'drafted' answers are withheld on forms that ask for answers written without AI.",
+ "essays": {
+  "why_software_engineering": "I chose software engineering because I love taking messy, manual workflows and turning them into reliable, high-speed systems that people can actually use. Whether I am building a solo full-stack expense tracker for freelancers (Tax Shoebox) where I engineered a cascading cache in TypeScript and Supabase to cut LLM API calls by 85%, or building an automated Python document-processing pipeline at Outamation that cut manual mortgage review time by 75%, I am driven by measurable engineering impact. I enjoy working across the entire stack—from designing normalized PostgreSQL schemas with strict Row-Level Security to shipping responsive React interfaces and testing edge cases with Pytest.",
+  "challenging_project": "While building Tax Shoebox, a solo full-stack expense-tracking web app for freelancers using TypeScript, React, and Supabase PostgreSQL, I ran into a major cost and latency bottleneck: calling the Claude API to categorize every uploaded receipt line item was slow and expensive at scale. To solve this, I architected a 4-tier cascading categorization cache backed by 7 PostgreSQL schema migrations and 5 Supabase Edge Functions—checking user-specific overrides first, then a shared vendor cache, before falling back to the LLM or deterministic rules. This architecture reduced external LLM inference calls by roughly 85% while maintaining strict tenant data isolation via PostgreSQL Row-Level Security."
+ },
+ "behavioral": {
+  "challenge": "At Outamation I built a Python pipeline that extracts structured financial fields from mortgage loan PDFs. The hard part was that scanned pages arrived in noisy, inconsistent layouts, so extraction was unreliable at first. I worked through it methodically: I preprocessed pages with OpenCV, tuned how PyMuPDF and LlamaIndex parsed each layout, and backed every fix with a Pytest regression suite so that solving one layout could not quietly break another. The pipeline reached 95% field-extraction accuracy and cut manual document review time by 75%. It taught me to treat debugging as a measurement problem: reproduce the failure, pin it with a test, then fix it.",
+  "teamwork": "At HackWesTX VI my four-person team built WashBuddy, an AI laundry-sorting web app. My part was integrating the React and Gemini front end with the Node.js/MongoDB backend, which meant agreeing on data shapes with my teammates early and keeping the classification and grouping logic in step with the interface as both changed over the weekend. We shipped an app that sorts clothing by type and fabric across four categories with 94% accuracy and won Best Hack for Beginners. I have also led a team: as Lead Researcher at the Web3 Acceleration Association I directed student researchers analyzing 100+ on-chain transactions and co-authored the paper we presented.",
+  "initiative": "Tax Shoebox started as my own idea and I built it solo, from an empty repository to a working full-stack expense tracker for freelancers filing Schedule C. With no one handing me requirements, I scoped it myself: a TypeScript and React front end on Supabase PostgreSQL, with 7 schema migrations, 5 Edge Functions and row-level security. When calling the Claude API for every receipt line item proved slow and expensive, I designed a 4-tier cascading categorization cache (user override, shared vendor cache, LLM, deterministic fallback) that cut LLM calls by about 85%.",
+  "learning": "As an AI/ML Research Trainee with the Computing Research Association I had an eight-week sprint to become productive with OCR and computer-vision models. I built OCR and vision pipelines to parse, clean and extract text from low-quality scans and photographs, then evaluated and fine-tuned PyTorch vision and NLP architectures across multi-format document layouts, reducing Character Error Rate by 18% on noisy test benchmarks. Working against that deadline taught me to get a baseline running first, measure it, and learn exactly what the next improvement requires."
+ },
+ "custom_answers": [
+  {
+   "pattern": "comfortable with working onsite at our san francisco hq",
+   "company": "^Astranis$",
+   "answer": true
+  },
+  {
+   "pattern": "fundamental knowledge of computer architecture and networks",
+   "answer": true
+  },
+  {
+   "pattern": "most interesting (paper|blog post|article|documentation).{0,60}(read|seen)",
+   "answer": "While building Tax Shoebox and designing Project Wall-E for the UT Dallas AIMD Case Competition, I read Anthropic's engineering documentation on prompt caching and context optimization alongside edge-AI clinical triage latency benchmarks. Seeing how deterministic prefix caching reduces both tail latency and token overhead inspired me to architect a 4-tier cascading categorization cache (user override -> shared vendor cache -> LLM -> deterministic fallback) in Supabase PostgreSQL, cutting LLM inference calls by 85%."
+  },
+  {
+   "pattern": "describe your previous experience with robots",
+   "answer": "I have not worked on physical robots yet, so I want to be direct about that. My closest experience is the perception side: at Outamation I built a Python computer-vision pipeline that preprocesses pages with OpenCV and extracts structured fields with PyMuPDF and LlamaIndex at 95% accuracy, and as an AI/ML Research Trainee with the Computing Research Association I built OCR and PyTorch vision pipelines for unconstrained camera images, reducing Character Error Rate by 18%. For Project Wall-E I compared published latency benchmarks across edge-inference models for real-time use. I would like to apply that vision and real-time inference background to robots.",
+   "drafted": true
+  },
+  {
+   "pattern": "experience with human-machine interaction programs",
+   "answer": "I have not worked on a human-machine interaction program directly. The closest work I have done is building software that people rely on in a review loop: at Outamation I built a Python document-processing pipeline (OpenCV, PyMuPDF, LlamaIndex) that reached 95% field-extraction accuracy and cut manual review time by 75%, backed by a Pytest regression suite. For Project Wall-E I compared published latency benchmarks across edge-inference models for real-time triage. I am interested in hardware-in-the-loop work because it demands that same measured, test-first discipline.",
+   "drafted": true
+  },
+  {
+   "pattern": "favorite c\\+\\+ feature",
+   "answer": "RAII. Tying a resource's lifetime to an object's scope means memory, file handles and locks are released deterministically, without a garbage collector and without remembering to clean up on every exit path. My C++ is from coursework at UT Dallas alongside Computer Architecture and Digital Systems, where smart pointers (unique_ptr for single ownership, shared_ptr only when ownership is really shared) made ownership explicit in the type, and where I learned why cache-friendly, contiguous data structures matter. That same concern for predictable performance carried into Project Forge, where I indexed high-frequency lookup columns in PostgreSQL.",
+   "drafted": true
+  },
+  {
+   "pattern": "what interests you most about android development",
+   "answer": "I have not shipped an Android app yet, so my interest comes from the product side: on a phone, performance, battery and flaky networks are constraints the user feels immediately. I have built user-facing web software end to end, including Tax Shoebox (TypeScript, React, Supabase PostgreSQL), where a cascading cache cut LLM calls by about 85% to keep the interface fast. I want to bring that focus on responsiveness and tested, reliable code to Android, and learn Kotlin and the platform properly from engineers who ship at scale.",
+   "drafted": true
+  },
+  {
+   "pattern": "built or modified an android app before",
+   "answer": "No, I have not built or modified an Android app yet. My app experience is on the web: Tax Shoebox (TypeScript, React, Supabase PostgreSQL) and WashBuddy (React front end on a Node.js/MongoDB backend). I work in Java and am ready to learn Kotlin and Jetpack Compose.",
+   "drafted": true
+  },
+  {
+   "pattern": "used any ai tools for software development",
+   "answer": "Yes. I use AI assistants day to day for coding and debugging, and I build with LLM APIs directly: Tax Shoebox uses the Claude API for expense categorization behind a 4-tier cache that cut LLM calls by about 85%, WashBuddy uses the Gemini API for classification, and at Outamation I used LlamaIndex for structured extraction from PDFs. I review and test what the tools produce, with Pytest suites for anything that matters.",
+   "drafted": true
+  },
+  {
+   "pattern": "which ai tools? are your? familiar with",
+   "answer": "I have built with the Claude API (Tax Shoebox), the Gemini API (WashBuddy), LlamaIndex (the Outamation document pipeline) and PyTorch (OCR and vision models with the Computing Research Association). I am interested in going deeper on agent workflows and on evaluating LLM systems rigorously.",
+   "drafted": true
+  },
+  {
+   "pattern": "experience with large language models",
+   "answer": "My LLM experience is applied rather than research. In Tax Shoebox I use the Claude API to categorize expense line items and designed a 4-tier cascading cache (user override, shared vendor cache, LLM, deterministic fallback) that cut LLM inference calls by about 85%. At Outamation I used LlamaIndex to extract structured financial fields from mortgage PDFs at 95% accuracy. In WashBuddy I integrated the Gemini API for classification. With the Computing Research Association I fine-tuned PyTorch vision and NLP architectures, reducing Character Error Rate by 18%. I have not trained large language models from scratch.",
+   "drafted": true
+  },
+  {
+   "pattern": "property/affinity prediction models versus generative design models",
+   "answer": "I do not have experience with protein or antibody models, either property/affinity prediction or generative design, and I do not want to overstate it. My machine-learning experience is in vision and NLP: I evaluated and fine-tuned PyTorch architectures with the Computing Research Association, reducing Character Error Rate by 18% on noisy benchmarks, and built a document-extraction pipeline at Outamation with 95% accuracy. I am interested in learning how those evaluation habits transfer to protein design.",
+   "drafted": true
+  },
+  {
+   "pattern": "list your publications or preprints",
+   "answer": "I co-authored and presented one research paper, on secure-transaction models for decentralized token infrastructure, as Lead Researcher at the Web3 Acceleration Association. I directed the student team and led the analysis of 100+ on-chain transactions that the paper's security and integrity findings are based on. I have no publications in protein design or machine learning.",
+   "drafted": true
+  },
+  {
+   "pattern": "shows how you demonstrate a high level of grit",
+   "answer": "At Outamation I built a Python pipeline that extracts structured financial fields from mortgage loan PDFs. The hard part was that scanned pages arrived in noisy, inconsistent layouts, so extraction was unreliable at first. I worked through it methodically: I preprocessed pages with OpenCV, tuned how PyMuPDF and LlamaIndex parsed each layout, and backed every fix with a Pytest regression suite so that solving one layout could not quietly break another. The pipeline reached 95% field-extraction accuracy and cut manual document review time by 75%. It taught me to treat debugging as a measurement problem: reproduce the failure, pin it with a test, then fix it.",
+   "drafted": true
+  },
+  {
+   "pattern": "most recent user-facing feature you personally shipped",
+   "answer": "- Feature: automatic expense categorization in Tax Shoebox, my solo full-stack expense tracker for freelancers filing Schedule C (TypeScript, React, Supabase PostgreSQL).\n- What I built: a 4-tier cascading categorization cache (user override, shared vendor cache, Claude API, deterministic fallback) across 5 Edge Functions with row-level security.\n- Result: about 85% fewer LLM calls, so categories appear quickly and each user's data stays isolated.",
+   "drafted": true
+  },
+  {
+   "pattern": "engineering highlight reel",
+   "answer": "- Outamation: built a Python document-processing pipeline (OpenCV, PyMuPDF, LlamaIndex) that extracts structured fields from mortgage PDFs at 95% accuracy and cut manual review time by 75%.\n- Tax Shoebox: solo full-stack app (TypeScript, React, Supabase PostgreSQL) with a 4-tier cache that cut LLM calls by about 85%.\n- Computing Research Association: fine-tuned PyTorch vision and NLP models, reducing Character Error Rate by 18%.\n- WashBuddy: React and Gemini front end on Node.js/MongoDB, 94% sorting accuracy, Best Hack for Beginners at HackWesTX VI.",
+   "drafted": true
+  },
+  {
+   "pattern": "what unique skills, abilities, or experience would you bring",
+   "answer": "I bring a habit of measuring what I build and proving it with tests. At Outamation I built a Python document-processing pipeline with OpenCV, PyMuPDF and LlamaIndex that reached 95% field-extraction accuracy and cut manual review time by 75%, with a Pytest suite guarding against regressions. On my own I built Tax Shoebox, a TypeScript, React and Supabase PostgreSQL app whose cascading cache cut LLM calls by about 85%. I am comfortable across the stack, from schema design and row-level security to the interface.",
+   "drafted": true
+  },
+  {
+   "pattern": "working in technology \\(wit\\) internship program",
+   "answer": "My interest in technology, mentorship and community has grown through student organizations. As Lead Researcher at the Web3 Acceleration Association I directed a student research team analyzing 100+ on-chain transactions and co-authored the paper we presented, which taught me to explain technical findings to non-engineering audiences. As a Student Researcher with AIMD (AI in Medicine) at UT Dallas I designed Project Wall-E, an edge-AI triage proposal for rural primary care, for the AIMD Case Competition. At HackWesTX VI my four-person team built WashBuddy and won Best Hack for Beginners. Leading and learning alongside peers in these groups shaped how I work: share early, ask for feedback, and help the next person along.",
+   "drafted": true
+  },
+  {
+   "pattern": "interest in pursuing an internship in the financial industry",
+   "answer": "What draws me to a hedge fund environment is that software quality is measured directly: latency, correctness and reliability all show up in results. That matches how I like to work. At Outamation I built a document-processing pipeline for mortgage loan PDFs that extracts structured financial fields at 95% accuracy, and in Tax Shoebox I designed a cascading cache that cut LLM inference calls by about 85%. I have not worked in trading before, and I want to learn how engineers build and verify systems where performance and correctness matter this much.",
+   "drafted": true
+  },
+  {
+   "pattern": "what specific types of work are you most interested in focusing on",
+   "answer": "I am most interested in development work on data pipelines and the infrastructure around them: building systems that ingest messy inputs, produce reliable structured output, and are backed by tests. That is the work I have done so far, in a Python document-processing pipeline at Outamation (95% extraction accuracy) and in the PostgreSQL schema design and indexing for Project Forge. I would also like exposure to performance-sensitive code, since my coursework in Computer Architecture and C++ has made me curious about it.",
+   "drafted": true
+  },
+  {
+   "pattern": "solve any problem that impacts your daily life",
+   "answer": "Paperwork. Students and freelancers lose hours to documents that software should read for them: receipts, tax forms, loan and immigration paperwork. I have worked on two pieces of this. At Outamation I built a pipeline that extracts structured fields from mortgage PDFs at 95% accuracy, cutting manual review time by 75%, and I built Tax Shoebox so freelancers filing Schedule C can categorize expenses automatically. I would solve it the same way at larger scale: reliable extraction, a human check where confidence is low, and tests that pin every layout that once failed.",
+   "drafted": true
+  },
+  {
+   "pattern": "intersection of technology, policy, and ethics",
+   "answer": "I would work on making automated document decisions auditable. Systems increasingly read people's financial and medical paperwork, and when extraction is wrong the person affected rarely learns why. At Outamation I built a pipeline that extracts fields from mortgage PDFs at 95% accuracy, which also means 5% of fields need a person. My approach would be technical and procedural together: record the evidence behind every extracted value, route low-confidence cases to human review, isolate each person's data (I used PostgreSQL row-level security for this in Tax Shoebox and Project Forge), and give people a way to see and contest what the system read.",
+   "drafted": true
+  },
+  {
+   "pattern": "qualities do you believe make someone a great agent engineer",
+   "answer": "A great agent engineer treats an LLM as an unreliable component and builds the system so the product is still dependable: clear fallbacks, measurement, and tests. That is how I built Tax Shoebox, where a 4-tier cascade (user override, shared vendor cache, Claude API, deterministic fallback) cut LLM calls by about 85% and keeps working when the model is wrong or slow. At Outamation I used LlamaIndex in a document pipeline that reached 95% extraction accuracy, with a Pytest suite pinning every failure I fixed. I am early in my career, but that habit of measuring and testing LLM behavior is what I would bring.",
+   "drafted": true
+  },
+  {
+   "pattern": "actively interviewing\\? if so",
+   "answer": "I am applying for Summer 2027 internships and have no outstanding offers or deadlines at this time, so my timeline is flexible.",
+   "drafted": true
+  },
+  {
+   "pattern": "how you use ai to get things done",
+   "answer": "In Tax Shoebox I built a 4-tier categorization cascade (user override, shared vendor cache, Claude API, deterministic fallback) that cut LLM calls by about 85% while keeping expense categories accurate.",
+   "drafted": true
+  },
+  {
+   "pattern": "experience with humanoid robots, specifically",
+   "answer": false
+  },
+  {
+   "pattern": "which team best fits your background and career goals",
+   "answer": "Perception Systems",
+   "company": "^Persona\\ AI$"
+  },
+  {
+   "pattern": "do you have industry experience with llms",
+   "answer": true
+  },
+  {
+   "pattern": "which type of software engineering opportunity are you most interested in",
+   "answer": "Backend Engineering"
+  },
+  {
+   "pattern": "hands-on experience with sql and python for data work",
+   "answer": "Used both extensively in coursework/projects"
+  },
+  {
+   "pattern": "available to begin a potential full-time role (before september 2028|in 2028)",
+   "answer": true
+  },
+  {
+   "pattern": "which opportunity are you most interested in",
+   "answer": "Applied AI",
+   "company": "^Datadog$"
+  },
+  {
+   "pattern": "which area is your second choice",
+   "answer": "Backend",
+   "company": "^Datadog$"
+  },
+  {
+   "pattern": "which area is your third choice",
+   "answer": "Data Engineering",
+   "company": "^Datadog$"
+  },
+  {
+   "pattern": "which dates do you prefer to work full-time",
+   "answer": "May 24, 2027 - August 20, 2027",
+   "company": "^Datadog$"
+  },
+  {
+   "pattern": "most important factors to you",
+   "answer": [
+    "Challenging technical work",
+    "Career growth"
+   ]
+  },
+  {
+   "pattern": "in process with other companies that would require us to be time sensitive",
+   "answer": false
+  },
+  {
+   "pattern": "eligible for northeastern university's co-op program",
+   "answer": false
+  },
+  {
+   "pattern": "did you attend a fall career fair this year",
+   "answer": "No"
+  },
+  {
+   "pattern": "participated in curriculum purchasing decisions",
+   "answer": false
+  },
+  {
+   "pattern": "including a link on your resume to samples of projects",
+   "answer": true
+  },
+  {
+   "pattern": "completed any internships\\? if yes, were any of them at a hedge fund",
+   "answer": "Yes, I have internship experience, but not within a hedge fund",
+   "drafted": true
+  },
+  {
+   "pattern": "which co-op work term options are you available for",
+   "answer": [
+    "2027 Summer Semester Only"
+   ]
+  },
+  {
+   "pattern": "spring co-op, summer internship, or both",
+   "answer": [
+    "Summer 2027 Internship"
+   ]
+  },
+  {
+   "pattern": "where are you spending summer 2026",
+   "answer": "Other"
+  },
+  {
+   "pattern": "any reason why you would not be able to perform the duties",
+   "answer": "No."
+  },
+  {
+   "pattern": "please confirm your knowledge of this by selecting 'yes'",
+   "answer": true
+  },
+  {
+   "pattern": "allow for .{0,20} to use the information submitted in this application",
+   "answer": true
+  },
+  {
+   "pattern": "^point of data transfer$",
+   "answer": "Acknowledge"
+  },
+  {
+   "pattern": "^personal information policy$",
+   "answer": true
+  },
+  {
+   "pattern": "please enter your relevant employment and military service above",
+   "answer": "Thank you"
+  },
+  {
+   "pattern": "may we contact your current employer",
+   "answer": true
+  },
+  {
+   "pattern": "have you been employed by lyft",
+   "answer": false
+  },
+  {
+   "pattern": "please review the linked document",
+   "answer": "I acknowledge",
+   "company": "^Lyft$"
+  },
+  {
+   "pattern": "reside in commutable proximity to our lyft office",
+   "answer": "I am willing to relocate before starting employment"
+  },
+  {
+   "pattern": "scholarship, fellowships, or initiatives we support",
+   "answer": [
+    "No"
+   ]
+  },
+  {
+   "pattern": "graduate gpa: please convert",
+   "answer": "Not Applicable"
+  },
+  {
+   "pattern": "tutored or ta'?d",
+   "answer": false
+  },
+  {
+   "pattern": "participated in any of the following mathematics competitions",
+   "answer": [
+    "I have not participated in any of these competitions"
+   ]
+  },
+  {
+   "pattern": "select the primary team you'd like to be considered for",
+   "answer": "Platform (SF)",
+   "company": "^Coinbase$"
+  },
+  {
+   "pattern": "not on your (cv|resume)|outside of (the projects|what is|what's) (listed )?on your (cv|resume)",
+   "answer": "Outside of the projects listed on my resume, I led the core development of WalkThru during HackUTD with a four-person team—a web application designed to streamline and document student housing move-in/move-out inspections. Taking ownership of the architecture under a 24-hour hackathon deadline and iterating on it afterward as a startup prototype taught me how to scope an MVP rapidly, coordinate across teammates under pressure, and build around real user pain points."
+  },
+  {
+   "pattern": "which of our 5 focus areas resonates with you",
+   "answer": "Clear Outcomes resonates with me most. Students make better decisions when they can see accurate information about where a program actually leads, and producing that information is a data-quality problem I enjoy: messy inputs have to become reliable, structured facts. At Outamation I built a Python pipeline with OpenCV, PyMuPDF and LlamaIndex that extracts structured fields from mortgage documents at 95% accuracy and cut manual review time by 75%. In Tax Shoebox I designed PostgreSQL row-level security so each user's data stays isolated, plus a cache that cut LLM calls by about 85%. As a student choosing my own path, I would like to help make outcome data trustworthy and easy to use.",
+   "company": "^Strada\\ Education\\ Foundation$",
+   "drafted": true
+  },
+  {
+   "pattern": "supporting our us government business out of our honolulu",
+   "answer": "I want to build software where reliability matters to the people depending on it, and supporting government users is that kind of mission work. I am glad to relocate to Honolulu and work on site for the internship.",
+   "company": "^Palantir$",
+   "drafted": true
+  }
+ ]
+}

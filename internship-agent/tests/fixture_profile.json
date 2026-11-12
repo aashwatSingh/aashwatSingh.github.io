@@ -1,0 +1,226 @@
+{
+  "resume_path": "./resume.pdf",
+  "identity": {
+    "first_name": "Jordan",
+    "middle_name": "",
+    "last_name": "Rivera",
+    "preferred_name": "Jordan",
+    "full_name": "Jordan Rivera",
+    "email": "jordan@example.com",
+    "phone_formatted": "(555) 010-0199",
+    "phone_dashed": "555-010-0199",
+    "phone_digits": "5550100199",
+    "phone_type": "Mobile",
+    "country_code": "+1",
+    "pronouns": "He/Him"
+  },
+  "address": {
+    "line1": "1 Example Way",
+    "line2": "",
+    "city": "Springfield",
+    "state": "Illinois",
+    "state_abbr": "IL",
+    "postal_code": "62701",
+    "country": "United States"
+  },
+  "links": {
+    "linkedin": "https://www.linkedin.com/in/example",
+    "github": "https://github.com/example",
+    "portfolio": "https://github.com/example"
+  },
+  "portal": {
+    "username": "jordan@example.com",
+    "password": "",
+    "passwords": []
+  },
+  "education": {
+    "school": "Example State University",
+    "school_aliases": [
+      "Example State"
+    ],
+    "school_location": "Springfield, IL",
+    "degree": "Bachelor of Science",
+    "degree_short": "B.S.",
+    "degree_level": "Bachelor's",
+    "major": "Computer Science",
+    "minor": "",
+    "class_standing": "Junior",
+    "start_month": 8,
+    "start_year": 2024,
+    "grad_month": 5,
+    "grad_year": 2028,
+    "gpa": "2.9",
+    "gpa_scale": "4.0",
+    "coursework": "Data Structures, Algorithms",
+    "enrollment_status": "Currently Enrolled Full-Time",
+    "class_standing_text": "Junior (3rd Year by Summer 2027)",
+    "sat_score": null,
+    "act_score": null,
+    "transcript_path": "./transcript.pdf",
+    "school_email": null,
+    "high_school_graduation": null,
+    "high_school_name": null
+  },
+  "work_authorization": {
+    "authorized_to_work_us": true,
+    "requires_sponsorship": true,
+    "over_18": true,
+    "us_person": null,
+    "apply_when_no_sponsorship": false,
+    "citizenship_status": null,
+    "has_security_clearance": false,
+    "internship_work_authorization": null,
+    "future_sponsorship_visa": null,
+    "requires_sponsorship_now": null,
+    "visa_category": null,
+    "country_of_citizenship": null
+  },
+  "logistics": {
+    "willing_to_relocate": true,
+    "onsite": true,
+    "hybrid": true,
+    "remote": true,
+    "earliest_start": "2027-05-24",
+    "latest_end": "2027-08-20",
+    "desired_hourly_rate": "40",
+    "desired_compensation_text": "Open / Standard Intern Rate",
+    "heard_about": [
+      "Job Board",
+      "LinkedIn",
+      "Handshake",
+      "Indeed"
+    ],
+    "previously_worked_or_applied": false,
+    "non_compete": false,
+    "relatives_at_company": false,
+    "worked_for_us_federal_government": false,
+    "desired_annual_salary": "80000",
+    "availability_text": "Summer 2027, 10-12 weeks",
+    "preferred_office_order": [
+      "TX",
+      "CA",
+      "WA",
+      "NY",
+      "Remote"
+    ],
+    "client_or_competitor_employment": false,
+    "government_official": false,
+    "notice_period_or_start_restrictions": false,
+    "professional_licenses": [],
+    "has_outstanding_offers": false,
+    "accept_arbitration_agreements": null,
+    "meets_basic_qualifications": true,
+    "pursuing_further_education_after_degree": null,
+    "has_prior_internship": null,
+    "can_perform_essential_functions": true,
+    "comfortable_with_defense_work": true,
+    "prior_internship_count": null,
+    "travel_percentage": null,
+    "consents_to_background_check": null,
+    "consents_to_interview_recording": null,
+    "outside_business_activities": null,
+    "cover_letter_path": null,
+    "preferred_start": "2027-05-24",
+    "latest_start": null,
+    "consents_to_drug_screening": true,
+    "consents_to_reference_checks": true,
+    "excluded_from_federal_programs": false,
+    "winter_spring_available": false,
+    "winter_spring_text": "",
+    "acknowledge_ai_policies": true,
+    "requires_housing": false,
+    "further_education_text": ""
+  },
+  "eeo": {
+    "gender": "Female",
+    "sexual_orientation": "",
+    "hispanic_or_latino": false,
+    "race": "White",
+    "race_subcategory": "",
+    "veteran": false,
+    "disability": false
+  },
+  "skills": {
+    "languages": [
+      "Java",
+      "Python"
+    ],
+    "backend": [
+      "PostgreSQL"
+    ],
+    "tools": [
+      "Git"
+    ],
+    "never_claim": [
+      "Docker",
+      "REST APIs"
+    ],
+    "preferred_language": "Python",
+    "years_experience_internship": "1",
+    "years_experience_full_time": "0"
+  },
+  "experience": [
+    {
+      "title": "Software Intern",
+      "company": "Example Labs",
+      "location": "Remote",
+      "start": "2026-01",
+      "end": "2026-03",
+      "current": false,
+      "bullets": [
+        "Built a Python data pipeline with Pytest coverage."
+      ]
+    }
+  ],
+  "essays": {
+    "why_software_engineering": "I like building reliable software that people use. I built Ledgerly to learn the whole stack.",
+    "challenging_project": "I built a caching layer for Ledgerly that cut API calls by 60%. The hard part was invalidation."
+  },
+  "projects": [
+    {
+      "name": "Ledgerly",
+      "tagline": "a full-stack budgeting web app",
+      "stack": [
+        "TypeScript",
+        "React",
+        "PostgreSQL"
+      ],
+      "focus": [
+        "fullstack",
+        "backend",
+        "web",
+        "database"
+      ],
+      "summary": "Ledgerly, a full-stack TypeScript, React, and PostgreSQL budgeting app with a caching layer that cut API calls by 60%",
+      "detail": "Built a budgeting web app with a caching layer that cut API calls by 60%."
+    },
+    {
+      "name": "the Example Labs pipeline",
+      "tagline": "a Python data pipeline",
+      "stack": [
+        "Python",
+        "Pytest"
+      ],
+      "focus": [
+        "ai",
+        "ml",
+        "data",
+        "python",
+        "pipeline"
+      ],
+      "summary": "a Python data pipeline at Example Labs that cut manual review time by 40%",
+      "detail": "Built a Python data pipeline with Pytest coverage that cut manual review time by 40%."
+    }
+  ],
+  "student_organizations": [
+    "Robotics Club"
+  ],
+  "behavioral": {
+    "challenge": "At Example Labs I debugged a flaky data pipeline and cut review time by 40%.",
+    "teamwork": "On a four-person hackathon team I integrated the front end with the backend.",
+    "initiative": "I built Ledgerly on my own from an empty repository.",
+    "learning": "In an eight-week program I learned a new framework and shipped a pipeline."
+  },
+  "spoken_languages": null,
+  "custom_answers": []
+}

@@ -1,0 +1,9 @@
+# Core (deterministic Greenhouse / Lever / Ashby adapters)
+playwright>=1.49
+openpyxl>=3.1
+pandas>=2.0
+requests>=2.31
+
+# Optional: LLM fallback for unsupported ATS portals and "Why us?" essays.
+# Only used when ANTHROPIC_API_KEY is set.
+#   pip install browser-use anthropic
