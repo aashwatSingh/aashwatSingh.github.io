@@ -167,6 +167,25 @@ class WorkdayAdapter(BaseAdapter):
         except Exception:                                  # noqa: BLE001
             return ""
 
+    _SIGNATURE_JS = """() => [...document.querySelectorAll('[data-automation-id^="formField-"]')]
+        .filter(w => w.offsetParent !== null).map(w => w.getAttribute('data-automation-id')).join('|')"""
+
+    async def _signature(self, page: Page) -> str:
+        try:
+            return await page.evaluate(self._SIGNATURE_JS)
+        except Exception:                                      # noqa: BLE001
+            return ""
+
+    async def _wait_new_page(self, page: Page, old_signature: str, seconds: float = 25) -> None:
+        """The step label changes before the page body: wait until the previous page's fields are gone."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            await page.wait_for_timeout(500)
+            now = await self._signature(page)
+            if now != old_signature and (now or REVIEW_STEP.search(await self.current_step(page))
+                                         or await self._error_page(page)):
+                return
+
     async def _page_ready(self, page: Page) -> None:
         """The step bar updates before the page body: wait for the step's fields and its Next button."""
         try:
@@ -351,7 +370,11 @@ class WorkdayAdapter(BaseAdapter):
     async def fill(self, page: Page, f: FormField, value, profile: dict) -> None:
         if f.widget == "file":
             await page.set_input_files(f"{f.sel} input[type=file]", value)
-            await page.wait_for_timeout(4000)
+            try:                                               # Continue before the upload/parse finishes breaks the page
+                await page.get_by_text("successfully uploaded", exact=False).first.wait_for(state="visible", timeout=30000)
+            except PWTimeout:
+                pass
+            await page.wait_for_timeout(2500)
             return
         if f.widget == "text":
             await page.locator(f"{f.sel} textarea, {f.sel} input:not([type=hidden])").first.fill(str(value))
@@ -499,11 +522,10 @@ class WorkdayAdapter(BaseAdapter):
             if await drop.count() and not already:
                 await drop.set_input_files(profile["resume_path"])
                 try:                                       # Continue before the upload finishes is ignored
-                    await page.wait_for_selector('[data-automation-id="file-upload-successful"], '
-                                                 '[data-automation-id="file-upload-item"]', timeout=25000)
+                    await page.get_by_text("successfully uploaded", exact=False).first.wait_for(state="visible", timeout=30000)
                 except PWTimeout:
                     pass
-                await page.wait_for_timeout(1500)
+                await page.wait_for_timeout(3000)
         except Exception:                                  # noqa: BLE001 - best effort, the page is handed over if needed
             pass
 
@@ -578,7 +600,8 @@ class WorkdayAdapter(BaseAdapter):
 
     async def _enter_wizard(self, page: Page) -> bool:
         """From the posting: Apply, then 'Autofill with Resume' (else 'Apply Manually'). True once a step shows."""
-        await self._dismiss_banner(page)
+        # The cookie banner is left alone: declining it breaks the application session on some tenants,
+        # and controls are scrolled to the centre before clicking so the banner does not cover them.
         await self._click(page, "adventureButton")
         for _ in range(12):                                    # dialog with the choices, or straight to the wizard
             await page.wait_for_timeout(700)
@@ -598,21 +621,14 @@ class WorkdayAdapter(BaseAdapter):
             await page.wait_for_timeout(700)
         return False
 
-    async def _dismiss_banner(self, page: Page) -> None:
-        """Cookie banners are sticky and cover controls; decline (or close) once."""
-        for aid in ("legalNoticeDeclineButton", "legalNoticeAcceptButton"):
-            if await self._visible(page, aid):
-                try:
-                    await page.locator(AID.format(aid)).first.click(timeout=2500)
-                    await page.wait_for_timeout(400)
-                except Exception:                              # noqa: BLE001
-                    pass
-                return
-
     async def _error_page(self, page: Page) -> bool:
         hit = page.get_by_text("Something went wrong", exact=False)
-        try:                                                   # the text also sits hidden in the page template
-            return await hit.count() > 0 and await hit.first.is_visible()
+        try:                                                   # the text also sits in the page template: it is the
+            if not (await hit.count() > 0 and await hit.first.is_visible()):   # error page only when no form shows
+                return False
+            fields = await page.evaluate("""() => [...document.querySelectorAll('[data-automation-id^="formField-"]')]
+                                                   .filter(w => w.offsetParent !== null).length""")
+            return fields == 0
         except Exception:                                      # noqa: BLE001
             return False
 
@@ -664,20 +680,15 @@ class WorkdayAdapter(BaseAdapter):
                 break
             await self._page_ready(page)
             if await self._error_page(page):                   # a refresh did not clear Workday's error page:
-                if restarts >= 2:                              # back off, then resume the draft from the posting
+                if restarts >= 3:
                     await _screenshot(page, shot_path)
                     return ApplyResult(MANUAL_REVIEW, "WORKDAY_PAGE", f"[{step}] Workday kept showing its "
                                        "'Something went wrong' page; the draft is saved, try again later",
                                        state.answers, state.unknowns, shot_path)
                 restarts += 1
-                await page.wait_for_timeout(20000 * restarts)
-                await page.goto(job["url"], wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT_S * 1000)
-                try:
-                    await page.wait_for_selector(AID.format("adventureButton"), timeout=30000)
-                    await page.wait_for_timeout(1500)
-                    await self._enter_wizard(page)
-                except PWTimeout:
-                    pass
+                await page.wait_for_timeout(4000 * restarts)   # "Please refresh the page and then try again"
+                await page.reload(wait_until="domcontentloaded")
+                await page.wait_for_timeout(3000)
                 continue
             state.handled.clear()
             before = len(state.unknown_fields)
@@ -691,11 +702,15 @@ class WorkdayAdapter(BaseAdapter):
                 problem = "; ".join(f.question.label[:70] for f in page_unknowns[:6])
                 moved = None
                 if not page_unknowns:
+                    await _screenshot(page, shot_path)         # what was filled on this page, for the audit trail
+                    signature = await self._signature(page)
                     for aid in ("bottom-navigation-next-button", "pageFooterNextButton"):
                         if await self._visible(page, aid):
                             await self._click(page, aid)
                             break
-                    moved = await self._wait_step_change(page, step, 15)
+                    moved = await self._wait_step_change(page, step, 20)
+                    if moved and moved != "DONE":
+                        await self._wait_new_page(page, signature)
                     if not moved:
                         problem = await self._errors(page) or "the page did not advance"
             except Exception as exc:                           # noqa: BLE001 - untested territory: hand over
