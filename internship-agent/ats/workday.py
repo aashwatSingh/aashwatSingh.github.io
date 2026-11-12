@@ -533,6 +533,30 @@ class WorkdayAdapter(BaseAdapter):
                            f"Sign in to {host} in the browser window (portal password was not accepted"
                            + (f": {error[:80]}" if error else "") + "; no account was created)")
 
+    async def _enter_wizard(self, page: Page) -> bool:
+        """From the posting: Apply, then 'Autofill with Resume' (else 'Apply Manually'). True once a step shows."""
+        await self._click(page, "adventureButton")
+        for _ in range(12):                                    # dialog with the choices, or straight to the wizard
+            await page.wait_for_timeout(700)
+            choice = ""
+            for x in ("autofillWithResume", "applyManually"):  # the resume parse pre-fills name, school and jobs
+                if await self._visible(page, x):
+                    choice = x
+                    break
+            if choice:
+                await self._click(page, choice)
+                break
+            if await self.current_step(page):
+                break
+        for _ in range(25):
+            if await self.current_step(page) or await self._visible(page, "email"):
+                return True
+            await page.wait_for_timeout(700)
+        return False
+
+    async def _error_page(self, page: Page) -> bool:
+        return await page.get_by_text("Something went wrong", exact=False).count() > 0
+
     # ---- flow ------------------------------------------------------------------------
     async def apply(self, page: Page, job: dict, engine, ctx, *, dry_run: bool, shot_path: str) -> ApplyResult:
         host = urlparse(job["url"]).netloc.lower()
@@ -558,24 +582,7 @@ class WorkdayAdapter(BaseAdapter):
             return blocked
         ctx.job_text = text
 
-        await self._click(page, "adventureButton")
-        for _ in range(12):                                    # dialog with "Apply Manually", or straight to the wizard
-            await page.wait_for_timeout(700)
-            choice = ""
-            for x in ("autofillWithResume", "applyManually"):
-                if await self._visible(page, x):
-                    choice = x
-                    break
-            if choice:                                         # the resume parse pre-fills name, school and jobs
-                await self._click(page, choice)
-                break
-            if await self.current_step(page):
-                break
-        for _ in range(25):
-            if await self.current_step(page) or await self._visible(page, "email"):
-                break
-            await page.wait_for_timeout(700)
-        else:
+        if not await self._enter_wizard(page):
             await _screenshot(page, shot_path)
             return ApplyResult(MANUAL_REVIEW, "FORM_NOT_FOUND", "the application wizard did not open", screenshot=shot_path)
 
@@ -586,12 +593,20 @@ class WorkdayAdapter(BaseAdapter):
             return stopped
 
         # ---------------- experimental from here: pages behind the login ----------------
-        state, learned = FormState(), []
-        for _ in range(14):
+        state, learned, restarts = FormState(), [], 0
+        for _ in range(18):
             step = await self.current_step(page)
             if not step or REVIEW_STEP.search(step):
                 break
             await self._page_ready(page)
+            if await self._error_page(page) and restarts < 2:  # refresh did not clear it: re-enter from the posting
+                restarts += 1
+                await page.wait_for_timeout(5000)
+                await page.goto(job["url"], wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT_S * 1000)
+                await page.wait_for_selector(AID.format("adventureButton"), timeout=25000)
+                if not await self._enter_wizard(page):
+                    break
+                continue
             state.handled.clear()
             before = len(state.unknown_fields)
             try:
