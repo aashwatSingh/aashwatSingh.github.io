@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
 from answers import Decision, Question
+from urls import host_matches
 from ats.base import (MANUAL_REVIEW, SUBMITTED, BaseAdapter, FormField, SubmitWatch, fetch_json,
                       visible_captcha)
 
@@ -88,7 +89,7 @@ class AshbyAdapter(BaseAdapter):
 
     @staticmethod
     def matches(url: str) -> bool:
-        return urlparse(url).netloc.endswith("ashbyhq.com")
+        return host_matches(url, "ashbyhq.com")
 
     def form_url(self, job: dict) -> str:
         p = urlparse(job["url"])

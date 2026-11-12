@@ -9,6 +9,7 @@ import requests
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
 from answers import MONTHS, Decision, Question
+from urls import host_matches
 from ats.base import (MANUAL_REVIEW, SUBMITTED, BaseAdapter, FormField, SubmitWatch, fetch_json,
                       strip_html, visible_captcha)
 
@@ -82,6 +83,23 @@ CODE_STATE_JS = r"""
 EDU_DATE = re.compile(r"^(start|end)-(month|year)--\d+$")
 
 
+GMAIL_CODE_SEARCH = "https://mail.google.com/mail/u/0/#search/greenhouse+security+code+newer_than%3A1h"
+
+
+async def open_code_search(page: Page) -> None:
+    """Open the inbox search for the code in a background tab so the candidate can copy it quickly.
+
+    Only a convenience: the candidate reads the code and types it. The agent never reads mail.
+    """
+    print(f"      Gmail search for the code (opened in a new tab): {GMAIL_CODE_SEARCH}", flush=True)
+    try:
+        tab = await page.context.new_page()
+        await tab.goto(GMAIL_CODE_SEARCH, wait_until="domcontentloaded", timeout=15000)
+        await page.bring_to_front()
+    except Exception:                                      # noqa: BLE001 - the link above still works
+        pass
+
+
 class GreenhouseAdapter(BaseAdapter):
     name = "Greenhouse"
     form_ready_selector = "#application-form"
@@ -89,13 +107,15 @@ class GreenhouseAdapter(BaseAdapter):
     # ---- URL handling -------------------------------------------------------
     @staticmethod
     def matches(url: str) -> bool:
-        return "greenhouse.io" in urlparse(url).netloc or "gh_jid=" in url
+        if "\\" in url or "@" in urlparse(url).netloc:
+            return False
+        return host_matches(url, "greenhouse.io") or "gh_jid=" in url
 
     def form_url(self, job: dict) -> str:
         url = job["url"]
         p = urlparse(url)
         qs = parse_qs(p.query)
-        if p.netloc.endswith("greenhouse.io"):
+        if host_matches(url, "greenhouse.io"):
             m = re.match(r"/([^/]+)/jobs/(\d+)", p.path)
             if m and m.group(1) != "embed":
                 host = "job-boards.eu.greenhouse.io" if ".eu." in p.netloc else "job-boards.greenhouse.io"
@@ -287,6 +307,8 @@ class GreenhouseAdapter(BaseAdapter):
                 if done:
                     return done
                 # A person supplies the code; the runner only focuses the box and presses Submit after.
+                if not focused and self.human_wait_s:
+                    await open_code_search(page)
                 typed = await page.evaluate(CODE_STATE_JS, not focused)
                 focused = True
                 if typed >= 8 and not resubmitted:

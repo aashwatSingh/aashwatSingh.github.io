@@ -121,7 +121,9 @@
     "winter_spring_text": "",
     "acknowledge_ai_policies": null,
     "requires_housing": null,
-    "further_education_text": ""
+    "further_education_text": "",
+    "preferred_end": null,
+    "availability_dates_text": ""
   },
   "eeo": {
     "gender": "",

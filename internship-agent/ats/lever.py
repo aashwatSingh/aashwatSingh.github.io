@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from playwright.async_api import Page
 
 from answers import Decision, Question
+from urls import host_matches
 from ats.base import (MANUAL_REVIEW, SUBMITTED, BaseAdapter, FormField, SubmitWatch, fetch_json,
                       strip_html, visible_captcha)
 
@@ -60,7 +61,7 @@ class LeverAdapter(BaseAdapter):
 
     @staticmethod
     def matches(url: str) -> bool:
-        return urlparse(url).netloc.endswith("lever.co")
+        return host_matches(url, "lever.co")
 
     def form_url(self, job: dict) -> str:
         p = urlparse(job["url"])

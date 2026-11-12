@@ -147,6 +147,28 @@ def test_pronouns_and_drafted_answers():
     assert held.rule != "custom"                          # withheld where the employer asks for non-AI answers
 
 
+def test_round_ten_answers():
+    import copy
+    from answers import AnswerEngine
+    # graduation month: by name, or as a number when the field wants one
+    months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"]
+    month = ENGINE.p["education"]["grad_month"]
+    assert filled("Expected graduation month", options=months) == f"{month:02d}"
+    assert filled("Grad month (1-12)", kind="number") == str(month)
+    # race: the closest option that names Asian when there is no exact one
+    profile = copy.deepcopy(ENGINE.p)
+    profile["eeo"].update(race="Asian", race_subcategory="South Asian")
+    eng = AnswerEngine(profile, custom_answers=[])
+    opts = ["American Indian or Alaska Native", "Asian/Pacific Islander", "Black or African American", "White",
+            "Decline to self-identify"]
+    assert eng.resolve(Question("Race/Ethnicity", "select", True, opts), Context()).value == "Asian/Pacific Islander"
+    opts = ["White", "Asian (Not Hispanic or Latino)", "Two or more races"]
+    assert eng.resolve(Question("Race", "select", True, opts), Context()).value == "Asian (Not Hispanic or Latino)"
+    # SEO programme and political contributions
+    assert filled("Are you an SEO Career scholar?", options=["Yes", "No"]) == "No"
+    assert filled("Have you made any political contributions in the past 2 years?", options=["Yes", "No"]) == "No"
+
+
 # --- things that must not be answered by keyword accident --------------------
 @pytest.mark.parametrize("label,kind", [
     ("Why did you want to become an engineer in your respective discipline?", "textarea"),

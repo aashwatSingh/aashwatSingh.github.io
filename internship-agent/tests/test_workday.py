@@ -19,3 +19,20 @@ def test_step_names():
     assert step_name("current step 2 of 6 My Information") == "My Information"
     assert AUTH_STEP.search("Create Account/Sign In") and not AUTH_STEP.search("My Information")
     assert REVIEW_STEP.search("Review") and not REVIEW_STEP.search("My Experience")
+
+
+def test_host_checks_reject_spoofed_urls():
+    from urls import host_matches
+    import scraper
+    spoofed = ["https://evil.example\\@acme.wd5.myworkdayjobs.com/en-US/careers/job/x",
+               "https://attackermyworkdayjobs.com/x/job/y",
+               "https://acme.wd5.myworkdayjobs.com@evil.example/x",
+               "javascript://acme.wd5.myworkdayjobs.com/%0aalert(1)"]
+    for url in spoofed:
+        assert not WorkdayAdapter.matches(url), url
+        assert scraper.detect_ats(url) != "Workday", url
+    assert not host_matches("https://clever.co/jobs", "lever.co")
+    assert not host_matches("https://evil.example\\@jobs.lever.co/acme/x", "lever.co")
+    assert adapter_for("https://evil.example\\@jobs.lever.co/acme/00000000-0000-0000-0000-000000000000") is None
+    assert host_matches("https://jobs.eu.lever.co/acme/x", "lever.co")
+    assert host_matches("https://ACME.wd5.myworkdayjobs.com./x", "myworkdayjobs.com")

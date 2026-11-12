@@ -31,6 +31,7 @@ from playwright.async_api import Page, TimeoutError as PWTimeout
 
 import config
 from answers import Decision, Question
+from urls import host_matches
 from ats.base import (CLOSED, DRY_RUN_OK, MANUAL_REVIEW, SUBMITTED, ApplyResult, BaseAdapter, FormField, FormState,
                       _screenshot)
 
@@ -128,8 +129,7 @@ class WorkdayAdapter(BaseAdapter):
 
     @staticmethod
     def matches(url: str) -> bool:
-        host = urlparse(url).netloc.lower()
-        return host.endswith("myworkdayjobs.com") or host.endswith("myworkdaysite.com")
+        return host_matches(url, "myworkdayjobs.com", "myworkdaysite.com")
 
     # ---- small page helpers ---------------------------------------------------
     async def _visible(self, page: Page, aid: str) -> bool:
@@ -555,6 +555,9 @@ class WorkdayAdapter(BaseAdapter):
                 return None
             return ApplyResult(MANUAL_REVIEW, reason, what + " (not completed in time)")
 
+        if not self.matches(page.url):                         # never type a password off Workday's own domains
+            return ApplyResult(MANUAL_REVIEW, "WORKDAY_LOGIN",
+                               f"sign-in page is not on a Workday domain ({urlparse(page.url).netloc[:60]})")
         if not self.try_sign_in or not password or host in self._sign_in_failed:
             return await human("WORKDAY_LOGIN", f"Sign in to {host} in the browser window")
 
@@ -567,6 +570,8 @@ class WorkdayAdapter(BaseAdapter):
         if not await self._visible(page, "email") or not await self._visible(page, "signInSubmitButton"):
             return await human("WORKDAY_LOGIN", f"Sign in to {host} in the browser window (unrecognised sign-in page)")
         for attempt in passwords[:2]:                          # at most two tries per site per run
+            if not self.matches(page.url):
+                break
             await page.fill(AID.format("email"), user)
             await page.fill(AID.format("password"), attempt)
             await self._click(page, "signInSubmitButton")
@@ -576,7 +581,7 @@ class WorkdayAdapter(BaseAdapter):
         self._sign_in_failed.add(host)                         # never retry this site in this run
         error = await self._errors(page)
 
-        if self.create_accounts and await self._visible(page, "createAccountLink"):
+        if self.create_accounts and self.matches(page.url) and await self._visible(page, "createAccountLink"):
             await self._click(page, "createAccountLink")
             try:
                 await page.wait_for_selector(AID.format("verifyPassword"), state="visible", timeout=8000)

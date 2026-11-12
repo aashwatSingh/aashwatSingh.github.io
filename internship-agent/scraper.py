@@ -32,6 +32,8 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import requests
 
+from urls import host_matches
+
 import config
 from dedup import canonical_url, load_queue, normalize_company, save_queue
 
@@ -175,13 +177,15 @@ def clean_url(url: str) -> str:
 def detect_ats(url: str) -> str:
     u = url.lower()
     host = urlparse(u).netloc
-    if "greenhouse.io" in host or "gh_jid=" in u:
+    if "\\" in u or "@" in host:
+        return "Other"                                  # host spoofing (see urls.host_matches)
+    if host_matches(u, "greenhouse.io") or "gh_jid=" in u:
         return "Greenhouse"
-    if host.endswith("lever.co"):
+    if host_matches(u, "lever.co"):
         return "Lever"
-    if host.endswith("ashbyhq.com"):
+    if host_matches(u, "ashbyhq.com"):
         return "Ashby"
-    if "myworkdayjobs.com" in host or "myworkdaysite.com" in host:
+    if host_matches(u, "myworkdayjobs.com", "myworkdaysite.com"):
         return "Workday"
     for needle, name in (("icims.com", "iCIMS"), ("smartrecruiters.com", "SmartRecruiters"),
                          ("oraclecloud.com", "Oracle"), ("taleo.net", "Taleo"),

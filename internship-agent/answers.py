@@ -677,7 +677,8 @@ class AnswerEngine:
                 if len(season) == 1:
                     return Text(season[0], [re.escape(season[0])])
                 if not with_year and "month" in label:
-                    return Text(grad_month)
+                    m = edu["grad_month"]
+                    return Text(grad_month, [rf"^{grad_month}\b", rf"^{grad_month[:3]}\b", rf"^0?{m}$", rf"^0?{m}\b(?!\d)"])
                 return Unknown(f"no single option for {grad_month} {year}")
             if re.search(r"\b(do|will|are|have|did|would|can) you\b", label) and not re.search(
                     r"^(when|what|which)\b", label):
@@ -685,6 +686,9 @@ class AnswerEngine:
             if re.search(r"\byear\b", label) and "month" not in label:
                 return Text(year)
             if "month" in label and "year" not in label:
+                hint = f"{q.placeholder} {label}".lower()
+                if q.kind == "number" or re.search(r"\bmm\b|1-12|1 ?- ?12|number", hint):
+                    return Text(f"{edu['grad_month']:02d}" if "mm" in hint else str(edu["grad_month"]))
                 return Text(grad_month)
             hint = f"{q.placeholder} {label}".lower()
             if re.search(r"mm\s*/\s*yyyy", hint) and "dd" not in hint:
@@ -716,9 +720,9 @@ class AnswerEngine:
 
         def end_date(q, label, ctx):
             if q.kind in CHOICE_KINDS:
-                month = MONTHS[int(log["latest_end"][5:7]) - 1]
+                month = MONTHS[int((log.get("preferred_end") or log["latest_end"])[5:7]) - 1]
                 return Choice([rf"^{month}\b"])
-            return Text(_fmt_date(log["latest_end"], q))
+            return Text(_fmt_date(log.get("preferred_end") or log["latest_end"], q))
 
         def summer_availability(q, label, ctx):
             if q.kind not in CHOICE_KINDS | {"checkbox"}:
@@ -802,8 +806,17 @@ class AnswerEngine:
 
         def race(q, label, ctx):
             pats = [rf"^{re.escape(v)}\b" for v in (eeo.get("race_subcategory"), eeo["race"]) if v]
-            return Choice(pats,
-                          exclude=r"native hawaiian|east asian|southeast|two or more|\band\b|/|mixed|multi")
+            strict = r"native hawaiian|east asian|southeast|two or more|\band\b|/|mixed|multi"
+            if q.kind in CHOICE_KINDS and q.options and re.search(r"\basian\b", eeo.get("race") or "", re.I) \
+                    and not pick_pattern(q.options, pats, strict):
+                # no exact "Asian" / "South Asian": take the closest option that still names Asian (or India)
+                hit = pick_pattern(q.options, [r"south asian", r"\basian\b(?!.{0,4}american indian)",
+                                               r"asian.?pacific|\ba\.?a\.?p\.?i\b|\bapi\b", r"\bindian?\b"],
+                                   exclude=r"american indian|alaska|native hawaiian(?!.{0,40}asian)|east asian|"
+                                           r"southeast asian|decline|prefer not|two or more")
+                if hit:
+                    return Text(hit, [rf"^{re.escape(hit)}$"])
+            return Choice(pats, exclude=strict)
 
         def hispanic(q, label, ctx):
             return YesNo(eeo["hispanic_or_latino"], [r"^not hispanic|^non-?hispanic"]
@@ -1519,6 +1532,21 @@ class AnswerEngine:
                                 r"(through|until|to|-|–)",
              lambda q, label, ctx: YesNo(True) if q.kind in CHOICE_KINDS and pick_yes_no(q.options, True)
              and _within_window(label, log) is True else None),
+            ("x-availability-dates", r"availability (date|dates|window|period)|dates? (of )?(your )?availability|"
+                                     r"available dates|what dates (are|would) you (be )?available|"
+                                     r"(dates|period) you (are|would be) available",
+             lambda q, label, ctx: None if q.kind in CHOICE_KINDS
+             else Text(_fmt_date(log.get("preferred_start") or log["earliest_start"], q)) if q.kind == "date"
+             else Text(log.get("availability_dates_text") or log.get("availability_text") or "")
+             if q.kind in ("text", "textarea") else None),
+            ("x-seo-program", r"\bseo\b|sponsors for educational opportunity",
+             lambda q, *_: YesNo(False, [r"^no\b", r"^none\b", r"not (a )?(participant|member|part)"])
+             if q.kind in CHOICE_KINDS | {"checkbox"} else Text("No") if q.kind in ("text", "textarea") else None),
+            ("x-political-contributions", r"political (contribution|donation)s?|campaign (contribution|donation)s?|"
+                                          r"(contribut|donat)\w* .{0,60}(political|candidate|campaign|"
+                                          r"office[- ]holder|party|pac)\b|pay[- ]to[- ]play",
+             lambda q, *_: YesNo(False, [r"^no\b", r"^none\b"]) if q.kind in CHOICE_KINDS | {"checkbox"}
+             else Text("No" if q.kind == "text" else "None.") if q.kind in ("text", "textarea") else None),
             ("x-contact-method", r"(best|preferred) (way|method|means) (to|of) (contact|reach|communicat)\w*( with)? you|"
                                  r"preferred (contact|communication) method|how (should|can) we (best )?(contact|reach) you",
              lambda q, *_: Choice([r"e-?mail"]) if q.kind in CHOICE_KINDS
@@ -1702,6 +1730,9 @@ class AnswerEngine:
             ("gpa", r"\bgpa\b|\bg\.p\.a\b|grade point", gpa),
             ("degree-and-major", r"degree.{0,25}(field of study|major)|(field of study|major).{0,25}degree(?! program)",
              lambda q, *_: Text(f"{edu['degree_short']} in {edu['major']}") if q.kind in FREE_KINDS else None),
+            ("graduation-month", r"\bgrad(uation|uating)?\b.{0,25}\bmonth\b|\bmonth\b.{0,25}\bgrad(uat\w*)?\b",
+             lambda q, label, ctx: graduation(q, label if "month" in label else label + " month", ctx)
+             if not re.search(r"\byear\b", label) else None),
             ("graduation", r"\bgradu\w*t(ion|ing|e[sd]?)\b(?! (student|degree|program|school|studies|level))|"
                            r"degree completion|completion date|conferral|degree date", graduation),
             ("minor", r"\bminor\b", skip),
