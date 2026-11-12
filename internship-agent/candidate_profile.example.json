@@ -29,7 +29,8 @@
   },
   "portal": {
     "username": "",
-    "password": ""
+    "password": "",
+    "passwords": []
   },
   "education": {
     "school": "",
@@ -67,7 +68,9 @@
     "has_security_clearance": null,
     "internship_work_authorization": null,
     "future_sponsorship_visa": null,
-    "requires_sponsorship_now": null
+    "requires_sponsorship_now": null,
+    "visa_category": null,
+    "country_of_citizenship": null
   },
   "logistics": {
     "willing_to_relocate": true,
@@ -78,7 +81,12 @@
     "latest_end": "",
     "desired_hourly_rate": "",
     "desired_compensation_text": "",
-    "heard_about": [],
+    "heard_about": [
+      "Job Board",
+      "LinkedIn",
+      "Handshake",
+      "Indeed"
+    ],
     "previously_worked_or_applied": false,
     "non_compete": false,
     "relatives_at_company": false,
@@ -102,7 +110,12 @@
     "consents_to_background_check": null,
     "consents_to_interview_recording": null,
     "outside_business_activities": null,
-    "cover_letter_path": null
+    "cover_letter_path": null,
+    "preferred_start": "",
+    "latest_start": null,
+    "consents_to_drug_screening": null,
+    "consents_to_reference_checks": null,
+    "excluded_from_federal_programs": null
   },
   "eeo": {
     "gender": "",

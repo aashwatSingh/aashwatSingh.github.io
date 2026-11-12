@@ -1,80 +1,43 @@
 [
  {
-  "label": "Are you currently authorized to work for any employer in the United States?",
-  "kind": "radio",
-  "options": [
-   "Yes - I have US work authorization as a Citizen or US Permanent Resident / Green",
-   "Yes - I have US work authorization via a non-immigrant visa (e.g. F-1, H-1B, L-1",
-   "No - I am not currently authorized to work in the US"
-  ],
-  "rule": "x-work-auth-detail",
-  "note": "options ask how you are authorized: set work_authorization.citizenship_status",
-  "profile_key": "work_authorization.citizenship_status",
-  "count": 9,
-  "companies": [
-   "Rivian"
-  ]
- },
- {
-  "label": "Is your most recent country of (1) citizenship or (2) permanent residency one of the following countries: North Korea; Syria; Iran; or Cuba?",
-  "kind": "boolean",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.citizenship_status in the profile",
-  "profile_key": "work_authorization.citizenship_status",
-  "count": 9,
-  "companies": [
-   "Rivian"
-  ]
- },
- {
-  "label": "Are you available for the entire duration of the internship? (June 1st to August 31st)",
-  "kind": "radio",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "summer-availability",
-  "note": "availability outside the stated internship window",
+  "label": "Company name",
+  "kind": "text",
+  "options": [],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
   "profile_key": "",
-  "count": 5,
+  "count": 4,
   "companies": [
-   "Tinder"
+   "Coinbase",
+   "Samsung Semiconductor"
   ]
  },
  {
-  "label": "Have you completed at least one previous internship?",
-  "kind": "radio",
-  "options": [
-   "Yes",
-   "No",
-   "Other - Research",
-   "Other - Job"
-  ],
-  "rule": "x-prior-internship",
-  "note": "whether earlier roles count as internships is your call (set logistics.has_prior_internship in the profile)",
-  "profile_key": "logistics.has_prior_internship",
-  "count": 5,
+  "label": "Cover Letter",
+  "kind": "file",
+  "options": [],
+  "rule": "file",
+  "note": "required upload not on file: Cover Letter",
+  "profile_key": "logistics.cover_letter_path (a cover letter file)",
+  "count": 4,
   "companies": [
-   "Hermeus"
+   "The New York Times",
+   "Crystal Dynamics",
+   "Xaira Therapeutics",
+   "Allen Control Systems"
   ]
  },
  {
-  "label": "The person hired will have access to information and items subject to U.S. export controls, and therefore, must either be a “U.S. person” as defined by 22 C.F.R. § 120.62 or otherwise eligible for deemed export licensing. To assist Hermeus in assessing its export compliance obligations in relation to your application, please identify which status applies to you:",
-  "kind": "select",
-  "options": [
-   "U.S. person. This status includes U.S. citizens, U.S. nationals, lawful permanen",
-   "Foreign person. This ITAR/EAR status includes anyone who is not a U.S. person (s"
-  ],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.us_person in the profile",
-  "profile_key": "work_authorization.us_person",
-  "count": 5,
+  "label": "Title",
+  "kind": "text",
+  "options": [],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 4,
   "companies": [
-   "Hermeus"
+   "Coinbase",
+   "Samsung Semiconductor"
   ]
  },
  {
@@ -102,91 +65,30 @@
   ]
  },
  {
-  "label": "As part of our interview process, we may use AI notetakers to transcribe conversations for accuracy and efficiency. Please see our candidate privacy policy for more information on how we process your data. Your decision to opt in or out of this tooling will not impact your candidacy.",
-  "kind": "radio",
-  "options": [
-   "Yes, I consent",
-   "No, I do not consent"
-  ],
-  "rule": "x-interview-recording",
-  "note": "consent needs your decision (set logistics.consents_to_interview_recording in the profile)",
-  "profile_key": "logistics.consents_to_interview_recording",
-  "count": 3,
-  "companies": [
-   "Palantir"
-  ]
- },
- {
-  "label": "Astranis complies with U.S. Government space technology export regulations, therefore will you state which of the following applies to you:",
+  "label": "At Astranis, we value in-person collaboration and a strong work ethic. Are you comfortable with working onsite at our San Francisco HQ 5 days a week and commit to 55 hours per week?",
   "kind": "select",
   "options": [
-   "I am a U.S. Citizen.",
-   "I am a lawful permanent resident of the U.S. and Green Card Holder.",
-   "I am a refugee under 8 U.S.C. 1157.",
-   "I am an asylee under 8 U.S.C. 1158.",
-   "None of the above."
+   "Yes",
+   "No"
   ],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.us_person (and citizenship_status) in the profile",
-  "profile_key": "work_authorization.us_person",
+  "rule": "onsite",
+  "note": "on-site question bundles a dated or extra-hours commitment",
+  "profile_key": "",
   "count": 3,
   "companies": [
    "Astranis"
   ]
  },
  {
-  "label": "Company name",
-  "kind": "text",
-  "options": [],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 3,
-  "companies": [
-   "Coinbase"
-  ]
- },
- {
-  "label": "Cover Letter",
-  "kind": "file",
-  "options": [],
-  "rule": "file",
-  "note": "required upload not on file: Cover Letter",
-  "profile_key": "logistics.cover_letter_path (a cover letter file)",
-  "count": 3,
-  "companies": [
-   "The New York Times",
-   "Crystal Dynamics",
-   "Allen Control Systems"
-  ]
- },
- {
   "label": "Export Control & Compliance: for the sole purpose of determining export licensing requirements, please list any countries of which you are a citizen or legal permanent resident, and when you obtained such status.",
   "kind": "textarea",
   "options": [],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.citizenship_status in the profile",
-  "profile_key": "work_authorization.citizenship_status",
+  "rule": "x-citizen-countries",
+  "note": "set work_authorization.country_of_citizenship",
+  "profile_key": "work_authorization.country_of_citizenship",
   "count": 3,
   "companies": [
    "Zoox"
-  ]
- },
- {
-  "label": "For this specific internship, will you require any of the below sponsorship for employment?",
-  "kind": "radio",
-  "options": [
-   "J1",
-   "F1",
-   "None",
-   "Other"
-  ],
-  "rule": "sponsorship",
-  "note": "options are visa categories: set work_authorization.internship_work_authorization",
-  "profile_key": "work_authorization.internship_work_authorization",
-  "count": 3,
-  "companies": [
-   "Notion"
   ]
  },
  {
@@ -247,7 +149,7 @@
   ]
  },
  {
-  "label": "Title",
+  "label": "What is your availability for a winter/spring internship (approximate dates)?",
   "kind": "text",
   "options": [],
   "rule": "no-rule",
@@ -255,7 +157,28 @@
   "profile_key": "",
   "count": 3,
   "companies": [
-   "Coinbase"
+   "Formlabs"
+  ]
+ },
+ {
+  "label": "What percentage of the time are you willing to travel?",
+  "kind": "select",
+  "options": [
+   "0%",
+   "1-10%",
+   "11-20%",
+   "21-30%",
+   "31-40%",
+   "41-50%",
+   "50-75%",
+   "75%+"
+  ],
+  "rule": "x-travel",
+  "note": "set logistics.travel_percentage",
+  "profile_key": "logistics.travel_percentage",
+  "count": 3,
+  "companies": [
+   "National Information Solutions Cooperative"
   ]
  },
  {
@@ -289,24 +212,6 @@
   ]
  },
  {
-  "label": "Will you now or at any time in the future require sponsorship for employment visa status (e.g. H1B, OPT)?",
-  "kind": "radio",
-  "options": [
-   "OPT",
-   "H1B",
-   "TN",
-   "None",
-   "Other"
-  ],
-  "rule": "sponsorship",
-  "note": "options are visa categories: set work_authorization.future_sponsorship_visa",
-  "profile_key": "work_authorization.future_sponsorship_visa",
-  "count": 3,
-  "companies": [
-   "Notion"
-  ]
- },
- {
   "label": "AI Policy for Application",
   "kind": "boolean",
   "options": [
@@ -322,38 +227,30 @@
   ]
  },
  {
-  "label": "Are you legally authorized to work in the United States?",
-  "kind": "radio",
-  "options": [
-   "I am authorized to work in the United States for any employer",
-   "I am authorized to work in the United States for my present employer",
-   "I require sponsorship to work in the United States",
-   "I am not authorized to work in the United States",
-   "My status to work in the United States is unknown",
-   "If Other, please explain:"
-  ],
-  "rule": "x-work-auth-detail",
-  "note": "choose which authorization statement applies to you (answer_blockers.py)",
-  "profile_key": "",
+  "label": "Alternate Email",
+  "kind": "text",
+  "options": [],
+  "rule": "x-alt-email",
+  "note": "set education.school_email",
+  "profile_key": "education.school_email",
   "count": 2,
   "companies": [
-   "Vital Lyfe",
-   "K2 Space"
+   "Chicago Trading Company"
   ]
  },
  {
-  "label": "At Astranis, we value in-person collaboration and a strong work ethic. Are you comfortable with working onsite at our San Francisco HQ 5 days a week and commit to 55 hours per week?",
+  "label": "Are you interested in our Women's Winternship program?",
   "kind": "select",
   "options": [
    "Yes",
    "No"
   ],
-  "rule": "onsite",
-  "note": "on-site question bundles a dated or extra-hours commitment",
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
   "profile_key": "",
   "count": 2,
   "companies": [
-   "Astranis"
+   "Virtu Financial"
   ]
  },
  {
@@ -361,19 +258,19 @@
   "kind": "select",
   "options": [
    "1) U.S. citizen or national of the United States",
-   "2) U.S. lawful permanent resident",
+   "2) U.S. lawful permanent resident (green card holder)",
    "3) Refugee under 8 U.S.C 1157",
    "4) Asylee under 8 U.S.C 1158",
    "5) Authorized to work in the United States under the Deferred Action For Childho",
    "6) Other (please explain)"
   ],
   "rule": "x-citizenship",
-  "note": "set work_authorization.us_person (and citizenship_status) in the profile",
-  "profile_key": "work_authorization.us_person",
+  "note": "no matching option among ['1) U.S. citizen or national of the United States', '2) U.S. lawful permanent resident (green card holder)', '3) Refugee under 8 U.S.C 1157', '4) Asylee under 8 U.S.C 1158', '5) Authorized to work in the United States under the Deferred Action For Childho', '6) Other (please explain)']",
+  "profile_key": "work_authorization.citizenship_status",
   "count": 2,
   "companies": [
-   "Rocket Lab USA",
-   "K2 Space"
+   "Freeform",
+   "Rocket Lab USA"
   ]
  },
  {
@@ -401,36 +298,6 @@
   "rule": "experience",
   "note": "experience and skill self-assessments are never auto-answered",
   "profile_key": "",
-  "count": 2,
-  "companies": [
-   "The Exploration Company"
-  ]
- },
- {
-  "label": "Do you have prior internship experience?",
-  "kind": "boolean",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "x-prior-internship",
-  "note": "whether earlier roles count as internships is your call (set logistics.has_prior_internship in the profile)",
-  "profile_key": "logistics.has_prior_internship",
-  "count": 2,
-  "companies": [
-   "The Exploration Company"
-  ]
- },
- {
-  "label": "Due to federal regulations (e.g., ITAR/EAR), applicants must be U.S. citizens or lawful permanent residents (e.g., current Green Card holders). Are you eligible?",
-  "kind": "boolean",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.citizenship_status in the profile",
-  "profile_key": "work_authorization.citizenship_status",
   "count": 2,
   "companies": [
    "The Exploration Company"
@@ -543,34 +410,18 @@
   ]
  },
  {
-  "label": "Interview Recording Consent",
-  "kind": "radio",
+  "label": "Please select one of the following statements based on your work authorization:",
+  "kind": "select",
   "options": [
-   "Yes, I consent to be recorded",
-   "Opt out of recording"
+   "Now or at any point the future, I will require visa sponsorship to work in the U",
+   "Now or at any point in the future, I am eligible to work in the United States wi"
   ],
-  "rule": "x-interview-recording",
-  "note": "consent needs your decision (set logistics.consents_to_interview_recording in the profile)",
-  "profile_key": "logistics.consents_to_interview_recording",
+  "rule": "work-auth",
+  "note": "wanted Yes but options are ['Now or at any point the future, I will require visa sponsorship to work in the U', 'Now or at any point in the future, I am eligible to work in the United States wi']",
+  "profile_key": "",
   "count": 2,
   "companies": [
-   "The Exploration Company",
-   "UiPath"
-  ]
- },
- {
-  "label": "Subject to receiving an offer from The Exploration Company, please confirm you are happy to complete the mandatory ZINC background check",
-  "kind": "radio",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "x-background-check",
-  "note": "consent needs your decision (set logistics.consents_to_background_check in the profile)",
-  "profile_key": "logistics.consents_to_background_check",
-  "count": 2,
-  "companies": [
-   "The Exploration Company"
+   "Chicago Trading Company"
   ]
  },
  {
@@ -586,20 +437,15 @@
   ]
  },
  {
-  "label": "This position may require access to information and technology that is subject to export controls, such as EAR. Are you any of the following?",
-  "kind": "radio",
-  "options": [
-   "A United States Citizen",
-   "A lawful permanent resident of the United States (i.e. Greencard holder)",
-   "A protected individual",
-   "Other"
-  ],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.citizenship_status in the profile",
-  "profile_key": "work_authorization.citizenship_status",
+  "label": "What drives your interest in pursuing an internship in the financial industry, particularly within a hedge fund environment?",
+  "kind": "textarea",
+  "options": [],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
   "count": 2,
   "companies": [
-   "Shield AI"
+   "Qube Research & Technologies"
   ]
  },
  {
@@ -627,6 +473,22 @@
   ]
  },
  {
+  "label": "Will you now or in the future require company sponsorship to retain or extend your work authorization in the country where the job is located?",
+  "kind": "select",
+  "options": [
+   "Yes, I will require immigration sponsorship now to legally work in the country w",
+   "Yes, I will require immigration sponsorship in the future to legally work in the",
+   "No, I do not and will not require immigration sponsorship to legally work in the"
+  ],
+  "rule": "sponsorship",
+  "note": "options ask when sponsorship is needed: set work_authorization.requires_sponsorship_now",
+  "profile_key": "work_authorization.requires_sponsorship_now",
+  "count": 2,
+  "companies": [
+   "Together AI"
+  ]
+ },
+ {
   "label": "ATL",
   "kind": "select",
   "options": [
@@ -642,51 +504,15 @@
   ]
  },
  {
-  "label": "Any offer of employment with Rocket Lab is contingent on a successful criminal background check, drug screen, and professional reference check. Please indicate below if you can meet these hiring requirements",
-  "kind": "select",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "x-background-check",
-  "note": "consent needs your decision (set logistics.consents_to_background_check in the profile)",
-  "profile_key": "logistics.consents_to_background_check",
+  "label": "Application Requirement: Write a program in C++ that takes in a file as input and reverses every line and puts it in a different file. Try to do this with as little memory footprint as possible and as fast as possible. Attach the file as a .txt below.",
+  "kind": "file",
+  "options": [],
+  "rule": "file",
+  "note": "required upload not on file: Application Requirement: Write a program in C++ that takes in a file as input and reverses every line and puts it in a different file. Try to do this with as little memory footprint as possible and as fast as possible. Attach the file as a .txt below.",
+  "profile_key": "",
   "count": 1,
   "companies": [
-   "Rocket Lab USA"
-  ]
- },
- {
-  "label": "Are you a US Citizen, Green Card Holder, or Permanent Resident",
-  "kind": "boolean",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.citizenship_status in the profile",
-  "profile_key": "work_authorization.citizenship_status",
-  "count": 1,
-  "companies": [
-   "Terranova"
-  ]
- },
- {
-  "label": "Are you a US Person under ITAR (22 CFR §120.15)? Please select appropriate response:",
-  "kind": "select",
-  "options": [
-   "US citizen",
-   "Lawful permanent resident (ie green card holder)",
-   "A protected individual under 8 U.S.C. 1324b(a)(3) (includes refugees and asylees",
-   "Other work authorization or visa status",
-   "Not a US person"
-  ],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.us_person (and citizenship_status) in the profile",
-  "profile_key": "work_authorization.us_person",
-  "count": 1,
-  "companies": [
-   "Pivotal Aero"
+   "Quantiq"
   ]
  },
  {
@@ -719,21 +545,6 @@
   "count": 1,
   "companies": [
    "Crystal Dynamics"
-  ]
- },
- {
-  "label": "Are you able to start on Tuesday, May 18th on-site?",
-  "kind": "radio",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "start-date",
-  "note": "no matching option among ['Yes', 'No']",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Strada Education Foundation"
   ]
  },
  {
@@ -771,7 +582,7 @@
    "No"
   ],
   "rule": "start-date",
-  "note": "no matching option among ['Yes', 'No']",
+  "note": "start date outside your window",
   "profile_key": "",
   "count": 1,
   "companies": [
@@ -824,6 +635,22 @@
   ]
  },
  {
+  "label": "Are you considering or committed to pursuing further education immediately after completing your current academic studies?",
+  "kind": "select",
+  "options": [
+   "No",
+   "I am considering further education after my current program",
+   "I have committed to another degree after my current program"
+  ],
+  "rule": "x-further-education",
+  "note": "post-degree plans not stated (set logistics.pursuing_further_education_after_degree in the profile)",
+  "profile_key": "logistics.pursuing_further_education_after_degree",
+  "count": 1,
+  "companies": [
+   "Five Rings Capital"
+  ]
+ },
+ {
   "label": "Are you currently an active member or contributor to any of our communities?",
   "kind": "select",
   "options": [
@@ -836,21 +663,6 @@
   "count": 1,
   "companies": [
    "Wikimedia Foundation"
-  ]
- },
- {
-  "label": "Are you currently authorized to work in the United States, either as a U.S. citizen, permanent resident, or on a transferable TN visa?",
-  "kind": "boolean",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.citizenship_status in the profile",
-  "profile_key": "work_authorization.citizenship_status",
-  "count": 1,
-  "companies": [
-   "Astro Mechanica"
   ]
  },
  {
@@ -869,6 +681,21 @@
   ]
  },
  {
+  "label": "Are you currently in process with other companies that would require us to be time sensitive?",
+  "kind": "select",
+  "options": [
+   "Yes",
+   "No"
+  ],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Datadog"
+  ]
+ },
+ {
   "label": "Are you currently pursuing a degree in the majors listed in the job description?",
   "kind": "radio",
   "options": [
@@ -884,18 +711,34 @@
   ]
  },
  {
-  "label": "Are you eligible to obtain and maintain a U.S. Government Clearance (Requires U.S Citizenship)?",
+  "label": "Are you eligible for Northeastern University's Co-op Program?",
   "kind": "select",
   "options": [
    "Yes",
    "No"
   ],
-  "rule": "x-clearance",
-  "note": "clearance eligibility depends on citizenship status",
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
   "profile_key": "",
   "count": 1,
   "companies": [
-   "Voyager Technologies"
+   "MasterControl"
+  ]
+ },
+ {
+  "label": "Are you legally authorised to work full-time in the country where this job is based?",
+  "kind": "select",
+  "options": [
+   "Yes, no restriction.",
+   "Yes, but I will need sponsorship in the future.",
+   "No, I need sponsorship now."
+  ],
+  "rule": "country",
+  "note": "'United States' not among ['Yes, no restriction.', 'Yes, but I will need sponsorship in the future.', 'No, I need sponsorship now.']",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Datadog"
   ]
  },
  {
@@ -911,49 +754,33 @@
   ]
  },
  {
-  "label": "Are you legally permitted to live and work in the United States or Canada on a permanent basis without needing employer sponsorship (e.g., U.S. or Canadian citizen, permanent resident, asylee)?",
+  "label": "Are you or have you been entrusted with a position or function in any government, international organization (such as the UN or World Bank), or state-controlled or state-owned bank, brokerage firm, or other enterprise?",
   "kind": "select",
   "options": [
-   "Yes (USA)",
-   "Yes (Canada)",
+   "Yes",
    "No"
   ],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.citizenship_status in the profile",
-  "profile_key": "work_authorization.citizenship_status",
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
   "count": 1,
   "companies": [
-   "Crystal Dynamics"
+   "Tower Research Capital"
   ]
  },
  {
-  "label": "As a result of the work performed by CesiumAstro, all eligible candidates must be a U.S. Person or able to obtain an export license. U.S. Persons include U.S. Citizens, Permanent Residents, conditional residents, asylees, and refugees. Are you a U.S. Person or eligible to obtain the required authorizations from the U.S. Department of State?",
-  "kind": "radio",
+  "label": "Are you willing to work from the Lincoln, NE Olsson office during the Spring 2027 semseter for this internship?",
+  "kind": "select",
   "options": [
    "Yes",
    "No"
   ],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.citizenship_status in the profile",
-  "profile_key": "work_authorization.citizenship_status",
+  "rule": "onsite",
+  "note": "on-site question bundles a dated or extra-hours commitment",
+  "profile_key": "",
   "count": 1,
   "companies": [
-   "CesiumAstro"
-  ]
- },
- {
-  "label": "As a result of the work performed by CesiumAstro, all eligible candidates must be a U.S. Person or able to obtain an export license. U.S. Persons include U.S. Citizens, Permanent Residents, conditional residents, asylees, and refugees. Are you a U.S. Person?",
-  "kind": "radio",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.citizenship_status in the profile",
-  "profile_key": "work_authorization.citizenship_status",
-  "count": 1,
-  "companies": [
-   "CesiumAstro"
+   "Olsson"
   ]
  },
  {
@@ -966,32 +793,6 @@
   "count": 1,
   "companies": [
    "Strada Education Foundation"
-  ]
- },
- {
-  "label": "By applying to this job, I affirm that the information provided on this application and resume is true and complete to the best of my knowledge. I understand that the Company will request a waiver for a background check and verify information through the reference and background check process should I reach the final stages of the interview process.",
-  "kind": "select",
-  "options": [
-   "I agree"
-  ],
-  "rule": "x-background-check",
-  "note": "consent needs your decision (set logistics.consents_to_background_check in the profile)",
-  "profile_key": "logistics.consents_to_background_check",
-  "count": 1,
-  "companies": [
-   "Vestmark"
-  ]
- },
- {
-  "label": "By submitting your application you hereby certify that the facts set forth in the above employment application are true and complete to the best of your knowledge. I certify that the information on this application is accurate and complete to the best of my knowledge and agree to have any of the information verified by CesiumAstro (the “Company”). By my signature below, I authorize any references submitted by me to the Company in support of this application to provide any and all information concerning my previous employment and any other pertinent information that they may have. I understand that I may be required to authorize the Company to obtain a consumer report or investigative consumer report, in accordance with applicable law, which authorization is contained in a separate document. Further, I release the Company and any other parties, agents, or persons from any and all liability or claims arising out of the disclosure or use of references or other information provided to the Company during the process of verifying the statements made in this application. I understand that any misrepresentation, falsification, or material omission of information on this application may result in my failure to receive an offer or, if I am hired, will result in my dismissal from employment. Furthermore, if hired, in consideration of my employment I agree to conform to the policies, rules and standards of the Company, including applicable safety rules, and agree that my employment can be terminated “at will” at any time, with or without cause, and with or without notice, either at my option or at the option of the Company. I understand that no employee or representative of the Company to which I am applying, has the authority to enter into any agreement for employment for any specified period of time, or to enter into any express or implied agreement to the contrary of at-will employment, except for a written agreement signed by me and the Chief Executive Office of the Company. I agree that this shall constitute a final and fully binding integrated agreement regarding the at-will nature of my employment relationship if I am hired. In addition, I understand that, if hired, I may be required as a condition of employment to take and pass drug and alcohol tests during employment to the extent required by policies of the Company consistent with applicable law. I acknowledge that I have personally completed this application, I have read all of the above statements, and understand them and agree to the terms and conditions therein. I confirm that I understand that my application may be subject to security checks under government regulations applicable in the aerospace and defense industry sectors.",
-  "kind": "checkbox",
-  "options": [],
-  "rule": "never-answer",
-  "note": "citizenship / visa / clearance / legal history is not in the profile",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "CesiumAstro"
   ]
  },
  {
@@ -1049,6 +850,30 @@
   ]
  },
  {
+  "label": "Describe your experience with large language models, if any.",
+  "kind": "textarea",
+  "options": [],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Xaira Therapeutics"
+  ]
+ },
+ {
+  "label": "Describe your experience with property/affinity prediction models versus generative design models for proteins or antibodies.",
+  "kind": "textarea",
+  "options": [],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Xaira Therapeutics"
+  ]
+ },
+ {
   "label": "Describe your previous experience with robots.",
   "kind": "textarea",
   "options": [],
@@ -1081,6 +906,21 @@
   ]
  },
  {
+  "label": "Did you complete the form listed below?",
+  "kind": "select",
+  "options": [
+   "Yes",
+   "No"
+  ],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Eulerity"
+  ]
+ },
+ {
   "label": "Do you actively hold a clearance? Are you interested / eligible to pursue upper levels of clearance?",
   "kind": "textarea",
   "options": [],
@@ -1093,18 +933,15 @@
   ]
  },
  {
-  "label": "Do you attest to the following statement? Pareto Captive Services (Pareto\") is an equal opportunity employer. Pareto does not discriminate in employment on account of race, color, religion, national origin, citizenship status, ancestry, age, gender, sexual orientation, marital status, physical or mental disability, military status or unfavorable discharge from military service. I understand that neither the completion of this application nor any other part of my consideration for employment establishes any obligation for Pareto to hire me. If I am hired, I understand that either Pareto or I can terminate my employment at any time and for any reason, with or without cause and without prior notice. I understand that no representative of Pareto has the authority to make any assurance to the contrary. I attest with my signature below that I have given to Pareto true and complete information on this application. No requested information has been concealed. I authorize Pareto to contact references provided for employment reference checks with prior notice to me. If any information I have provided is untrue, or if I have concealed material information, I understand that this will constitute cause for the denial of employment or immediate dismissal. Electronic acknowledgement required.",
-  "kind": "select",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.citizenship_status in the profile",
-  "profile_key": "work_authorization.citizenship_status",
+  "label": "Do you currently have an offer? If so, what is your deadline to make a decision by?",
+  "kind": "text",
+  "options": [],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
   "count": 1,
   "companies": [
-   "ParetoHealth"
+   "Tower Research Capital"
   ]
  },
  {
@@ -1117,21 +954,6 @@
   "count": 1,
   "companies": [
    "Wikimedia Foundation"
-  ]
- },
- {
-  "label": "Do you have any professional internship or co-op experience?",
-  "kind": "boolean",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "x-prior-internship",
-  "note": "whether earlier roles count as internships is your call (set logistics.has_prior_internship in the profile)",
-  "profile_key": "logistics.has_prior_internship",
-  "count": 1,
-  "companies": [
-   "Resurgent Industries"
   ]
  },
  {
@@ -1162,36 +984,6 @@
   "count": 1,
   "companies": [
    "Notion"
-  ]
- },
- {
-  "label": "Do you have previous Software Engineering Internship experience?",
-  "kind": "select",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "x-prior-internship",
-  "note": "whether earlier roles count as internships is your call (set logistics.has_prior_internship in the profile)",
-  "profile_key": "logistics.has_prior_internship",
-  "count": 1,
-  "companies": [
-   "Cadence Solutions"
-  ]
- },
- {
-  "label": "Does the deemed export rule affect your employment by Everpure?",
-  "kind": "select",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.us_person in the profile",
-  "profile_key": "work_authorization.us_person",
-  "count": 1,
-  "companies": [
-   "Pure Storage"
   ]
  },
  {
@@ -1314,6 +1106,55 @@
   ]
  },
  {
+  "label": "Have you completed any internships? If yes, were any of them at a hedge fund or a proprietary trading firm?",
+  "kind": "select",
+  "options": [
+   "No, I have not completed any internships.",
+   "Yes, I have internship experience, but not within a hedge fund or proprietary tr",
+   "Yes, I have internship experience within a hedge fund or proprietary trading fir"
+  ],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Aquatic Capital Management"
+  ]
+ },
+ {
+  "label": "Have you participated in any of the following mathematics competitions?",
+  "kind": "checkbox_group",
+  "options": [
+   "IMO or EGMO",
+   "USAMO, USAJMO, or foreign National Olympiad",
+   "Putnam",
+   "USACO, IOI, or ICPC",
+   "I have not participated in any of these competitions"
+  ],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Aquatic Capital Management"
+  ]
+ },
+ {
+  "label": "Have you tutored or TA'd for any classes?",
+  "kind": "select",
+  "options": [
+   "Yes",
+   "No"
+  ],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "PDT Partners"
+  ]
+ },
+ {
   "label": "Have you used any AI tools for software development? If yes, which ones and how did you use them?",
   "kind": "textarea",
   "options": [],
@@ -1323,18 +1164,6 @@
   "count": 1,
   "companies": [
    "Tinder"
-  ]
- },
- {
-  "label": "High School Name",
-  "kind": "textarea",
-  "options": [],
-  "rule": "x-high-school",
-  "note": "high-school question",
-  "profile_key": "education.high_school_name",
-  "count": 1,
-  "companies": [
-   "Palantir"
   ]
  },
  {
@@ -1379,36 +1208,6 @@
   "count": 1,
   "companies": [
    "Lyft"
-  ]
- },
- {
-  "label": "I confirm my availability for a Summer 2027 (May/June start) Internship",
-  "kind": "select",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "start-date",
-  "note": "no matching option among ['Yes', 'No']",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Scale AI"
-  ]
- },
- {
-  "label": "I understand that if my application proceeds to the final round, it will be subject to further review via a formal background check including employment verification before a final offer can be made, as appropriate under applicable law",
-  "kind": "select",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "x-background-check",
-  "note": "consent needs your decision (set logistics.consents_to_background_check in the profile)",
-  "profile_key": "logistics.consents_to_background_check",
-  "count": 1,
-  "companies": [
-   "Wikimedia Foundation"
   ]
  },
  {
@@ -1534,21 +1333,6 @@
   ]
  },
  {
-  "label": "Is your eligibility is based on a work visa?",
-  "kind": "select",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.citizenship_status in the profile",
-  "profile_key": "work_authorization.citizenship_status",
-  "count": 1,
-  "companies": [
-   "Formlabs"
-  ]
- },
- {
   "label": "Knowledge of operating systems in the jd",
   "kind": "select",
   "options": [
@@ -1561,6 +1345,18 @@
   "count": 1,
   "companies": [
    "Hive Financial Systems"
+  ]
+ },
+ {
+  "label": "List your publications or preprints and your specific contribution to each.",
+  "kind": "textarea",
+  "options": [],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Xaira Therapeutics"
   ]
  },
  {
@@ -1618,18 +1414,6 @@
   "count": 1,
   "companies": [
    "Pure Storage"
-  ]
- },
- {
-  "label": "Please attach your transcripts (an unofficial copy is satisfactory). This will help our team get a better understanding of your academic background.",
-  "kind": "file",
-  "options": [],
-  "rule": "file",
-  "note": "required upload not on file: Please attach your transcripts (an unofficial copy is satisfactory). This will help our team get a better understanding of your academic background.",
-  "profile_key": "education.transcript_path (a transcript.pdf file)",
-  "count": 1,
-  "companies": [
-   "QuantCo"
   ]
  },
  {
@@ -1719,18 +1503,6 @@
   ]
  },
  {
-  "label": "Please provide a recent transcript of your undergraduate studies",
-  "kind": "file",
-  "options": [],
-  "rule": "file",
-  "note": "required upload not on file: Please provide a recent transcript of your undergraduate studies",
-  "profile_key": "education.transcript_path (a transcript.pdf file)",
-  "count": 1,
-  "companies": [
-   "Decagon"
-  ]
- },
- {
   "label": "Please review the linked document:",
   "kind": "select",
   "options": [
@@ -1758,30 +1530,6 @@
   "count": 1,
   "companies": [
    "xAI"
-  ]
- },
- {
-  "label": "Please submit your transcripts in pdf format. Copies of unofficial or official transcripts from your university are accepted.",
-  "kind": "file",
-  "options": [],
-  "rule": "file",
-  "note": "required upload not on file: Please submit your transcripts in pdf format. Copies of unofficial or official transcripts from your university are accepted.",
-  "profile_key": "education.transcript_path (a transcript.pdf file)",
-  "count": 1,
-  "companies": [
-   "The Voleon Group"
-  ]
- },
- {
-  "label": "Please upload a copy of your transcript",
-  "kind": "file",
-  "options": [],
-  "rule": "file",
-  "note": "required upload not on file: Please upload a copy of your transcript",
-  "profile_key": "education.transcript_path (a transcript.pdf file)",
-  "count": 1,
-  "companies": [
-   "Point72"
   ]
  },
  {
@@ -1941,6 +1689,18 @@
   ]
  },
  {
+  "label": "Start month/year of university and end month/year of university",
+  "kind": "textarea",
+  "options": [],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Tower Research Capital"
+  ]
+ },
+ {
   "label": "Tell us about the most recent user-facing feature you personally shipped. Use three bullets:",
   "kind": "textarea",
   "options": [],
@@ -1992,18 +1752,6 @@
   "count": 1,
   "companies": [
    "Lyft"
-  ]
- },
- {
-  "label": "Transcript",
-  "kind": "file",
-  "options": [],
-  "rule": "file",
-  "note": "required upload not on file: Transcript",
-  "profile_key": "education.transcript_path (a transcript.pdf file)",
-  "count": 1,
-  "companies": [
-   "Armadin"
   ]
  },
  {
@@ -2089,18 +1837,20 @@
   ]
  },
  {
-  "label": "We use Metaview, an AI notetaking tool, to streamline interviews by recording and summarizing discussions, enabling interviewers to be fully present without manual notetaking. With your approval, it silently records notes during interviews. Can Metaview transcribe all your interviews?",
-  "kind": "radio",
+  "label": "What are your preferred pronouns?",
+  "kind": "select",
   "options": [
-   "Yes",
-   "No"
+   "He/Him/His",
+   "She/Her/Hers",
+   "They/Them/Theirs",
+   "Other"
   ],
-  "rule": "x-interview-recording",
-  "note": "consent needs your decision (set logistics.consents_to_interview_recording in the profile)",
-  "profile_key": "logistics.consents_to_interview_recording",
+  "rule": "pronouns",
+  "note": "no matching option among ['He/Him/His', 'She/Her/Hers', 'They/Them/Theirs', 'Other']",
+  "profile_key": "",
   "count": 1,
   "companies": [
-   "Sierra"
+   "Xantium"
   ]
  },
  {
@@ -2113,18 +1863,6 @@
   "count": 1,
   "companies": [
    "Crystal Dynamics"
-  ]
- },
- {
-  "label": "What drives your interest in pursuing an internship in the financial industry, particularly within a hedge fund environment?",
-  "kind": "textarea",
-  "options": [],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Qube Research & Technologies"
   ]
  },
  {
@@ -2203,8 +1941,8 @@
   ]
  },
  {
-  "label": "What is your availability for a winter/spring internship (approximate dates)?",
-  "kind": "text",
+  "label": "What is your favorite C++ feature?",
+  "kind": "textarea",
   "options": [],
   "rule": "no-rule",
   "note": "no answer in the candidate profile",
@@ -2251,26 +1989,6 @@
   "count": 1,
   "companies": [
    "Wikimedia Foundation"
-  ]
- },
- {
-  "label": "What is your work authorization status?",
-  "kind": "radio",
-  "options": [
-   "US Citizen or Permanent Resident",
-   "H1B",
-   "TN",
-   "F1 / Stem OPT",
-   "L1",
-   "E3",
-   "Other (please explain below)"
-  ],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.citizenship_status in the profile",
-  "profile_key": "work_authorization.citizenship_status",
-  "count": 1,
-  "companies": [
-   "Etched"
   ]
  },
  {
@@ -2341,19 +2059,39 @@
   ]
  },
  {
-  "label": "When would you like to intern with us?",
-  "kind": "radio",
+  "label": "What unique skills, abilities, or experience would you bring to the role?",
+  "kind": "textarea",
+  "options": [],
+  "rule": "experience",
+  "note": "experience and skill self-assessments are never auto-answered",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Freeform"
+  ]
+ },
+ {
+  "label": "When considering an internship at Datadog, what are the most important factors to you?",
+  "kind": "multiselect",
   "options": [
-   "Summer",
-   "Off-cycle (e.g. during spring or fall)",
-   "Open to either Summer or Off-cycle"
+   "Career growth",
+   "Challenging technical work",
+   "Company culture",
+   "Company reputation and stability",
+   "Company size",
+   "Compensation and benefits package",
+   "Diversity, equity, and inclusion",
+   "Impact of work",
+   "Location",
+   "Mentorship and support",
+   "Work-life balance"
   ],
   "rule": "no-rule",
   "note": "no answer in the candidate profile",
   "profile_key": "",
   "count": 1,
   "companies": [
-   "QuantCo"
+   "Datadog"
   ]
  },
  {
@@ -2370,6 +2108,64 @@
   "count": 1,
   "companies": [
    "Palantir"
+  ]
+ },
+ {
+  "label": "Which AI tool are your familiar with, and which are you interested in?",
+  "kind": "textarea",
+  "options": [],
+  "rule": "experience",
+  "note": "experience and skill self-assessments are never auto-answered",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "MATTE PROJECTS"
+  ]
+ },
+ {
+  "label": "Which area is your second choice?",
+  "kind": "select",
+  "options": [
+   "Applied AI",
+   "Backend",
+   "Data Engineering",
+   "Distributed Systems",
+   "Frontend",
+   "Infrastructure",
+   "Libraries and Open-Source Technologies",
+   "Mobile",
+   "Security",
+   "No preference"
+  ],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Datadog"
+  ]
+ },
+ {
+  "label": "Which area is your third choice?",
+  "kind": "select",
+  "options": [
+   "Applied AI",
+   "Backend",
+   "Data Engineering",
+   "Distributed Systems",
+   "Frontend",
+   "Infrastructure",
+   "Libraries and Open-Source Technologies",
+   "Mobile",
+   "Security",
+   "No preference"
+  ],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Datadog"
   ]
  },
  {
@@ -2410,6 +2206,23 @@
   ]
  },
  {
+  "label": "Which dates do you prefer to work full-time in the Datadog office?",
+  "kind": "select",
+  "options": [
+   "May 24, 2027 - August 20, 2027",
+   "May 24, 2027 - August 27, 2027",
+   "June 7, 2027 - September 3, 2027",
+   "None of these dates work for me"
+  ],
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Datadog"
+  ]
+ },
+ {
   "label": "Which of our 5 Focus Areas resonates with you and why?",
   "kind": "textarea",
   "options": [],
@@ -2422,19 +2235,26 @@
   ]
  },
  {
-  "label": "Which of the following describes your work authorization status?",
+  "label": "Which opportunity are you most interested in?",
   "kind": "select",
   "options": [
-   "U.S. citizens or Green Card holders",
-   "F-1 students with CPT/OPT",
-   "Other (requires sponsorship)"
+   "Applied AI",
+   "Backend",
+   "Data Engineering",
+   "Distributed Systems",
+   "Frontend",
+   "Infrastructure",
+   "Libraries and Open-Source Technologies",
+   "Mobile",
+   "Security",
+   "No preference"
   ],
-  "rule": "x-citizenship",
-  "note": "set work_authorization.citizenship_status in the profile",
-  "profile_key": "work_authorization.citizenship_status",
+  "rule": "no-rule",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
   "count": 1,
   "companies": [
-   "Nex"
+   "Datadog"
   ]
  },
  {
@@ -2496,8 +2316,8 @@
   ]
  },
  {
-  "label": "Will this be your final internship before graduating?",
-  "kind": "radio",
+  "label": "Will participating in an internship during this period push your expected graduation date back?",
+  "kind": "select",
   "options": [
    "Yes",
    "No"
@@ -2507,22 +2327,7 @@
   "profile_key": "",
   "count": 1,
   "companies": [
-   "Palantir"
-  ]
- },
- {
-  "label": "Will you be enrolled in a degree seeking program during the Internship program dates of January 19 - April 23, 2027?",
-  "kind": "select",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "degree",
-  "note": "no matching option among ['Yes', 'No']",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Toshiba Global Commerce Solutions"
+   "Datadog"
   ]
  },
  {
@@ -2541,21 +2346,6 @@
   ]
  },
  {
-  "label": "Will you be officially enrolled during the internship?",
-  "kind": "radio",
-  "options": [
-   "Yes",
-   "No"
-  ],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "QuantCo"
-  ]
- },
- {
   "label": "Will you be returning to an undergraduate or graduate program after the internship if selected?",
   "kind": "select",
   "options": [
@@ -2570,22 +2360,6 @@
   "count": 1,
   "companies": [
    "Pure Storage"
-  ]
- },
- {
-  "label": "Will you now or in the future require company sponsorship to retain or extend your work authorization in the country where the job is located?",
-  "kind": "select",
-  "options": [
-   "Yes, I will require immigration sponsorship now to legally work in the country w",
-   "Yes, I will require immigration sponsorship in the future to legally work in the",
-   "No, I do not and will not require immigration sponsorship to legally work in the"
-  ],
-  "rule": "sponsorship",
-  "note": "options ask when sponsorship is needed: set work_authorization.requires_sponsorship_now",
-  "profile_key": "work_authorization.requires_sponsorship_now",
-  "count": 1,
-  "companies": [
-   "Together AI"
   ]
  },
  {
@@ -2635,6 +2409,18 @@
   ]
  },
  {
+  "label": "Writing Sample (please drop a link and include a password if one is required",
+  "kind": "text",
+  "options": [],
+  "rule": "link-password",
+  "note": "no answer in the candidate profile",
+  "profile_key": "",
+  "count": 1,
+  "companies": [
+   "Together AI"
+  ]
+ },
+ {
   "label": "Year of High School Graduation",
   "kind": "select",
   "options": [
@@ -2652,8 +2438,8 @@
    "Other"
   ],
   "rule": "x-high-school",
-  "note": "high-school question",
-  "profile_key": "education.high_school_name",
+  "note": "high-school question: set education.high_school_graduation",
+  "profile_key": "education.high_school_graduation",
   "count": 1,
   "companies": [
    "Palantir"

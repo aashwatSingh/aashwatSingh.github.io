@@ -58,10 +58,17 @@ EXTRACT_JS = r"""
     const label = clean(lab ? lab.innerText : (w.getAttribute('aria-label') || ''));
     const id = w.getAttribute('data-automation-id').slice('formField-'.length);
     const required = !!w.querySelector('[aria-required="true"], [required]') || /\*\s*$/.test((lab && lab.innerText) || '');
-    const base = {sel: tag(w), label: label || id, required, id, options: []};
+    const grp = w.closest('[role="group"][aria-labelledby]');
+    const head = grp && document.getElementById(grp.getAttribute('aria-labelledby'));
+    const base = {sel: tag(w), label: label || id, required, id, options: [], group: clean(head ? head.innerText : '')};
     const optLabel = c => clean((c.id && w.querySelector(`label[for="${CSS.escape(c.id)}"]`)?.innerText) || c.closest('label')?.innerText);
 
-    if (w.querySelector('input[type=file]')) { out.push({...base, widget: 'file', kind: 'file'}); return; }
+    if (w.querySelector('input[type=file]')) {
+      const scope = grp || w;
+      out.push({...base, widget: 'file', kind: 'file',
+                filled: !!scope.querySelector('[data-automation-id="file-upload-item"], [data-automation-id="file-upload-successful"]')});
+      return;
+    }
     const radios = [...w.querySelectorAll('input[type=radio]')];
     if (radios.length) {
       out.push({...base, widget: 'boxes', kind: 'radio', options: radios.map(optLabel), filled: radios.some(r => r.checked)});
@@ -132,8 +139,25 @@ class WorkdayAdapter(BaseAdapter):
             return False
 
     async def _click(self, page: Page, aid: str) -> None:
-        # Workday lays a transparent "click_filter" over its buttons; force the click through it.
-        await page.locator(AID.format(aid)).first.click(force=True)
+        # Workday lays a transparent "click_filter" over some buttons, and it is the overlay that carries
+        # the handler: a forced click on the button underneath is silently ignored. Click what a person
+        # would hit, and only force as a last resort.
+        el = page.locator(AID.format(aid)).first
+        try:
+            await el.click(timeout=2500)
+            return
+        except Exception:                                  # noqa: BLE001
+            pass
+        try:
+            label = " ".join((await el.inner_text(timeout=1500)).split())
+        except Exception:                                  # noqa: BLE001
+            label = ""
+        overlay = page.locator(f'[data-automation-id="click_filter"][aria-label="{label}"]') if label else None
+        if overlay is not None and await overlay.count():
+            await overlay.first.hover()
+            await overlay.first.click(timeout=5000)
+        else:
+            await el.click(force=True)
 
     async def current_step(self, page: Page) -> str:
         loc = page.locator(AID.format("progressBarActiveStep")).first
@@ -141,6 +165,37 @@ class WorkdayAdapter(BaseAdapter):
             return step_name(await loc.inner_text(timeout=1500)) if await loc.count() else ""
         except Exception:                                  # noqa: BLE001
             return ""
+
+    async def _page_ready(self, page: Page) -> None:
+        """The step bar updates before the page body: wait for the step's fields and its Next button."""
+        try:
+            await page.wait_for_selector(f'{AID.format("pageFooterNextButton")}, '
+                                         f'{AID.format("bottom-navigation-next-button")}',
+                                         state="visible", timeout=20000)
+            await page.wait_for_load_state("networkidle", timeout=8000)
+        except PWTimeout:
+            pass
+        for _ in range(2):                                     # Workday's transient error page: refresh, as it asks
+            if not await page.get_by_text("Something went wrong", exact=False).count():
+                break
+            await page.wait_for_timeout(4000)
+            await page.reload(wait_until="domcontentloaded")
+            try:
+                await page.wait_for_selector(f'{AID.format("pageFooterNextButton")}, '
+                                             f'{AID.format("bottom-navigation-next-button")}',
+                                             state="visible", timeout=25000)
+            except PWTimeout:
+                pass
+        count_js = """() => [...document.querySelectorAll('[data-automation-id^="formField-"]')]
+                               .filter(w => w.offsetParent !== null).length"""
+        last, stable = -1, 0
+        for _ in range(20):                                    # the previous page's button lingers: wait for
+            await page.wait_for_timeout(600)                   # the field count to appear and settle
+            n = await page.evaluate(count_js)
+            stable = stable + 1 if n == last and n > 0 else 0
+            last = n
+            if stable >= 2:
+                break
 
     async def _wait_step_change(self, page: Page, previous: str, seconds: float) -> str | None:
         """The new step name once the wizard leaves `previous`, 'DONE' on a confirmation, else None."""
@@ -187,7 +242,8 @@ class WorkdayAdapter(BaseAdapter):
             q = Question(label=r["label"], kind=r["kind"], required=bool(r["required"]),
                          options=r.get("options") or [], field_id=r.get("id") or "")
             fields.append(FormField(q, r["sel"], r["widget"], {"lazy_options": r.get("lazy", False),
-                                                               "parts": r.get("parts") or []}))
+                                                               "parts": r.get("parts") or [],
+                                                               "group": r.get("group") or ""}))
         return fields
 
     def special(self, f: FormField, profile: dict) -> Decision | None:
@@ -199,19 +255,76 @@ class WorkdayAdapter(BaseAdapter):
             return Decision("fill", ident["phone_digits"], "wd-phone")
         if "extension" in fid or "phone extension" in label:
             return Decision("skip", rule="wd-phone-extension")
+        group = f.extra.get("group") or ""
+        if f.widget == "file" and not re.search(r"transcript|cover letter|portfolio|writing sample", label + " " + group.lower()):
+            return Decision("fill", profile["resume_path"], "wd-resume")     # the page's Resume/CV drop zone
+        m = re.match(r"work experience (\d+)", group, re.I)
+        if m:
+            return self._work_experience(f, fid, profile, int(m.group(1)) - 1)
+        if re.match(r"education", group, re.I):
+            edu = profile["education"]
+            if "firstyear" in fid or "startdate" in fid:
+                return Decision("fill", f"{edu['start_year']}-{int(edu.get('start_month') or 8):02d}-01", "wd-edu-start")
+            if "lastyear" in fid or "enddate" in fid:
+                return Decision("fill", f"{edu['grad_year']}-{int(edu.get('grad_month') or 5):02d}-01", "wd-edu-end")
         return None
 
+    @staticmethod
+    def _work_experience(f: FormField, fid: str, profile: dict, index: int) -> Decision:
+        """Fill resume-parser gaps in 'Work Experience N' from the Nth job in the profile, never from guesses."""
+        jobs = profile.get("experience") or []
+        if index >= len(jobs):
+            return (Decision("unknown", rule="wd-experience", note="more job blocks on the page than jobs in the profile")
+                    if f.question.required else Decision("skip", rule="wd-experience"))
+        job = jobs[index]
+        current = str(job.get("current")).lower() == "true"
+        if "jobtitle" in fid:
+            return Decision("fill", job["title"], "wd-experience")
+        if "company" in fid:
+            return Decision("fill", job["company"], "wd-experience")
+        if "location" in fid:
+            return Decision("fill", job.get("location") or "", "wd-experience") if job.get("location") \
+                else Decision("skip", rule="wd-experience")
+        if "currentlyworkhere" in fid:
+            return Decision("fill", True, "wd-experience") if current else Decision("skip", rule="wd-experience")
+        if "startdate" in fid and job.get("start"):
+            return Decision("fill", f"{job['start']}-01", "wd-experience")
+        if "enddate" in fid:
+            return Decision("fill", f"{job['end']}-01", "wd-experience") if job.get("end") and not current \
+                else Decision("skip", rule="wd-experience")
+        if "description" in fid:
+            bullets = job.get("bullets") or []
+            text = "\n".join(f"- {b}" for b in bullets) if isinstance(bullets, list) else str(bullets)
+            return Decision("fill", text, "wd-experience") if text else Decision("skip", rule="wd-experience")
+        return Decision("unknown" if f.question.required else "skip", rule="wd-experience",
+                        note="unrecognised field in a work-experience block")
+
+    # Only the list that is open now: a closed dropdown's listbox can linger in the DOM for a moment.
+    _LISTBOX = '[role="listbox"]:visible >> nth=-1'
+
     async def _options(self, page: Page, f: FormField) -> list[str]:
-        await page.locator(f'{f.sel} button[aria-haspopup="listbox"]').first.click(force=True)
-        try:
-            await page.wait_for_selector('[role="listbox"] [role="option"]', timeout=4000)
-        except PWTimeout:
-            return []
-        return [" ".join(t.split()) for t in await page.locator('[role="listbox"] [role="option"]').all_inner_texts()]
+        for _ in range(10):                                    # let the previous dropdown's list go away
+            if not await page.locator('[role="listbox"]:visible').count():
+                break
+            await page.wait_for_timeout(200)
+        button = page.locator(f'{f.sel} button[aria-haspopup="listbox"]').first
+        await button.scroll_into_view_if_needed()
+        for attempt in range(3):                               # a click can land while the last list is closing
+            await button.click(force=True)
+            try:
+                await page.wait_for_selector('[role="listbox"] [role="option"]', state="visible", timeout=3000)
+                break
+            except PWTimeout:
+                if attempt == 2:
+                    return []
+                await page.wait_for_timeout(400)
+        box = page.locator(self._LISTBOX)
+        return [" ".join(t.split()) for t in await box.locator('[role="option"]').all_inner_texts()]
 
     async def read_options(self, page: Page, f: FormField) -> list[str]:
         options = await self._options(page, f)
         await page.keyboard.press("Escape")
+        await page.wait_for_timeout(250)
         return [o for o in options if o and not re.fullmatch(r"select( one)?", o, re.I)]
 
     async def read_value(self, page: Page, f: FormField):
@@ -233,10 +346,11 @@ class WorkdayAdapter(BaseAdapter):
             return
         if f.widget == "dropdown":
             await self._options(page, f)
-            opts = page.locator('[role="listbox"] [role="option"]')
+            opts = page.locator(self._LISTBOX).locator('[role="option"]')
             for i in range(await opts.count()):
                 if " ".join((await opts.nth(i).inner_text()).split()) == value:
                     await opts.nth(i).click()
+                    await page.wait_for_timeout(300)
                     return
             await page.keyboard.press("Escape")
             raise LookupError(f"option {value!r} not offered")
@@ -266,21 +380,70 @@ class WorkdayAdapter(BaseAdapter):
                     await page.keyboard.type(part)
             return
         if f.widget == "search":
-            box = page.locator(f'{f.sel} input').first
-            await box.click(force=True)
-            await box.fill(str(value))
+            await self._pick_prompt(page, f, str(value))
+            return
+        raise NotImplementedError(f.widget)
+
+    # Popup lists are rendered outside the field wrappers; other fields' selected items are not options.
+    _POPUP_JS = r"""() => [...document.querySelectorAll('[data-automation-id="promptOption"]')]
+        .filter(e => e.offsetParent !== null && !e.closest('[data-automation-id^="formField-"]'))
+        .map(e => (e.getAttribute('data-automation-label') || e.innerText || '').replace(/\s+/g, ' ').trim())"""
+    _SOURCE_ORDER = (r"job board|job site", r"linkedin", r"handshake", r"indeed", r"social media",
+                     r"internet|website|online", r"^other")
+
+    async def _click_popup_option(self, page: Page, text: str) -> None:
+        opts = page.locator('[data-automation-id="promptOption"]')
+        for i in range(await opts.count()):
+            o = opts.nth(i)
+            label = " ".join(((await o.get_attribute("data-automation-label")) or await o.inner_text()).split())
+            if label == text and await o.is_visible() and not await o.evaluate(
+                    "e => !!e.closest('[data-automation-id^=\"formField-\"]')"):
+                await o.click(force=True)
+                return
+        raise LookupError(f"option {text!r} disappeared")
+
+    async def _pick_prompt(self, page: Page, f: FormField, value: str) -> None:
+        """Workday's searchable picker. Some are trees ("How did you hear about us?": category, then source)."""
+        box = page.locator(f"{f.sel} input").first
+        selected = page.locator(f'{f.sel} [data-automation-id="selectedItem"]')
+        is_source = "source" in f.question.field_id.lower() or re.search(r"hear about|how did you", f.question.label, re.I)
+        want = value.lower()
+
+        def choose(options: list[str]) -> str | None:
+            for o in options:
+                if o.lower() == want:
+                    return o
+            for o in options:
+                if want and (want in o.lower() or o.lower() in want):
+                    return o
+            if is_source:
+                for pat in self._SOURCE_ORDER:
+                    for o in options:
+                        if re.search(pat, o, re.I):
+                            return o
+            return None
+
+        await box.click(force=True)
+        await page.wait_for_timeout(1200)
+        options = await page.evaluate(self._POPUP_JS)
+        if not choose(options) and not is_source:              # long lists only load what was searched for
+            await box.fill(value)
             await page.keyboard.press("Enter")
             await page.wait_for_timeout(1800)
-            options = page.locator('[data-automation-id="promptOption"]')
-            want = str(value).lower()
-            for i in range(await options.count()):
-                if want in (await options.nth(i).inner_text()).lower():
-                    await options.nth(i).click(force=True)
-                    await page.keyboard.press("Escape")
-                    return
-            await page.keyboard.press("Escape")
-            raise LookupError(f"{value!r} not found in the search list")
-        raise NotImplementedError(f.widget)
+            options = await page.evaluate(self._POPUP_JS)
+        for _ in range(4):                                     # walk down the tree until something is selected
+            pick = choose(options)
+            if not pick:
+                await page.keyboard.press("Escape")
+                raise LookupError(f"{value!r} not offered ({', '.join(options[:8])})")
+            await self._click_popup_option(page, pick)
+            await page.wait_for_timeout(1500)
+            if await selected.count():
+                await page.keyboard.press("Escape")
+                return
+            options = [o for o in await page.evaluate(self._POPUP_JS)]
+        await page.keyboard.press("Escape")
+        raise LookupError(f"could not select {value!r}")
 
     async def _upload_resume(self, page: Page, profile: dict, step: str) -> None:
         """The resume drop zone on 'My Experience' is not always inside a formField wrapper."""
@@ -292,7 +455,12 @@ class WorkdayAdapter(BaseAdapter):
                                          '[data-automation-id="file-upload-successful"]').count()
             if await drop.count() and not already:
                 await drop.set_input_files(profile["resume_path"])
-                await page.wait_for_timeout(4000)
+                try:                                       # Continue before the upload finishes is ignored
+                    await page.wait_for_selector('[data-automation-id="file-upload-successful"], '
+                                                 '[data-automation-id="file-upload-item"]', timeout=25000)
+                except PWTimeout:
+                    pass
+                await page.wait_for_timeout(1500)
         except Exception:                                  # noqa: BLE001 - best effort, the page is handed over if needed
             pass
 
@@ -303,7 +471,9 @@ class WorkdayAdapter(BaseAdapter):
         if step and not AUTH_STEP.search(step):
             return None                                        # already signed in (saved browser profile)
         portal = profile.get("portal") or {}
-        user, password = portal.get("username") or profile["identity"]["email"], portal.get("password") or ""
+        user = portal.get("username") or profile["identity"]["email"]
+        passwords = [x for x in (portal.get("passwords") or [portal.get("password")]) if x]
+        password = passwords[0] if passwords else ""
         try:                                                   # the step bar appears before the sign-in widgets
             await page.wait_for_selector(f'{AID.format("SignInWithEmailButton")}, {AID.format("email")}',
                                          state="visible", timeout=15000)
@@ -326,23 +496,27 @@ class WorkdayAdapter(BaseAdapter):
         if await self._visible(page, "SignInWithEmailButton"):
             await self._click(page, "SignInWithEmailButton")
             await page.wait_for_timeout(1500)
-        if not await self._visible(page, "email") and await self._visible(page, "signInLink"):
+        if not await self._visible(page, "signInSubmitButton") and await self._visible(page, "signInLink"):
             await self._click(page, "signInLink")              # landed on the create-account form
             await page.wait_for_timeout(1500)
-        if not await self._visible(page, "email"):
+        if not await self._visible(page, "email") or not await self._visible(page, "signInSubmitButton"):
             return await human("WORKDAY_LOGIN", f"Sign in to {host} in the browser window (unrecognised sign-in page)")
-        await page.fill(AID.format("email"), user)
-        await page.fill(AID.format("password"), password)
-        await self._click(page, "signInSubmitButton")
-        moved = await self._wait_step_change(page, step, 12)
-        if moved and not AUTH_STEP.search(moved):
-            return None
+        for attempt in passwords[:2]:                          # at most two tries per site per run
+            await page.fill(AID.format("email"), user)
+            await page.fill(AID.format("password"), attempt)
+            await self._click(page, "signInSubmitButton")
+            moved = await self._wait_step_change(page, step, 12)
+            if moved and not AUTH_STEP.search(moved):
+                return None
         self._sign_in_failed.add(host)                         # never retry this site in this run
         error = await self._errors(page)
 
         if self.create_accounts and await self._visible(page, "createAccountLink"):
             await self._click(page, "createAccountLink")
-            await page.wait_for_timeout(2000)
+            try:
+                await page.wait_for_selector(AID.format("verifyPassword"), state="visible", timeout=8000)
+            except PWTimeout:
+                return await human("WORKDAY_ACCOUNT", f"Create your account on {host} in the browser window")
             await page.fill(AID.format("email"), user)
             await page.fill(AID.format("password"), password)
             if await self._visible(page, "verifyPassword"):
@@ -387,8 +561,13 @@ class WorkdayAdapter(BaseAdapter):
         await self._click(page, "adventureButton")
         for _ in range(12):                                    # dialog with "Apply Manually", or straight to the wizard
             await page.wait_for_timeout(700)
-            if await self._visible(page, "applyManually"):
-                await self._click(page, "applyManually")
+            choice = ""
+            for x in ("autofillWithResume", "applyManually"):
+                if await self._visible(page, x):
+                    choice = x
+                    break
+            if choice:                                         # the resume parse pre-fills name, school and jobs
+                await self._click(page, choice)
                 break
             if await self.current_step(page):
                 break
@@ -412,6 +591,7 @@ class WorkdayAdapter(BaseAdapter):
             step = await self.current_step(page)
             if not step or REVIEW_STEP.search(step):
                 break
+            await self._page_ready(page)
             state.handled.clear()
             before = len(state.unknown_fields)
             try:

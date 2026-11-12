@@ -27,6 +27,10 @@ _KEY = re.compile(r"\bset ((?:work_authorization|logistics|education|skills)\.[a
 # Rules whose unanswered questions map to one profile key even though the note does not name it.
 RULE_KEYS = {
     "x-citizenship": "work_authorization.citizenship_status",
+    "x-citizen-countries": "work_authorization.country_of_citizenship",
+    "x-debarment": "logistics.excluded_from_federal_programs",
+    "x-drug-screen": "logistics.consents_to_drug_screening",
+    "x-reference-check": "logistics.consents_to_reference_checks",
     "x-prior-internship": "logistics.has_prior_internship",
     "x-prior-internship-count": "logistics.prior_internship_count",
     "x-further-education": "logistics.pursuing_further_education_after_degree",

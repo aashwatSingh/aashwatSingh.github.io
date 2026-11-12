@@ -44,7 +44,8 @@ KINDS = [
     ("goals", r"(want|hope|expect|looking) to (get out of|gain|learn|achieve|accomplish) .{0,60}(intern|program|role|"
               r"experience|position)|get out of (the|this|your) .{0,40}(intern|program)|"
               r"end of (this|the|your) internship.{0,60}hope to|hope to walk away with|"
-              r"most excited to (work on|learn|build) .{0,40}intern|goals? for (this|the|your) internship"),
+              r"most excited to (work on|learn|build) .{0,40}intern|goals? for (this|the|your) internship|"
+              r"why are you (looking|searching) for (a )?new opportunit"),
     ("why_swe", r"aspect of software engineering|why (software engineering|computer science|engineering)\b(?!.{0,30}\bat\b)|"
                 r"why .{0,30}become an? (software )?engineer|"
                 r"(interest|passion) in (technology|software|engineering|computer science)$"),

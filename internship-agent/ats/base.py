@@ -37,7 +37,7 @@ class FormField:
 
     @property
     def key(self) -> str:
-        return f"{self.widget}|{self.question.field_id or self.question.label}"
+        return f"{self.widget}|{self.extra.get('group', '')}|{self.question.field_id or self.question.label}"
 
 
 @dataclass

@@ -547,6 +547,11 @@ class AnswerEngine:
                     return Unknown("options ask when sponsorship is needed: set work_authorization.requires_sponsorship_now")
                 key = "internship_work_authorization" if now_q else "future_sponsorship_visa"
                 value = auth.get(key)
+                if needs and re.search(r"f-?1|student", auth.get("visa_category") or "", re.I):
+                    # an F-1 student interns on CPT and works after graduation on OPT
+                    hit = pick_pattern(q.options, [r"\bf-?1\b", r"student visa", r"\bcpt\b", r"\bopt\b"])
+                    if hit:
+                        return Text(hit, [rf"^{re.escape(hit)}$"])
                 if value:
                     return Text(value, [rf"^{re.escape(value)}\b", rf"\b{re.escape(value)}\b"])
                 return Unknown(f"options are visa categories: set work_authorization.{key}")
@@ -680,8 +685,11 @@ class AnswerEngine:
             return Text(edu["gpa"])
 
         def start_date(q, label, ctx):
-            iso = log["earliest_start"]
+            iso = log.get("preferred_start") or log["earliest_start"]
             month = MONTHS[int(iso[5:7]) - 1]
+            if q.kind in CHOICE_KINDS and pick_yes_no(q.options, True):
+                # "Are you able to start on May 18th?" - yes when the date is inside the stated window
+                return YesNo(True) if _within_window(label, log) is not False else Unknown("start date outside your window")
             if q.kind in CHOICE_KINDS:
                 return Choice([rf"^{month}\b[^-–]*{iso[:4]}$", rf"^{month}$", r"summer.{0,6}2027", r"^summer\b"],
                               exclude=r"2026|2028|spring|fall|winter")
@@ -733,13 +741,14 @@ class AnswerEngine:
         def heard(q, label, ctx):
             co = re.escape(ctx.company) if ctx.company else "company"
             return Choice([
+                r"job board|job site|online job", r"linkedin", r"handshake", r"indeed",
                 r"^(company|corporate|careers?|our) ?(web)?site$|careers? (page|site)|company (careers|website)",
                 rf"{co}.{{0,12}}(website|careers|career site|job board)|"
                 r"\b(website|careers? (site|page|website))\b",
-                r"job board", r"linkedin", r"^other\b"],
+                r"^other\b"],
                 text=log["heard_about"][0],
                 exclude=r"employee|referr|recruiter|event|fair|campus|school|university|college|"
-                        r"handshake|\bseo\b|office|cent(er|re)|professor|club|friend")
+                        r"\bseo\b|office|cent(er|re)|professor|club|friend")
 
         def applied_before(q, label, ctx):
             return YesNo(bool(ctx.applied_before) or log["previously_worked_or_applied"])
@@ -997,12 +1006,16 @@ class AnswerEngine:
                 return Text(hit, [rf"^{re.escape(hit)}$"]) if hit else Unknown("no matching experience range")
             return Text(value)
 
-        status = (auth.get("citizenship_status") or "").lower()
+        status = f"{auth.get('citizenship_status') or ''} {auth.get('visa_category') or ''}".strip().lower()
         is_citizen = bool(re.search(r"\bcitizen\b", status)) and "non" not in status
         is_pr = bool(re.search(r"permanent resident|green card|\blpr\b", status))
         status_patterns = ([r"u\.?s\.? citizen|^citizen"] if is_citizen else
                            [r"permanent resident|green card"] if is_pr else
-                           [r"f-?1|student visa|\bopt\b|\bcpt\b"] if re.search(r"f-?1|student", status) else
+                           [r"f-?1|student visa|\bopt\b|\bcpt\b", r"foreign (national|person)",
+                            r"non-?u\.?s\.? citizen|not a u\.?s\.? (citizen|person)|non-?citizen",
+                            r"visa holder|(work|temporary|non-?immigrant) visa|other work authorization",
+                            r"authorized to work.{0,60}(visa|temporar)", r"^other\b", r"none of the above"]
+                           if re.search(r"f-?1|student", status) else
                            [re.escape(status)] if status else [])
 
         def citizenship(q, label, ctx):
@@ -1013,7 +1026,9 @@ class AnswerEngine:
                 if is_citizen or is_pr:
                     return Choice(status_patterns)
                 if auth.get("us_person") is False:
-                    return Choice([r"^none of the above", r"^none\b", r"not a u\.?s\.? person"])
+                    return Choice([r"^none of the above", r"^none\b", r"not a u\.?s\.? person", r"foreign (person|national)",
+                                   r"(work|temporary|non-?immigrant) visa|visa holder|other work authorization",
+                                   r"authorized to work.{0,80}(visa|temporar|other)", r"^other\b"])
                 return Unknown("set work_authorization.us_person (and citizenship_status) in the profile")
             if "deemed export" in label and q.kind in CHOICE_KINDS:
                 if auth.get("us_person") is None:
@@ -1021,6 +1036,8 @@ class AnswerEngine:
                 return YesNo(not auth["us_person"])
             if not status:
                 return Unknown("set work_authorization.citizenship_status in the profile")
+            if q.kind in CHOICE_KINDS and re.search(r"permanent basis|without (needing|requiring|the need for).{0,30}sponsor", label):
+                return Choice([r"^no\b"]) if not (is_citizen or is_pr) else None
             if re.search(r"north korea|syria|iran|cuba", label):
                 return YesNo(bool(re.search(r"north korea|syria|iran|cuba", status)))
             if q.kind in CHOICE_KINDS and pick_yes_no(q.options, True):
@@ -1040,7 +1057,10 @@ class AnswerEngine:
             if has is None:
                 return Unknown("set work_authorization.has_security_clearance in the profile")
             if re.search(r"eligib|able to obtain|obtain and maintain|willing to (obtain|undergo)", label):
-                return YesNo(True) if is_citizen else Unknown("clearance eligibility depends on citizenship status")
+                if is_citizen:
+                    return YesNo(True)
+                # eligibility for a U.S. clearance requires citizenship
+                return YesNo(False) if status and q.kind in CHOICE_KINDS else Unknown("clearance eligibility depends on citizenship status")
             if has:
                 return Unknown("clearance level needs a human answer")
             if q.kind in CHOICE_KINDS:
@@ -1070,6 +1090,9 @@ class AnswerEngine:
             if pick_yes_no(q.options, True) is None and re.search(
                     r"citizen|permanent resident|green card|visa|sponsor", " ".join(q.options).lower()):
                 if re.search(r"any employer|present employer", " ".join(q.options).lower()):
+                    hit = pick_pattern(q.options, [r"\b(require|need)s?\b.{0,80}sponsor"]) if auth["requires_sponsorship"] else None
+                    if hit:
+                        return Text(hit, [rf"^{re.escape(hit)}$"])
                     return Unknown("choose which authorization statement applies to you (answer_blockers.py)")
                 if not status:
                     return Unknown("options ask how you are authorized: set work_authorization.citizenship_status")
@@ -1178,7 +1201,13 @@ class AnswerEngine:
             # --- extended coverage: checked before the general rules ---------------
             ("x-high-school", r"high school", lambda q, label, ctx: YesNo(False)
              if re.search(r"(enrolled|student|attend)", label) and q.kind in CHOICE_KINDS | {"checkbox"}
-             and "graduat" not in label else Unknown("high-school question")),
+             and "graduat" not in label
+             else Text(edu["high_school_name"]) if edu.get("high_school_name") and q.kind in ("text", "textarea")
+             and re.search(r"^(name of )?(your )?high school( name)?\b.{0,12}$|name of (your|the) high school|high school (you )?attended", label)
+             else Text(str(edu["high_school_graduation"])[:4], [rf"^{str(edu['high_school_graduation'])[:4]}$"])
+             if edu.get("high_school_graduation") and re.search(r"year", label)
+             else Unknown("high-school question" + ("" if edu.get("high_school_graduation") else
+                                                    ": set education.high_school_graduation"))),
             ("x-housing", r"(secure|arrange|have|find|obtain) .{0,40}(accommodations?|housing) in\b",
              lambda q, label, ctx: None if q.kind not in CHOICE_KINDS
              else YesNo(log["willing_to_relocate"]) if re.search(r"able to|can you|secure|arrange|find|obtain", label)
@@ -1349,8 +1378,32 @@ class AnswerEngine:
              else Text(addr["state"], [rf"^{addr['state']}$", rf"^{addr['state_abbr']}$"])
              if match_option(q.options, addr["state"]) or match_option(q.options, addr["state_abbr"])
              else YesNo(addr["country"].lower().startswith("united states"))),
+            ("x-contact-method", r"(best|preferred) (way|method|means) (to|of) (contact|reach|communicat)\w*( with)? you|"
+                                 r"preferred (contact|communication) method|how (should|can) we (best )?(contact|reach) you",
+             lambda q, *_: Choice([r"e-?mail"]) if q.kind in CHOICE_KINDS
+             else Text(f"Email ({ident['email']})") if q.kind in ("text", "textarea") else None),
+            ("x-debarment", r"excluded from federal (procurement|programs)|list of parties excluded|"
+                            r"\b(debarred|debarment)\b|suspended .{0,40}federal (contract|program)",
+             flag("excluded_from_federal_programs", "legal status not stated")),
+            ("x-final-internship", r"(final|last) internship before (you )?graduat",
+             lambda q, *_: YesNo(grad <= (2028, 8)) if q.kind in CHOICE_KINDS else None),
+            ("x-enrolled-during", r"(officially |currently )?enrolled .{0,40}(during|throughout|for the duration of) "
+                                  r"(the |your |this )?(internship|program|co-?op)",
+             lambda q, *_: YesNo(grad > (2027, 9)) if q.kind in CHOICE_KINDS else None),
+            ("x-when-intern", r"when would you like to intern",
+             lambda q, *_: Choice([r"^summer\b", r"summer"]) if q.kind in CHOICE_KINDS else None),
+            ("x-visa-based", r"eligibility .{0,40}based on a? ?(work |student )?visa",
+             lambda q, *_: YesNo(not (is_citizen or is_pr)) if status and q.kind in CHOICE_KINDS else None),
+            ("x-drug-screen", r"drug (test|screen)|substance (test|screen)",
+             flag("consents_to_drug_screening", "consent needs your decision")),
+            ("x-reference-check", r"reference checks?|contact (your )?(references|previous employers)|employment verification",
+             flag("consents_to_reference_checks", "consent needs your decision")),
+            ("x-prior-experience", r"(prior|previous|any) .{0,30}(industry|research|work|professional) experience\b(?!.{0,40}\b(with|in|using)\b)",
+             lambda q, label, ctx: YesNo(bool(log["has_prior_internship"])) if q.kind in CHOICE_KINDS
+             and log.get("has_prior_internship") is not None else None),
             ("x-prior-internship", r"(prior|previous|any|professional) .{0,25}(internship|co-?op).{0,25}experience|"
-                                   r"completed .{0,25}(previous|prior) internship",
+                                   r"completed .{0,25}(previous|prior) internship|"
+                                   r"(have|had) .{0,20}(previous|prior|past|an?) internships?\b",
              flag("has_prior_internship", "whether earlier roles count as internships is your call")),
             ("x-grading-scale", r"grading scale|gpa scale", lambda q, *_: Choice(
                 [rf"^{re.escape(edu.get('gpa_scale') or '4.0')}\b", r"\b4\.0\b"], text=edu.get("gpa_scale") or "4.0")),
@@ -1405,6 +1458,12 @@ class AnswerEngine:
              and q.kind in CHOICE_KINDS and pick_yes_no(q.options, True) else None),
             ("sponsorship", r"sponsor|\bfil(e|ing) (a |an )?petition|employment[- ]?based immigration|"
                             r"employment eligibility status", sponsorship),
+            ("x-certify", r"\bcertify\b.{0,120}(true|accurate|complete)|facts set forth .{0,80}true",
+             lambda q, *_: Check() if q.kind == "checkbox" else None),
+            ("x-citizen-countries", r"(list|state|provide|what) .{0,60}countr(y|ies) .{0,40}(citizen|national)|"
+                                    r"countr(y|ies) of citizenship",
+             lambda q, *_: Text(auth["country_of_citizenship"]) if auth.get("country_of_citizenship")
+             and q.kind in ("text", "textarea") else Unknown("set work_authorization.country_of_citizenship")),
             ("never-answer", r"citizen|u\.?s\.? person|\bitar\b|export control|\bear\b|green card|"
                              r"permanent resident|visa (status|type|category)|immigration status|"
                              r"(current|type of|which|what) visa|work visa|\bopt\b(?! ?-?(in|out))|\bcpt\b|clearance|"

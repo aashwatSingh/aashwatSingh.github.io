@@ -56,6 +56,12 @@ PROFILE_FIELDS = [
     ("education.sat_score", "text", "SAT score (Enter keeps answering N/A)"),
     ("education.act_score", "text", "ACT score (Enter keeps answering N/A)"),
     ("spoken_languages", "list", "Languages you speak, comma separated"),
+    ("work_authorization.country_of_citizenship", "text",
+     "Country (or countries) of citizenship, for export-control questions that ask you to list them"),
+    ("logistics.consents_to_drug_screening", "bool", "Do you consent to a pre-employment drug screen where one is required?"),
+    ("logistics.consents_to_reference_checks", "bool", "May employers contact your references / verify past employment?"),
+    ("logistics.excluded_from_federal_programs", "bool",
+     "Have you ever been on the federal excluded-parties (debarment) list?"),
 ]
 
 

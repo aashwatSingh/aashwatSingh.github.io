@@ -74,12 +74,21 @@ def test_never_answered(label):
     blocked(label)
 
 
-def test_ambiguous_authorization_options_are_blocked():
-    blocked("Are you legally authorized to work in the United States?", options=[
+def test_authorization_statement_follows_sponsorship_need():
+    assert "require sponsorship" in filled("Are you legally authorized to work in the United States?", options=[
         "I am authorized to work in the United States for any employer",
         "I am authorized to work in the United States for my present employer only",
         "I require sponsorship to work in the United States",
         "I am not authorized to work in the United States"])
+
+
+def test_contact_method_and_new_rules():
+    assert filled("What is the best way to contact you?", kind="textarea").lower().startswith("email")
+    assert filled("Will this be your final internship before graduating?", kind="radio", options=["Yes", "No"]) == "Yes"
+    assert filled("Will you be officially enrolled during the internship?", kind="radio", options=["Yes", "No"]) == "Yes"
+    assert filled("When would you like to intern with us?", kind="radio",
+                  options=["Summer", "Off-cycle (e.g. during spring or fall)"]) == "Summer"
+    assert filled("How did you hear about us?", options=["Referral", "Indeed", "Job Board", "Other"]) == "Job Board"
 
 
 # --- things that must not be answered by keyword accident --------------------
@@ -505,7 +514,7 @@ def test_short_fact_rules_do_not_answer_long_questions():
 
 def test_round_seven_blockers():
     sources = ["Company Website", "LinkedIn", "YouTube", "University – Career Services", "Glassdoor"]
-    assert filled("Select One", kind="radio", options=sources) == "Company Website"
+    assert filled("Select One", kind="radio", options=sources) == "LinkedIn"
     blocked("Select One", kind="radio", options=["Red", "Green", "Blue"])
     areas = ["iOS", "Backend", "Cloud infrastructure", "Android", "Machine Learning", "Data Science", "Product"]
     assert filled("What best describes the type of opportunities you're interested in:", kind="checkbox_group",
