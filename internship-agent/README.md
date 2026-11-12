@@ -66,6 +66,8 @@ python agent_runner.py --local-blitz --dedup-level role --max-per-company 3
   and Submit is pressed once the code is in). On confirmation it writes the row to
   `internship_tracker.xlsx` and moves to the next posting. `--assist SECONDS` is the same wait
   with your own timeout; `--browser-channel` picks the browser.
+* `--only-ready` restricts a run to the postings in `ready_to_submit.csv` (every required question answered
+  in your last `--dry-run` sweep; run `python report.py` after the sweep to write it).
 * `--dedup-level role --max-per-company N` allows several roles at one company, capped at N
   counting what is already in the tracker.
 * Without `--assist` the runner is fully unattended: anything needing a human goes to
@@ -199,12 +201,16 @@ attest the answers are your own are never drafted. Read `custom_answers.json` be
 python agent_runner.py --local-blitz --ats Workday --workday-manual-sign-in
 ```
 
-Workday is opt-in. Run against live sites so far: sign-in, account creation (`--workday-create-accounts`, then
-you click the verification e-mail), Autofill with Resume, My Information, My Experience and the first Application
-Questions page, on one tenant. Later pages (Voluntary Disclosures, Self Identify, Review) use the same code but
-have not been reached yet, so expect to finish pages by hand at first. It never clicks the final Submit (you
-review and submit), tries at most two of `portal.passwords` per site per run, and creates accounts only with the
-flag. Stepping through pages saves a draft in your Workday account even in `--dry-run`.
+Workday is opt-in. Walked end to end on one live tenant in dry-run: account creation
+(`--workday-create-accounts`, then you click the verification e-mail), sign-in, Autofill with Resume, My
+Information, My Experience (adds your two most recent jobs when the parser finds none), both Application
+Questions pages, Voluntary Disclosures, Self Identify, and stop at Review. Other tenants use the same page
+types with their own questions, so expect some to stop for an answer. It never clicks the final Submit (you
+review and submit), tries at most two of `portal.passwords` per site per run, and creates accounts only with
+the flag. Stepping through pages saves a draft in your Workday account even in `--dry-run`; pre-filled
+dropdowns in a saved draft are re-checked against your profile. Workday sometimes answers back-to-back
+sessions with a "Something went wrong" page: the posting goes to manual review with that note and works on a
+later run.
 
 ## Files it writes
 

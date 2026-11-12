@@ -117,6 +117,22 @@ def test_round_nine_user_answers():
             options=["Yes", "No"])
 
 
+def test_unrestricted_authorization_is_no_when_sponsorship_is_needed():
+    label = ("As required by the Immigration Reform and Control Act of 1986 (IRCA), Acme has a legal obligation to "
+             "employ only persons who can establish identity and authorization to work in the United States. Do you "
+             "currently have unrestricted employment authorization that will allow you to work with any employer in "
+             "the United States for an unlimited duration?")
+    assert filled(label, options=["Yes", "No"]) == "No"
+
+
+def test_workday_question_wordings():
+    assert filled("What is your current G.P.A.?", kind="textarea")
+    assert filled("The internship program begins Monday, May 24, 2027 through Friday, August 6, 2027",
+                  options=["Yes", "No"]) == "Yes"
+    blocked("The internship program begins Monday, January 11, 2027 through Friday, April 30, 2027",
+            options=["Yes", "No"])
+
+
 # --- things that must not be answered by keyword accident --------------------
 @pytest.mark.parametrize("label,kind", [
     ("Why did you want to become an engineer in your respective discipline?", "textarea"),

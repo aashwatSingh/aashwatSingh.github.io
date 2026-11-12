@@ -132,8 +132,17 @@ def select_jobs(queue: list[dict], args) -> list[dict]:
         return [job]
     wanted = None if args.ats == "all" else {a.strip().lower() for a in args.ats.split(",")}
     statuses = {"pending"} | ({"manual_review", "error"} if args.retry_manual else set())
-    return [j for j in queue if j.get("status", "pending") in statuses
+    jobs = [j for j in queue if j.get("status", "pending") in statuses
             and (wanted is None or j["ats"].lower() in wanted)]
+    if args.only_ready:
+        path = config.BASE / "ready_to_submit.csv"
+        if not path.exists():
+            raise SystemExit("--only-ready needs ready_to_submit.csv: run a --dry-run sweep, then `python report.py`")
+        import csv
+        with path.open(encoding="utf-8") as fh:
+            ready = {dedup.canonical_url(r["URL"]) for r in csv.DictReader(fh)}
+        jobs = [j for j in jobs if dedup.canonical_url(j["url"]) in ready]
+    return jobs
 
 
 async def run(args) -> int:
@@ -306,6 +315,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="run on your own machine: visible browser with a persistent ./chrome_profile, fill and "
                          "submit everything, and when a site asks for a CAPTCHA or an emailed code ring the "
                          "bell and wait up to 120 s for you to do that one step, then record and move on")
+    ap.add_argument("--only-ready", action="store_true",
+                    help="only postings listed in ready_to_submit.csv (fully filled in the last dry-run sweep)")
     ap.add_argument("--only-url", help="apply to this single posting")
     ap.add_argument("--company", help="company name for --only-url postings not in the queue")
     ap.add_argument("--title", help="role title for --only-url postings not in the queue")

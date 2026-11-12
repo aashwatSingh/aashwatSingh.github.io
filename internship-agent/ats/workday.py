@@ -86,7 +86,8 @@ EXTRACT_JS = r"""
     const dd = w.querySelector('button[aria-haspopup="listbox"]');
     if (dd) {
       const shown = clean(dd.innerText);
-      out.push({...base, widget: 'dropdown', kind: 'select', lazy: true, filled: !!shown && !/^select( one)?$/i.test(shown)});
+      out.push({...base, widget: 'dropdown', kind: 'select', lazy: true, shown,
+                filled: !!shown && !/^select( one)?$/i.test(shown)});
       return;
     }
     const dateParts = w.querySelectorAll('[data-automation-id^="dateSection"][data-automation-id$="-input"]');
@@ -176,7 +177,7 @@ class WorkdayAdapter(BaseAdapter):
         except PWTimeout:
             pass
         for _ in range(2):                                     # Workday's transient error page: refresh, as it asks
-            if not await page.get_by_text("Something went wrong", exact=False).count():
+            if not await self._error_page(page):
                 break
             await page.wait_for_timeout(4000)
             await page.reload(wait_until="domcontentloaded")
@@ -237,13 +238,19 @@ class WorkdayAdapter(BaseAdapter):
     async def extract(self, page: Page, include_filled: bool = False) -> list[FormField]:
         fields = []
         for r in await page.evaluate(EXTRACT_JS):
-            if (r.get("filled") and not include_filled) or r.get("kind") == "password":
+            if r.get("kind") == "password":
                 continue
-            q = Question(label=r["label"], kind=r["kind"], required=bool(r["required"]),
+            # A saved draft keeps old values, so filled dropdowns are re-checked (never required: a value
+            # the rules cannot improve on is left as it is). Other filled fields are left alone.
+            recheck = bool(r.get("filled")) and r["widget"] == "dropdown" and not include_filled
+            if r.get("filled") and not include_filled and not recheck:
+                continue
+            q = Question(label=r["label"], kind=r["kind"], required=bool(r["required"]) and not recheck,
                          options=r.get("options") or [], field_id=r.get("id") or "")
             fields.append(FormField(q, r["sel"], r["widget"], {"lazy_options": r.get("lazy", False),
                                                                "parts": r.get("parts") or [],
-                                                               "group": r.get("group") or ""}))
+                                                               "group": r.get("group") or "",
+                                                               "current": r.get("shown") or ""}))
         return fields
 
     def special(self, f: FormField, profile: dict) -> Decision | None:
@@ -308,9 +315,14 @@ class WorkdayAdapter(BaseAdapter):
                 break
             await page.wait_for_timeout(200)
         button = page.locator(f'{f.sel} button[aria-haspopup="listbox"]').first
-        await button.scroll_into_view_if_needed()
         for attempt in range(3):                               # a click can land while the last list is closing
-            await button.click(force=True)
+            # centre it: at the top edge it sits under sticky headers and cookie banners
+            await button.evaluate("e => e.scrollIntoView({block: 'center'})")
+            try:
+                await button.click(timeout=2000)
+            except Exception:                                  # noqa: BLE001 - covered: open it from the keyboard
+                await button.focus()
+                await page.keyboard.press("Space")
             try:
                 await page.wait_for_selector('[role="listbox"] [role="option"]', state="visible", timeout=3000)
                 break
@@ -345,6 +357,8 @@ class WorkdayAdapter(BaseAdapter):
             await page.locator(f"{f.sel} textarea, {f.sel} input:not([type=hidden])").first.fill(str(value))
             return
         if f.widget == "dropdown":
+            if f.extra.get("current") == value:
+                return                                         # already holds the right value
             await self._options(page, f)
             opts = page.locator(self._LISTBOX).locator('[role="option"]')
             for i in range(await opts.count()):
@@ -376,8 +390,12 @@ class WorkdayAdapter(BaseAdapter):
             for aid, part in (("dateSectionMonth-input", m), ("dateSectionDay-input", d), ("dateSectionYear-input", y)):
                 box = page.locator(f'{f.sel} [data-automation-id="{aid}"]')
                 if await box.count():
-                    await box.first.click(force=True)
-                    await page.keyboard.type(part)
+                    await box.first.evaluate("e => e.scrollIntoView({block: 'center'})")
+                    try:
+                        await box.first.click(timeout=2000)
+                    except Exception:                          # noqa: BLE001 - covered or off-screen: use focus
+                        await box.first.focus()
+                    await page.keyboard.type(part, delay=40)
             return
         if f.widget == "search":
             await self._pick_prompt(page, f, str(value))
@@ -444,6 +462,31 @@ class WorkdayAdapter(BaseAdapter):
             options = [o for o in await page.evaluate(self._POPUP_JS)]
         await page.keyboard.press("Escape")
         raise LookupError(f"could not select {value!r}")
+
+    async def _ensure_experience(self, page: Page, profile: dict, step: str) -> None:
+        """If the resume parse produced no 'Work Experience' block, add one per job (the two most recent)."""
+        if not re.search(r"experience", step, re.I):
+            return
+        jobs = (profile.get("experience") or [])[:2]
+        count_js = """() => new Set([...document.querySelectorAll('[role="group"][aria-labelledby]')]
+            .map(g => (document.getElementById(g.getAttribute('aria-labelledby')) || {}).innerText || '')
+            .filter(t => /^work experience \\d+/i.test(t.trim()))).size"""
+        try:
+            have = await page.evaluate(count_js)
+            while have < len(jobs):
+                # the Work Experience section's Add / Add Another button is the first one on the page
+                button = page.locator(AID.format("add-button")).first
+                if not await button.count():
+                    return
+                await button.evaluate("e => e.scrollIntoView({block: 'center'})")
+                await button.click(timeout=4000)
+                await page.wait_for_timeout(1200)
+                now = await page.evaluate(count_js)
+                if now <= have:
+                    return                                     # nothing was added: leave it to the candidate
+                have = now
+        except Exception:                                      # noqa: BLE001 - best effort
+            return
 
     async def _upload_resume(self, page: Page, profile: dict, step: str) -> None:
         """The resume drop zone on 'My Experience' is not always inside a formField wrapper."""
@@ -535,6 +578,7 @@ class WorkdayAdapter(BaseAdapter):
 
     async def _enter_wizard(self, page: Page) -> bool:
         """From the posting: Apply, then 'Autofill with Resume' (else 'Apply Manually'). True once a step shows."""
+        await self._dismiss_banner(page)
         await self._click(page, "adventureButton")
         for _ in range(12):                                    # dialog with the choices, or straight to the wizard
             await page.wait_for_timeout(700)
@@ -554,8 +598,23 @@ class WorkdayAdapter(BaseAdapter):
             await page.wait_for_timeout(700)
         return False
 
+    async def _dismiss_banner(self, page: Page) -> None:
+        """Cookie banners are sticky and cover controls; decline (or close) once."""
+        for aid in ("legalNoticeDeclineButton", "legalNoticeAcceptButton"):
+            if await self._visible(page, aid):
+                try:
+                    await page.locator(AID.format(aid)).first.click(timeout=2500)
+                    await page.wait_for_timeout(400)
+                except Exception:                              # noqa: BLE001
+                    pass
+                return
+
     async def _error_page(self, page: Page) -> bool:
-        return await page.get_by_text("Something went wrong", exact=False).count() > 0
+        hit = page.get_by_text("Something went wrong", exact=False)
+        try:                                                   # the text also sits hidden in the page template
+            return await hit.count() > 0 and await hit.first.is_visible()
+        except Exception:                                      # noqa: BLE001
+            return False
 
     # ---- flow ------------------------------------------------------------------------
     async def apply(self, page: Page, job: dict, engine, ctx, *, dry_run: bool, shot_path: str) -> ApplyResult:
@@ -596,21 +655,35 @@ class WorkdayAdapter(BaseAdapter):
         state, learned, restarts = FormState(), [], 0
         for _ in range(18):
             step = await self.current_step(page)
+            for _ in range(25):                                # the step bar is empty while a page loads
+                if step and not AUTH_STEP.search(step):
+                    break
+                await page.wait_for_timeout(700)
+                step = await self.current_step(page)
             if not step or REVIEW_STEP.search(step):
                 break
             await self._page_ready(page)
-            if await self._error_page(page) and restarts < 2:  # refresh did not clear it: re-enter from the posting
+            if await self._error_page(page):                   # a refresh did not clear Workday's error page:
+                if restarts >= 2:                              # back off, then resume the draft from the posting
+                    await _screenshot(page, shot_path)
+                    return ApplyResult(MANUAL_REVIEW, "WORKDAY_PAGE", f"[{step}] Workday kept showing its "
+                                       "'Something went wrong' page; the draft is saved, try again later",
+                                       state.answers, state.unknowns, shot_path)
                 restarts += 1
-                await page.wait_for_timeout(5000)
+                await page.wait_for_timeout(20000 * restarts)
                 await page.goto(job["url"], wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT_S * 1000)
-                await page.wait_for_selector(AID.format("adventureButton"), timeout=25000)
-                if not await self._enter_wizard(page):
-                    break
+                try:
+                    await page.wait_for_selector(AID.format("adventureButton"), timeout=30000)
+                    await page.wait_for_timeout(1500)
+                    await self._enter_wizard(page)
+                except PWTimeout:
+                    pass
                 continue
             state.handled.clear()
             before = len(state.unknown_fields)
             try:
                 answered_before = len(state.answers)
+                await self._ensure_experience(page, engine.p, step)
                 await self.answer_form(page, job, engine, ctx, text, state)
                 if not any(a["kind"] == "file" and a["action"] == "fill" for a in state.answers[answered_before:]):
                     await self._upload_resume(page, engine.p, step)

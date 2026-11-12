@@ -255,6 +255,8 @@ def gpa_option(options: list[str], gpa: float) -> str | None:
             continue
         if len(nums) >= 2:
             ok = min(nums[:2]) <= gpa <= max(nums[:2])
+        elif re.search(r"or (below|less|under|lower)", low):
+            ok = gpa <= nums[0]
         elif re.search(r"below|under|less than|lower than|<", low):
             ok = gpa < nums[0]
         elif re.search(r"above|over|greater|higher|at least|or (above|higher|more)|\+|>", low):
@@ -659,6 +661,11 @@ class AnswerEngine:
                 if windowed:
                     return Text(windowed, [rf"^{re.escape(windowed)}$"])
                 with_year = [o for o in q.options if year in o]
+                if not with_year:                            # "2027 & later" / "2027 or after"
+                    later = [o for o in q.options if re.search(r"(&|and|or) (later|after|beyond)|\+\s*$", o)
+                             and re.search(r"20\d\d", o) and int(re.search(r"20\d\d", o).group()) <= int(year)]
+                    if len(later) == 1:
+                        return Text(later[0], [rf"^{re.escape(later[0])}$"])
                 if len(with_year) == 1:
                     return Text(with_year[0], [re.escape(with_year[0])])
                 season = [o for o in with_year if re.search(rf"{grad_month}|spring", o, re.I)]
@@ -1188,6 +1195,19 @@ class AnswerEngine:
         def na_fallback(q, label, ctx):
             return Text("N/A") if q.required and q.kind in ("text", "textarea") else None
 
+        def sponsor_statement(q, label, ctx):
+            """Option lists made of full sentences about sponsorship rather than Yes / No."""
+            if q.kind not in CHOICE_KINDS or not auth["requires_sponsorship"]:
+                return None
+            opts = [o for o in q.options if len(o) > 14 and re.search(r"sponsor", o, re.I)
+                    and not re.match(r"\s*no\b", o, re.I) and not re.search(r"(do|will) not (need|require)|without", o, re.I)]
+            if not opts:
+                return None
+            order = [r"now or (at any point )?(in )?the future", r"\bfuture\b", r"will require|/will require"] \
+                if auth.get("requires_sponsorship_now") is False else [r"now or (at any point )?(in )?the future"]
+            hit = pick_pattern(opts, order) or (opts[0] if len(opts) == 1 else None)
+            return Text(hit, [rf"^{re.escape(hit)}$"]) if hit else None
+
         def ai_policy_ack(q, label, ctx):
             """Acknowledging an employer's candidate AI policy. Anything asking whether AI was used stays manual."""
             text = f"{label} {norm(q.description or '')}"
@@ -1459,6 +1479,26 @@ class AnswerEngine:
             ("x-ai-usage", r"how (do )?you use ai tools|describes? how you use ai|use of ai tools today",
              lambda q, *_: Choice([r"\bdaily\b|every day", r"\bregularly\b", r"design or automate|integrat|build"])
              if q.kind in CHOICE_KINDS else None),
+            ("x-unrestricted-auth", r"unrestricted .{0,30}(employment|work) authori[sz]ation|"
+                                    r"(work|employment) .{0,60}any employer .{0,80}(unlimited|indefinite) (duration|period)|"
+                                    r"authori[sz]ed to work .{0,60}without (any )?(restriction|limitation)s?\b",
+             lambda q, *_: YesNo(bool(auth["authorized_to_work_us"]) and not auth["requires_sponsorship"])
+             if q.kind in CHOICE_KINDS else None),
+            ("x-sponsor-statement", r"sponsor|work authori[sz]ation|authori[sz]ed to work|work authorization:?$",
+             sponsor_statement),
+            ("x-pep", r"entrusted with a position or function in any government|politically exposed",
+             lambda q, *_: None if log.get("government_official") is None else YesNo(bool(log["government_official"]))),
+            ("x-returning-program", r"returning to an? (undergraduate|graduate).{0,40}program after",
+             lambda q, *_: Choice([r"^undergraduate"] if grad > (2027, 9) and "bachelor" in edu["degree"].lower()
+                                  else [r"not returning"]) if q.kind in CHOICE_KINDS else None),
+            ("x-graduation-delay", r"push .{0,40}graduation date back|delay your graduation",
+             lambda q, *_: YesNo(False) if q.kind in CHOICE_KINDS else None),
+            ("x-requires-housing", r"(require|need) (company[- ]provided |corporate )?housing|housing (assistance|stipend) (needed|required)",
+             flag("requires_housing", "housing need not stated")),
+            ("x-program-dates", r"(internship|program|co-?op) (begins|starts|runs|is|will run|takes place)\b.{0,60}"
+                                r"(through|until|to|-|–)",
+             lambda q, label, ctx: YesNo(True) if q.kind in CHOICE_KINDS and pick_yes_no(q.options, True)
+             and _within_window(label, log) is True else None),
             ("x-contact-method", r"(best|preferred) (way|method|means) (to|of) (contact|reach|communicat)\w*( with)? you|"
                                  r"preferred (contact|communication) method|how (should|can) we (best )?(contact|reach) you",
              lambda q, *_: Choice([r"e-?mail"]) if q.kind in CHOICE_KINDS
@@ -1638,7 +1678,7 @@ class AnswerEngine:
                  r"link|url|portfolio|website|github", label) else Text(links["portfolio"])),
 
             # --- education --------------------------------------------------
-            ("gpa", r"\bgpa\b|grade point", gpa),
+            ("gpa", r"\bgpa\b|\bg\.p\.a\b|grade point", gpa),
             ("degree-and-major", r"degree.{0,25}(field of study|major)|(field of study|major).{0,25}degree(?! program)",
              lambda q, *_: Text(f"{edu['degree_short']} in {edu['major']}") if q.kind in FREE_KINDS else None),
             ("graduation", r"\bgradu\w*t(ion|ing|e[sd]?)\b(?! (student|degree|program|school|studies|level))|"

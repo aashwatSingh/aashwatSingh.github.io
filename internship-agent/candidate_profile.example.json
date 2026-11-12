@@ -118,7 +118,8 @@
     "excluded_from_federal_programs": null,
     "winter_spring_available": null,
     "winter_spring_text": "",
-    "acknowledge_ai_policies": null
+    "acknowledge_ai_policies": null,
+    "requires_housing": null
   },
   "eeo": {
     "gender": "",

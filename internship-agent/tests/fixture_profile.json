@@ -126,7 +126,8 @@
     "excluded_from_federal_programs": false,
     "winter_spring_available": false,
     "winter_spring_text": "",
-    "acknowledge_ai_policies": true
+    "acknowledge_ai_policies": true,
+    "requires_housing": false
   },
   "eeo": {
     "gender": "Female",

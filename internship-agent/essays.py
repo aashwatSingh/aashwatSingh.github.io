@@ -58,7 +58,8 @@ _WHY_ROLE = (r"why .{0,50}(this|the|our) (role|position|internship|company|oppor
              r"why .{0,40}\b(intern|work|join) (at|with|for|here)|^why (us|here)\b|why are you applying|"
              r"what (interests|excites|attracts|draws) you (about|to) .{0,40}(this|the|our|interning|working|role|"
              r"opportunity|position|company)|interest(ed)? in (this|the) (role|position|internship|company|opportunity)|"
-             r"what makes .{0,40}(attractive|appealing|a good fit)")
+             r"what makes .{0,40}(attractive|appealing|a good fit)|why are you excited (to join|about)|"
+             r"what excites you (the )?(most )?about (the opportunity to join |joining |working at )?\w+")
 
 
 # Behavioural ("describe a time when...") prompts map to four prepared stories in profile["behavioral"].
