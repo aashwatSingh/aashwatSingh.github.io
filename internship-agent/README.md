@@ -170,18 +170,34 @@ submitting is also remembered in `custom_answers.json` for the next form. Questi
 to attest to authorship or AI use are never auto-answered, never remembered, and stop essay
 drafting on that form.
 
+## Essays a template cannot write
+
+```bash
+python draft_essays.py --export
+```
+
+```bash
+python draft_essays.py --gemini
+```
+
+`--export` writes `essay_requests.json`: every open-ended question that still blocks a form, with the grounded
+prompt for it (resume facts only: no name, contact details or GPA). `--gemini` drafts them with `GEMINI_API_KEY`
+and stores the ones that pass vetting in `custom_answers.json` for that company; `--import answers.json` stores
+answers drafted anywhere else. Forms that ask you to attest the answers are your own are never exported. Read
+`custom_answers.json` before a live run.
+
 ## Workday (experimental)
 
 ```bash
 python agent_runner.py --local-blitz --ats Workday --workday-manual-sign-in
 ```
 
-Workday is opt-in. Only the part before login has been run against a live site (open posting,
-eligibility check, Apply, sign-in screen). After login it walks the wizard with the same answer
-engine but has never been exercised: expect to finish pages by hand at first. It never clicks
-the final Submit (you review and submit), tries your portal password at most once per site per
-run, and creates accounts only with `--workday-create-accounts`. Stepping through pages saves a
-draft in your Workday account even in `--dry-run`.
+Workday is opt-in. Run against live sites so far: sign-in, account creation (`--workday-create-accounts`, then
+you click the verification e-mail), Autofill with Resume, My Information, My Experience and the first Application
+Questions page, on one tenant. Later pages (Voluntary Disclosures, Self Identify, Review) use the same code but
+have not been reached yet, so expect to finish pages by hand at first. It never clicks the final Submit (you
+review and submit), tries at most two of `portal.passwords` per site per run, and creates accounts only with the
+flag. Stepping through pages saves a draft in your Workday account even in `--dry-run`.
 
 ## Files it writes
 

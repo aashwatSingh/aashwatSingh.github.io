@@ -32,14 +32,54 @@ Rules that are never broken:
   score, experience in a field not on the resume), reply with exactly: INSUFFICIENT"""
 
 
+GEMINI_MODEL = "gemini-2.5-flash"
+
+
 def available() -> bool:
-    return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+    return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+                or os.environ.get("GEMINI_API_KEY"))
+
+
+def candidate_facts(profile: dict) -> dict:
+    """What a drafting model may know about the candidate. No name, contact details, address or GPA."""
+    facts = {k: profile[k] for k in ("education", "skills", "experience", "projects", "essays", "behavioral")
+             if k in profile}
+    facts["education"] = {k: v for k, v in facts["education"].items()
+                          if k not in ("gpa", "gpa_scale", "school_email", "sat_score", "act_score", "transcript_path")}
+    return facts
+
+
+def build_prompt(question: str, job: dict, job_text: str, profile: dict, limit: int | None = None) -> str:
+    return (f"Company: {job.get('company', '')}\nRole: {job.get('title', '')}\n"
+            f"Word limit: {limit or 'none stated (75-140 words)'}\n\n"
+            f"Application question: {question}\n\n"
+            f"Candidate profile (JSON):\n{json.dumps(candidate_facts(profile), ensure_ascii=False)}\n\n"
+            f"Job description:\n{(job_text or '(not available)')[:12000]}")
+
+
+def gemini_answer(question: str, job: dict, job_text: str, profile: dict, limit: int | None = None) -> str | None:
+    """Same contract as open_answer, through the Gemini API (GEMINI_API_KEY). Not yet run against the live API."""
+    import requests
+    try:
+        r = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
+            headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
+            json={"systemInstruction": {"parts": [{"text": SYSTEM}]},
+                  "contents": [{"role": "user", "parts": [{"text": build_prompt(question, job, job_text, profile, limit)}]}]},
+            timeout=90)
+        r.raise_for_status()
+        text = " ".join(part.get("text", "") for part in r.json()["candidates"][0]["content"]["parts"]).strip()
+    except Exception:                                      # noqa: BLE001 - any failure: fall back to templates
+        return None
+    return text if acceptable(text, profile, limit) else None
 
 
 def open_answer(question: str, job: dict, job_text: str, profile: dict, limit: int | None = None) -> str | None:
     """A vetted answer, or None when the question should be handled another way."""
     if not available():
         return None
+    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+        return gemini_answer(question, job, job_text, profile, limit)
     import anthropic
 
     facts = {k: profile[k] for k in ("education", "skills", "experience", "projects", "essays") if k in profile}

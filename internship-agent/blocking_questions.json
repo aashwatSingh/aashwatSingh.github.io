@@ -53,18 +53,6 @@
   ]
  },
  {
-  "label": "Are you open to starting full-time immediately after your internship? (either graduated or willing to take time off from school)",
-  "kind": "textarea",
-  "options": [],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 3,
-  "companies": [
-   "Etched"
-  ]
- },
- {
   "label": "At Astranis, we value in-person collaboration and a strong work ethic. Are you comfortable with working onsite at our San Francisco HQ 5 days a week and commit to 55 hours per week?",
   "kind": "select",
   "options": [
@@ -77,61 +65,6 @@
   "count": 3,
   "companies": [
    "Astranis"
-  ]
- },
- {
-  "label": "Export Control & Compliance: for the sole purpose of determining export licensing requirements, please list any countries of which you are a citizen or legal permanent resident, and when you obtained such status.",
-  "kind": "textarea",
-  "options": [],
-  "rule": "x-citizen-countries",
-  "note": "set work_authorization.country_of_citizenship",
-  "profile_key": "work_authorization.country_of_citizenship",
-  "count": 3,
-  "companies": [
-   "Zoox"
-  ]
- },
- {
-  "label": "Language Skill(s) (Check all that apply)",
-  "kind": "checkbox_group",
-  "options": [
-   "English (ENG)",
-   "Spanish (SPA)",
-   "French (FRA)",
-   "German (DEU)",
-   "Japanese (JPN)",
-   "Cantonese (CANT)",
-   "Mandarin (MAN)",
-   "Dutch (NLD)",
-   "Hindi (HIN)",
-   "Arabic (ARA)",
-   "Danish (DAN)",
-   "Turkish (TUR)",
-   "Portuguese (POR)",
-   "Hebrew (HEB)",
-   "Swedish (SWE)",
-   "Norwegian (NOR)",
-   "Italian (ITA)",
-   "Vietnamese (VIE)",
-   "Tagalog (TGL)",
-   "Khmer (KHM)",
-   "Hmong (HMN)",
-   "Telugu (TEL)",
-   "Bengali (BNE)",
-   "Marathi (MAR)",
-   "Urdu (URD)",
-   "Gujarati (GUJ)",
-   "Lithuanian (LIT)",
-   "Korean (KOR)",
-   "American Sign Language (ASL)",
-   "British Sign Language (BSL)"
-  ],
-  "rule": "x-spoken-languages",
-  "note": "set spoken_languages in the profile",
-  "profile_key": "spoken_languages",
-  "count": 3,
-  "companies": [
-   "Palantir"
   ]
  },
  {
@@ -251,26 +184,6 @@
   "count": 2,
   "companies": [
    "Virtu Financial"
-  ]
- },
- {
-  "label": "Citizenship Status",
-  "kind": "select",
-  "options": [
-   "1) U.S. citizen or national of the United States",
-   "2) U.S. lawful permanent resident (green card holder)",
-   "3) Refugee under 8 U.S.C 1157",
-   "4) Asylee under 8 U.S.C 1158",
-   "5) Authorized to work in the United States under the Deferred Action For Childho",
-   "6) Other (please explain)"
-  ],
-  "rule": "x-citizenship",
-  "note": "no matching option among ['1) U.S. citizen or national of the United States', '2) U.S. lawful permanent resident (green card holder)', '3) Refugee under 8 U.S.C 1157', '4) Asylee under 8 U.S.C 1158', '5) Authorized to work in the United States under the Deferred Action For Childho', '6) Other (please explain)']",
-  "profile_key": "work_authorization.citizenship_status",
-  "count": 2,
-  "companies": [
-   "Freeform",
-   "Rocket Lab USA"
   ]
  },
  {
@@ -930,30 +843,6 @@
   "count": 1,
   "companies": [
    "Palantir"
-  ]
- },
- {
-  "label": "Do you currently have an offer? If so, what is your deadline to make a decision by?",
-  "kind": "text",
-  "options": [],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Tower Research Capital"
-  ]
- },
- {
-  "label": "Do you have any planned time off or availability constraints during the internship period (e.g. travel, other commitments)? If so, please share the dates.",
-  "kind": "text",
-  "options": [],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Wikimedia Foundation"
   ]
  },
  {
@@ -1689,18 +1578,6 @@
   ]
  },
  {
-  "label": "Start month/year of university and end month/year of university",
-  "kind": "textarea",
-  "options": [],
-  "rule": "no-rule",
-  "note": "no answer in the candidate profile",
-  "profile_key": "",
-  "count": 1,
-  "companies": [
-   "Tower Research Capital"
-  ]
- },
- {
   "label": "Tell us about the most recent user-facing feature you personally shipped. Use three bullets:",
   "kind": "textarea",
   "options": [],
@@ -2418,31 +2295,6 @@
   "count": 1,
   "companies": [
    "Together AI"
-  ]
- },
- {
-  "label": "Year of High School Graduation",
-  "kind": "select",
-  "options": [
-   "2020",
-   "2021",
-   "2022",
-   "2023",
-   "2024",
-   "2025",
-   "2026",
-   "2027",
-   "2028",
-   "2029",
-   "2030",
-   "Other"
-  ],
-  "rule": "x-high-school",
-  "note": "high-school question: set education.high_school_graduation",
-  "profile_key": "education.high_school_graduation",
-  "count": 1,
-  "companies": [
-   "Palantir"
   ]
  }
 ]

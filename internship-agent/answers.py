@@ -1028,7 +1028,8 @@ class AnswerEngine:
                 if auth.get("us_person") is False:
                     return Choice([r"^none of the above", r"^none\b", r"not a u\.?s\.? person", r"foreign (person|national)",
                                    r"(work|temporary|non-?immigrant) visa|visa holder|other work authorization",
-                                   r"authorized to work.{0,80}(visa|temporar|other)", r"^other\b"])
+                                   r"authorized to work.{0,80}(visa|temporar|other)", r"^(\d+[.)]\s*)?other\b"],
+                                  exclude=r"deferred action|daca")
                 return Unknown("set work_authorization.us_person (and citizenship_status) in the profile")
             if "deemed export" in label and q.kind in CHOICE_KINDS:
                 if auth.get("us_person") is None:
@@ -1385,6 +1386,24 @@ class AnswerEngine:
             ("x-debarment", r"excluded from federal (procurement|programs)|list of parties excluded|"
                             r"\b(debarred|debarment)\b|suspended .{0,40}federal (contract|program)",
              flag("excluded_from_federal_programs", "legal status not stated")),
+            ("x-university-dates", r"start (month|date).{0,20}(of|at) (university|college|school).{0,60}end (month|date)|"
+                                   r"(university|college) start and end (dates?|month)",
+             lambda q, *_: Text(f"{int(edu['start_month']):02d}/{edu['start_year']} - {int(edu['grad_month']):02d}/{edu['grad_year']}")
+             if q.kind in ("text", "textarea") and edu.get("start_month") and edu.get("start_year") else None),
+            ("x-current-offer", r"(currently|presently) have an? (other )?offer|have (any )?(other|competing|pending) offers?\b",
+             lambda q, *_: None if log.get("has_outstanding_offers") is None
+             else YesNo(bool(log["has_outstanding_offers"])) if q.kind in CHOICE_KINDS
+             else Text("No") if not log["has_outstanding_offers"] and q.kind in ("text", "textarea") else None),
+            ("x-time-off", r"planned (time off|vacations?|absences?)|availability constraints|"
+                           r"(time off|vacation|commitments?) .{0,40}during the (internship|program)",
+             lambda q, *_: YesNo(False) if q.kind in CHOICE_KINDS
+             else Text("No planned time off or constraints during the internship period.")
+             if q.kind in ("text", "textarea") else None),
+            ("x-full-time-after", r"open to (starting|working) full[- ]time immediately after (your|the) internship",
+             lambda q, *_: YesNo(grad <= (2027, 9)) if q.kind in CHOICE_KINDS
+             else Text(f"No. I will return to finish my degree and graduate in {int(edu['grad_month']):02d}/{edu['grad_year']}; "
+                       f"I am available for full-time work after that.") if grad > (2027, 9) and q.kind in ("text", "textarea")
+             else None),
             ("x-final-internship", r"(final|last) internship before (you )?graduat",
              lambda q, *_: YesNo(grad <= (2028, 8)) if q.kind in CHOICE_KINDS else None),
             ("x-enrolled-during", r"(officially |currently )?enrolled .{0,40}(during|throughout|for the duration of) "

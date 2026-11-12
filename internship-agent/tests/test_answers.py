@@ -91,6 +91,14 @@ def test_contact_method_and_new_rules():
     assert filled("How did you hear about us?", options=["Referral", "Indeed", "Job Board", "Other"]) == "Job Board"
 
 
+def test_logistics_text_answers():
+    assert filled("Start month/year of university and end month/year of university", kind="textarea").count("/") == 2
+    assert filled("Do you have any planned time off or availability constraints during the internship period "
+                  "(e.g. travel, other commitments)? If so, please share the dates.", kind="text").startswith("No")
+    assert filled("Are you now or have you ever been listed on the List of Parties excluded from Federal Procurement "
+                  "and Non-Procurement Programs?", options=["Yes", "No"]) == "No"
+
+
 # --- things that must not be answered by keyword accident --------------------
 @pytest.mark.parametrize("label,kind", [
     ("Why did you want to become an engineer in your respective discipline?", "textarea"),
