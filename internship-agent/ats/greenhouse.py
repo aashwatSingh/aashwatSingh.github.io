@@ -6,6 +6,7 @@ import re
 from urllib.parse import parse_qs, urlparse
 
 import requests
+import config
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
 from answers import MONTHS, Decision, Question
@@ -83,20 +84,29 @@ CODE_STATE_JS = r"""
 EDU_DATE = re.compile(r"^(start|end)-(month|year)--\d+$")
 
 
-GMAIL_CODE_SEARCH = "https://mail.google.com/mail/u/0/#search/greenhouse+security+code+newer_than%3A1h"
+GMAIL_CODE_SEARCH = "https://mail.google.com/mail/?authuser={email}#search/greenhouse+security+code+newer_than%3A1h"
 
 
 async def open_code_search(page: Page) -> None:
-    """Open the inbox search for the code in a background tab so the candidate can copy it quickly.
+    """Open the inbox search for the code in the candidate's everyday browser, where they are signed in.
 
-    Only a convenience: the candidate reads the code and types it. The agent never reads mail.
+    The automated window is not signed in to Google (and Google refuses sign-in from automated
+    browsers), so the search is opened with the system's default browser instead. Only a convenience:
+    the candidate reads the code and types it. The agent never reads mail.
     """
-    print(f"      Gmail search for the code (opened in a new tab): {GMAIL_CODE_SEARCH}", flush=True)
+    import webbrowser
+    from urllib.parse import quote
     try:
-        tab = await page.context.new_page()
-        await tab.goto(GMAIL_CODE_SEARCH, wait_until="domcontentloaded", timeout=15000)
-        await page.bring_to_front()
-    except Exception:                                      # noqa: BLE001 - the link above still works
+        email = config.load_profile()["identity"]["email"]
+    except Exception:                                      # noqa: BLE001
+        email = ""
+    url = GMAIL_CODE_SEARCH.format(email=quote(email)) if email else GMAIL_CODE_SEARCH.replace("?authuser={email}", "u/0/")
+    print(f"      The code email is open in your browser: {url}", flush=True)
+    try:
+        webbrowser.open(url, new=2)
+        await page.wait_for_timeout(800)
+        await page.bring_to_front()                    # back to the form, with the code box focused
+    except Exception:                                      # noqa: BLE001 - the printed link still works
         pass
 
 
