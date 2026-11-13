@@ -19,6 +19,7 @@ import asyncio
 import csv
 import json
 import os
+import re
 import signal
 import sys
 import time
@@ -196,6 +197,12 @@ async def run(args) -> int:
         backup = dedup.backup_tracker()
         if backup:
             log(f"tracker backed up to {backup.name}")
+        try:
+            restored = ledger.reconcile_xlsx()
+            if restored:
+                log(f"added {restored} earlier application(s) that were missing from {config.TRACKER_XLSX.name}")
+        except OSError:
+            log(f"! {config.TRACKER_XLSX.name} is open in another program: close it so new rows can be written")
 
     tally: Counter = Counter()
     deadline = time.time() + args.max_minutes * 60 if args.max_minutes else None
@@ -257,6 +264,10 @@ async def run(args) -> int:
             await context.close()
             save_queue(queue)
 
+    ledger.flush_pending_xlsx()
+    if ledger.pending_xlsx:
+        log(f"! {len(ledger.pending_xlsx)} submitted application(s) are in applied_tracker.csv but not yet in "
+            f"{config.TRACKER_XLSX.name} (it was locked). Close Excel; the next run adds them.")
     log(f"done: {dict(tally)}; ledger {start_total} -> {ledger.total} of {args.target}")
     remaining = sum(1 for j in queue if j.get("status") == "pending")
     log(f"queue: {remaining} still pending; manual review list: {config.MANUAL_REVIEW_CSV.name}")
@@ -275,6 +286,8 @@ def prefetch_schemas() -> None:
         parts = [s for s in p.path.split("/") if s]
         if job["ats"] != "Greenhouse" or job.get("status") != "pending" or "greenhouse.io" not in p.netloc or not parts:
             continue
+        if not re.fullmatch(r"[\w.-]+", f"{parts[0]}_{job.get('ats_job_id') or ''}") or ".." in parts[0]:
+            continue                                       # names come from listing URLs: plain file names only
         target = out / f"{parts[0]}_{job['ats_job_id']}.json"
         if target.exists():
             continue

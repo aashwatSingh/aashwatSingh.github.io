@@ -11,7 +11,7 @@ from playwright.async_api import Page, TimeoutError as PWTimeout
 
 from answers import MONTHS, Decision, Question
 from urls import host_matches
-from ats.base import (MANUAL_REVIEW, SUBMITTED, BaseAdapter, FormField, SubmitWatch, fetch_json,
+from ats.base import (MANUAL_REVIEW, SUBMITTED, BaseAdapter, form_still_showing, FormField, SubmitWatch, fetch_json,
                       strip_html, visible_captcha)
 
 EXTRACT_JS = r"""
@@ -84,6 +84,7 @@ CODE_STATE_JS = r"""
 EDU_DATE = re.compile(r"^(start|end)-(month|year)--\d+$")
 
 
+SUBMIT_BUTTON = "#application-form button[type=submit], button:has-text('Submit application')"
 GMAIL_CODE_SEARCH = "https://mail.google.com/mail/?authuser={email}#search/greenhouse+security+code+newer_than%3A1h"
 
 
@@ -291,12 +292,13 @@ class GreenhouseAdapter(BaseAdapter):
             return page.url
         body = (await page.inner_text("body")).lower()
         if re.search(r"thank you for applying|application has been (submitted|received)|"
-                     r"thanks for applying|we('ve| have) received your application", body):
+                     r"thanks for applying|we('ve| have) received your application", body) \
+                and not await form_still_showing(page, SUBMIT_BUTTON):
             return "confirmation text"
         return None
 
     async def submit(self, page: Page) -> tuple[str, str, str]:
-        button = page.locator("#application-form button[type=submit], button:has-text('Submit application')").first
+        button = page.locator(SUBMIT_BUTTON).first
         await button.scroll_into_view_if_needed()
         await button.click()
         watch = SubmitWatch(self, 15)
@@ -308,7 +310,8 @@ class GreenhouseAdapter(BaseAdapter):
                 return SUBMITTED, "confirmation page", url
             body = (await page.inner_text("body")).lower()
             if re.search(r"thank you for applying|application has been (submitted|received)|"
-                         r"thanks for applying|we('ve| have) received your application", body):
+                         r"thanks for applying|we('ve| have) received your application", body) \
+                    and not await form_still_showing(page, SUBMIT_BUTTON):
                 return SUBMITTED, "confirmation text", url
             # Greenhouse: "enter the 8-character code to confirm you're a human". Never automated.
             if re.search(r"security code|verification code|enter the code|code (we )?sent to", body):

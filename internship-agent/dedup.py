@@ -143,6 +143,13 @@ def load_tracker_rows(path: Path | None = None) -> list[dict]:
     return rows
 
 
+def _plain(value):
+    """Listing text is untrusted: never let a cell be read as a formula."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
 def append_to_tracker_xlsx(row: dict, path: Path | None = None) -> int:
     """Insert one application row at the end of the data block.
 
@@ -169,7 +176,7 @@ def append_to_tracker_xlsx(row: dict, path: Path | None = None) -> int:
             dst.alignment = copy(src.alignment)
             dst.number_format = src.number_format
             dst.protection = copy(src.protection)
-        dst.value = row.get(headers[col - 1])
+        dst.value = _plain(row.get(headers[col - 1]))
     if ws.row_dimensions[last].height:
         ws.row_dimensions[new_row].height = ws.row_dimensions[last].height
 
@@ -204,6 +211,7 @@ class Ledger:
         self.companies: set[str] = set()
         self.company_roles: set[tuple[str, str]] = set()
         self.urls: set[str] = set()
+        self.pending_xlsx: list[tuple] = []                # submitted, but the workbook was locked
         self.reload()
 
     # -- loading ------------------------------------------------------------
@@ -287,7 +295,7 @@ class Ledger:
         with tmp.open("w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=config.LEDGER_COLUMNS)
             w.writeheader()
-            w.writerows(self.rows)
+            w.writerows([{k: _plain(v) for k, v in r.items()} for r in self.rows])
         tmp.replace(self.csv_path)
 
     def record_application(self, job: dict, *, when: datetime | None = None,
@@ -307,6 +315,53 @@ class Ledger:
         self._index(row)
         self.write_csv()
         if write_xlsx and self.xlsx.exists():
+            try:
+                self._append_xlsx(job, row, when, location)
+            except OSError as exc:                         # e.g. the workbook is open in Excel
+                self.pending_xlsx.append((job, row, when, location))
+                print(f"  ! could not write {self.xlsx.name} ({type(exc).__name__}): close it in Excel. "
+                      "The application is saved in applied_tracker.csv and will be added on the next write.",
+                      flush=True)
+                return row
+            self.flush_pending_xlsx()
+        return row
+
+    def reconcile_xlsx(self) -> int:
+        """Add applications that are in applied_tracker.csv but never reached the workbook
+        (it was open in Excel, or a run was interrupted). Returns how many rows were added."""
+        if not self.xlsx.exists():
+            return 0
+        in_book: Counter = Counter((normalize_company(t.get("Company")), normalize_role(t.get("Role")))
+                                   for t in load_tracker_rows(self.xlsx))
+        added = 0
+        for r in self._read_csv():
+            if not r.get("ATS_Platform"):                  # rows that came from the workbook in the first place
+                continue
+            key = (normalize_company(r.get("Company")), normalize_role(r.get("Role")))
+            if in_book[key] > 0:
+                in_book[key] -= 1
+                continue
+            try:
+                when = datetime.strptime(r.get("Timestamp") or "", "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                when = datetime.now()
+            try:
+                self._append_xlsx({}, r, when, r.get("Location") or "")
+            except OSError:
+                break
+            added += 1
+        return added
+
+    def flush_pending_xlsx(self) -> None:
+        while self.pending_xlsx:
+            try:
+                self._append_xlsx(*self.pending_xlsx[0])
+            except OSError:
+                return
+            self.pending_xlsx.pop(0)
+
+    def _append_xlsx(self, job: dict, row: dict, when: datetime, location: str) -> None:
+        if True:
             day = when.strftime("%Y-%m-%d")
             append_to_tracker_xlsx({
                 "Company": row["Company"],
@@ -323,7 +378,6 @@ class Ledger:
                 ),
                 "Source Email Subject": None,
             }, self.xlsx)
-        return row
 
 
 def _first_url(text: str) -> str:

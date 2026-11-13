@@ -684,3 +684,10 @@ def test_contact_facts_never_fill_long_prompts():
     # a long address prompt is still an address prompt
     assert filled("Please provide your permanent address (city, state, zip code). We use this information to determine "
                   "eligibility for relocation assistance for the internship.", kind="text").startswith("1 Example Way")
+
+
+def test_uploads_never_come_from_stored_answers():
+    from answers import AnswerEngine
+    engine = AnswerEngine(ENGINE.p, custom_answers=[{"pattern": "portfolio", "answer": "candidate_profile.json"}])
+    d = engine.resolve(Question(label="Portfolio", kind="file", required=True), Context(company="Acme"))
+    assert d.action != "fill"

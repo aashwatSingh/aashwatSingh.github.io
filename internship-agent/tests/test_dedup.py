@@ -97,3 +97,21 @@ def test_filter_queue_keeps_one_pending_per_company(ledger):
     ]
     dedup.filter_queue(queue, ledger, "company")
     assert [j["status"] for j in queue] == ["duplicate", "pending", "duplicate"]
+
+
+def test_locked_workbook_does_not_lose_the_application(tmp_path, monkeypatch):
+    import dedup
+    xlsx, csv_path = tmp_path / "t.xlsx", tmp_path / "a.csv"
+    make_tracker(xlsx, [["Acme", "SWE Intern", "Summer 2027", "2026-10-01", "Rejected", "2026-10-02", None, None, None]])
+    ledger = dedup.Ledger(xlsx, csv_path)
+    real = dedup.append_to_tracker_xlsx
+    monkeypatch.setattr(dedup, "append_to_tracker_xlsx", lambda *a, **k: (_ for _ in ()).throw(PermissionError("locked")))
+    job = {"company": "=Initech", "title": "SWE Intern", "url": "https://job-boards.greenhouse.io/initech/jobs/1",
+           "ats": "Greenhouse", "locations": ["Austin, TX"]}
+    ledger.record_application(job)                      # must not raise
+    assert ledger.total == 2 and len(ledger.pending_xlsx) == 1
+    monkeypatch.setattr(dedup, "append_to_tracker_xlsx", real)
+    fresh = dedup.Ledger(xlsx, csv_path)
+    assert fresh.total == 2 and fresh.reconcile_xlsx() == 1 and fresh.reconcile_xlsx() == 0
+    ws = openpyxl.load_workbook(xlsx).active
+    assert ws.cell(6, 1).value == "'=Initech"           # listing text is never stored as a formula

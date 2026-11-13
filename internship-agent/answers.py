@@ -344,12 +344,12 @@ class AnswerEngine:
         ctx = ctx or Context()
         label = norm(q.label)
 
+        if q.kind == "file":                                 # uploads come only from the profile's file paths,
+            return self._file(q, label)                      # never from stored or learned text answers
+
         custom = self._custom(q, label, ctx)
         if custom is not None:
             return custom
-
-        if q.kind == "file":
-            return self._file(q, label)
 
         essay_prompt = bool(ESSAY_PROMPT.search(label)) and q.kind not in CHOICE_KINDS | {"checkbox"}
         long_prompt = len(label) > LONG_PROMPT.get(q.kind, 10 ** 6)

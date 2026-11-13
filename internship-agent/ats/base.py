@@ -343,6 +343,16 @@ class SubmitWatch:
         return MANUAL_REVIEW, "NO_CONFIRMATION", "no confirmation after clicking submit"
 
 
+async def form_still_showing(page: Page, submit_selector: str) -> bool:
+    """A 'thank you for applying' phrase only proves submission once the form itself is gone:
+    the same words can appear in a job description that shares the page with the form."""
+    try:
+        button = page.locator(submit_selector).first
+        return await button.count() > 0 and await button.is_visible()
+    except Exception:                                      # noqa: BLE001 - page navigating
+        return True
+
+
 def fetch_json(url: str):
     """Small synchronous GET for public posting APIs (run via asyncio.to_thread)."""
     import requests

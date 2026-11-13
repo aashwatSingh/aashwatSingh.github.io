@@ -9,7 +9,7 @@ from playwright.async_api import Page, TimeoutError as PWTimeout
 
 from answers import Decision, Question
 from urls import host_matches
-from ats.base import (MANUAL_REVIEW, SUBMITTED, BaseAdapter, FormField, SubmitWatch, fetch_json,
+from ats.base import (MANUAL_REVIEW, SUBMITTED, BaseAdapter, form_still_showing, FormField, SubmitWatch, fetch_json,
                       visible_captcha)
 
 EXTRACT_JS = r"""
@@ -80,6 +80,9 @@ EXTRACT_JS = r"""
   return out;
 }
 """
+
+
+SUBMIT_BUTTON = "button.ashby-application-form-submit-button, button:has-text('Submit Application')"
 
 
 class AshbyAdapter(BaseAdapter):
@@ -228,12 +231,13 @@ class AshbyAdapter(BaseAdapter):
             return "success panel"
         body = (await page.inner_text("body")).lower()
         if re.search(r"application (was|has been) (successfully )?(submitted|received)|"
-                     r"thanks? for (applying|your application)|thank you for applying", body):
+                     r"thanks? for (applying|your application)|thank you for applying", body) \
+                and not await form_still_showing(page, SUBMIT_BUTTON):
             return "confirmation text"
         return None
 
     async def submit(self, page: Page) -> tuple[str, str, str]:
-        button = page.locator("button.ashby-application-form-submit-button, button:has-text('Submit Application')").first
+        button = page.locator(SUBMIT_BUTTON).first
         await button.scroll_into_view_if_needed()
         await button.click()
         watch = SubmitWatch(self, 20)                           # uploads finalise on submit
@@ -243,7 +247,8 @@ class AshbyAdapter(BaseAdapter):
                 return SUBMITTED, "success panel", page.url
             body = (await page.inner_text("body")).lower()
             if re.search(r"application (was|has been) (successfully )?(submitted|received)|"
-                         r"thanks? for (applying|your application)|thank you for applying", body):
+                         r"thanks? for (applying|your application)|thank you for applying", body) \
+                    and not await form_still_showing(page, SUBMIT_BUTTON):
                 return SUBMITTED, "confirmation text", page.url
             if re.search(r"flagged as (possible )?spam|couldn.t submit your application|unable to submit", body):
                 return MANUAL_REVIEW, "REJECTED_BY_ATS", "Ashby refused the automated submission (spam/bot check)"
