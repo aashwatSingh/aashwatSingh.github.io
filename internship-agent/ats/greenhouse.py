@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import time
 from urllib.parse import parse_qs, urlparse
 
 import requests
 import config
+import gmail_tab_otp
+import imap_otp
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
 from answers import MONTHS, Decision, Question
@@ -71,13 +75,17 @@ EXTRACT_JS = r"""
 }
 """
 
-# Returns how many characters the person has typed into the security-code boxes; optionally focuses the first.
+# The security-code inputs: eight one-character boxes (security-input-0..7) or a single field.
+CODE_BOXES = 'input[id^="security-input"], input[id*="security-code"], input[autocomplete="one-time-code"]'
+CODE_BOXES_FALLBACK = 'input[maxlength="1"]:visible'
+
+# Returns what is currently typed into the security-code boxes; optionally focuses the first.
 CODE_STATE_JS = r"""
-(focusFirst) => {
-  let boxes = [...document.querySelectorAll('input[id^="security-input"], input[autocomplete="one-time-code"]')];
+([selector, focusFirst]) => {
+  let boxes = [...document.querySelectorAll(selector)];
   if (!boxes.length) boxes = [...document.querySelectorAll('input[maxlength="1"]')].filter(e => e.offsetParent);
   if (focusFirst && boxes[0]) { boxes[0].scrollIntoView({block: 'center'}); boxes[0].focus(); }
-  return boxes.map(e => e.value || '').join('').length;
+  return boxes.map(e => e.value || '').join('');
 }
 """
 
@@ -93,7 +101,8 @@ async def open_code_search(page: Page) -> None:
 
     The automated window is not signed in to Google (and Google refuses sign-in from automated
     browsers), so the search is opened with the system's default browser instead. Only a convenience:
-    the candidate reads the code and types it. The agent never reads mail.
+    the candidate reads the code and types it. Used when the code could not be read automatically
+    (see retrieve_code).
     """
     import webbrowser
     from urllib.parse import quote
@@ -109,6 +118,61 @@ async def open_code_search(page: Page) -> None:
         await page.bring_to_front()                    # back to the form, with the code box focused
     except Exception:                                      # noqa: BLE001 - the printed link still works
         pass
+
+
+async def typed_code(page: Page, focus: bool = False) -> str:
+    return await page.evaluate(CODE_STATE_JS, [CODE_BOXES, focus])
+
+
+async def enter_code(page: Page, code: str) -> bool:
+    """Type the e-mailed code into the security-code boxes. True once the boxes hold exactly the code."""
+    boxes = page.locator(CODE_BOXES)
+    if not await boxes.count():
+        boxes = page.locator(CODE_BOXES_FALLBACK)
+    n = await boxes.count()
+    if not n:
+        return False
+    await boxes.first.scroll_into_view_if_needed()
+    if n == 1:
+        await boxes.first.fill(code)
+    else:
+        for i in range(n):                                 # anything left from an earlier attempt
+            await boxes.nth(i).fill("")
+        await boxes.first.click()
+        await page.keyboard.type(code, delay=40)           # the boxes advance focus as each character lands
+        if await typed_code(page) != code:
+            for i, ch in enumerate(code[:n]):
+                await boxes.nth(i).fill(ch)
+    return await typed_code(page) == code
+
+
+async def retrieve_code(page: Page, since: float) -> str | None:
+    """Read the code Greenhouse e-mailed after `since` from the candidate's own Gmail.
+
+    Method A (GMAIL_APP_PASSWORD in .env): IMAP, see imap_otp.py. Method B (no app password, or
+    IMAP could not be opened): a Gmail tab in this browser profile, see gmail_tab_otp.py.
+    Returns None when neither produced a code; the candidate then pastes it as before.
+    """
+    password = os.environ.get("GMAIL_APP_PASSWORD", "").strip()
+    try:
+        if password:
+            try:
+                address = os.environ.get("GMAIL_ADDRESS") or config.load_profile()["identity"]["email"]
+                print(f"      Reading the Greenhouse code from {address} over IMAP...", flush=True)
+                return await asyncio.to_thread(imap_otp.fetch_code_imap, address, password, since)
+            except Exception as exc:                       # noqa: BLE001 - bad app password, IMAP blocked
+                print(f"      IMAP lookup failed ({type(exc).__name__}: {str(exc)[:100]}); "
+                      "trying the Gmail tab", flush=True)
+        print("      Reading the Greenhouse code from the Gmail tab...", flush=True)
+        return await gmail_tab_otp.fetch_code_gmail_tab(page.context)
+    except Exception as exc:                               # noqa: BLE001 - never fail the application on this
+        print(f"      Could not read the code automatically ({type(exc).__name__}: {str(exc)[:100]})", flush=True)
+        return None
+    finally:
+        try:
+            await page.bring_to_front()
+        except Exception:                                  # noqa: BLE001
+            pass
 
 
 class GreenhouseAdapter(BaseAdapter):
@@ -300,9 +364,12 @@ class GreenhouseAdapter(BaseAdapter):
     async def submit(self, page: Page) -> tuple[str, str, str]:
         button = page.locator(SUBMIT_BUTTON).first
         await button.scroll_into_view_if_needed()
+        clicked_at = time.time()                           # the code e-mail is sent on this click
         await button.click()
         watch = SubmitWatch(self, 15)
-        focused = resubmitted = False
+        focused = auto_tried = False
+        sent_code = ""                                     # the code last submitted, so it is pressed once
+        auto_grace = 0.0                                   # until then, an auto-entered code is being checked
         while watch.running():
             await page.wait_for_timeout(500)
             url = page.url
@@ -313,19 +380,36 @@ class GreenhouseAdapter(BaseAdapter):
                          r"thanks for applying|we('ve| have) received your application", body) \
                     and not await form_still_showing(page, SUBMIT_BUTTON):
                 return SUBMITTED, "confirmation text", url
-            # Greenhouse: "enter the 8-character code to confirm you're a human". Never automated.
+            # Greenhouse: "enter the 8-character code" e-mailed to the applicant's address.
             if re.search(r"security code|verification code|enter the code|code (we )?sent to", body):
+                # Attended runs (--local-blitz / --assist) read the code from the candidate's own
+                # mailbox first; unattended runs still send the posting to manual review.
+                if self.human_wait_s and not auto_tried:
+                    auto_tried = True
+                    watch.extend(imap_otp.POLL_TIMEOUT_S + gmail_tab_otp.SIGN_IN_WAIT_S + 90)
+                    code = await retrieve_code(page, clicked_at)
+                    if code and await enter_code(page, code):
+                        imap_otp.mark_used(code)
+                        sent_code = code
+                        print("      Code entered; submitting.", flush=True)
+                        await page.wait_for_timeout(400)
+                        await button.click()
+                        auto_grace = time.monotonic() + 12
+                    watch.deadline = time.monotonic() + 20
+                    continue
+                if time.monotonic() < auto_grace:
+                    continue                               # Greenhouse is still checking the entered code
                 done = watch.human_gate("EMAIL_VERIFICATION_CODE",
-                                        "Greenhouse emailed a human-verification code")
+                                        "Greenhouse emailed a verification code")
                 if done:
                     return done
-                # A person supplies the code; the runner only focuses the box and presses Submit after.
-                if not focused and self.human_wait_s:
+                # Fallback: a person supplies the code; the runner focuses the box and presses Submit after.
+                if not focused:
                     await open_code_search(page)
-                typed = await page.evaluate(CODE_STATE_JS, not focused)
+                typed = await typed_code(page, focus=not focused)
                 focused = True
-                if typed >= 8 and not resubmitted:
-                    resubmitted = True
+                if len(typed) >= imap_otp.CODE_LENGTH and typed != sent_code:
+                    sent_code = typed
                     await page.wait_for_timeout(400)
                     await button.click()
                 continue

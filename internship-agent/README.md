@@ -62,8 +62,9 @@ python agent_runner.py --local-blitz --dedup-level role --max-per-company 3
   cookies carry over between forms and runs), fills every field, uploads the resume and clicks
   Submit. If the site then asks for a CAPTCHA or an emailed code, the terminal bell rings with
   `[ACTION REQUIRED] ...` and the runner waits up to 120 seconds for you to do that one step:
-  solve the CAPTCHA, or paste the 8-character Greenhouse code (the code box is focused for you
-  and Submit is pressed once the code is in). On confirmation it writes the row to
+  solve the CAPTCHA. The 8-character Greenhouse e-mail code is read from your own Gmail and
+  entered for you (see "Greenhouse e-mail code" below); if that fails, the code box is focused
+  and Submit is pressed once you paste the code. On confirmation it writes the row to
   `internship_tracker.xlsx` and moves to the next posting. `--assist SECONDS` is the same wait
   with your own timeout; `--browser-channel` picks the browser.
 * `--only-ready` restricts a run to the postings in `ready_to_submit.csv` (every required question answered
@@ -87,10 +88,27 @@ the rule that produced it, so any submission can be audited afterwards.
 submission with *"enter the 8-character code [emailed to you] to confirm you're a human"*; Ashby
 raises a reCAPTCHA image challenge on submit; Lever puts hCaptcha on every form. (The first two
 were observed on live submissions from a headless cloud browser.) The agent never solves a
-CAPTCHA, never reads a verification code out of your mailbox, and does not disguise the
-browser as non-automated. Those steps are the sites asking for a person, so a person does them
-(`--local-blitz` makes that a few seconds each), or the posting goes to the manual-review queue.
-This is a deliberate difference from the original spec (steps 4.4 and 6).
+CAPTCHA and does not disguise the browser as non-automated. Those steps are the sites asking
+for a person, so a person does them (`--local-blitz` makes that a few seconds each), or the
+posting goes to the manual-review queue. This is a deliberate difference from the original spec
+(steps 4.4 and 6).
+
+**Greenhouse e-mail code.** In an attended run (`--local-blitz` / `--assist`) the 8-character
+code Greenhouse e-mails after Submit is read from your own Gmail and typed in for you. Unattended
+runs never do this: the posting goes to manual review as before.
+
+* *Method A, IMAP* (`imap_otp.py`): put `GMAIL_APP_PASSWORD=...` in `.env` (Google Account →
+  Security → 2-Step Verification → App passwords; `.env` is git-ignored). The runner polls
+  `imap.gmail.com` every 3 s for up to 45 s for mail from `greenhouse-mail.io` / `greenhouse.io`
+  that arrived after the Submit click. The mailbox is opened read-only; nothing is marked read.
+  The address is `identity.email` from the profile, or `GMAIL_ADDRESS` in `.env`.
+* *Method B, Gmail tab* (`gmail_tab_otp.py`): with no app password (or if IMAP cannot be opened),
+  a second tab in the same `./chrome_profile` opens Gmail. The first time, the bell rings and
+  the runner waits up to 4 minutes for you to sign in there; the profile keeps the session. It
+  then searches for the newest Greenhouse message and reads the code from it. Google sometimes
+  refuses sign-in in an automated browser window; if it does, use Method A.
+
+If neither finds a code, or Greenhouse rejects it, the run falls back to you pasting the code.
 
 **It does not invent answers.** `answers.py` answers a question only from
 `candidate_profile.json`: your stated facts and preferences (relocation, office order, salary,

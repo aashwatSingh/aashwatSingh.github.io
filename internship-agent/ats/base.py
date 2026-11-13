@@ -322,6 +322,10 @@ class SubmitWatch:
     def running(self) -> bool:
         return time.monotonic() < self.deadline
 
+    def extend(self, seconds: float) -> None:
+        """Keep watching for at least this much longer (an automatic step is in progress)."""
+        self.deadline = max(self.deadline, time.monotonic() + seconds)
+
     def human_gate(self, reason: str, detail: str) -> tuple[str, str, str] | None:
         """A human-verification step is showing. Returns a final result, or None to keep waiting."""
         wait = self.adapter.human_wait_s

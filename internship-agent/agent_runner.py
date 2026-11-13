@@ -337,8 +337,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="use an installed browser instead of bundled Chromium, e.g. 'chrome' or 'msedge'")
     ap.add_argument("--local-blitz", action="store_true",
                     help="run on your own machine: visible browser with a persistent ./chrome_profile, fill and "
-                         "submit everything, and when a site asks for a CAPTCHA or an emailed code ring the "
-                         "bell and wait up to 120 s for you to do that one step, then record and move on")
+                         "submit everything, read the Greenhouse e-mail code from your Gmail (GMAIL_APP_PASSWORD in "
+                         ".env, else a Gmail tab), and when a site asks for a CAPTCHA ring the bell and wait "
+                         "up to 120 s for you to do that one step, then record and move on")
     ap.add_argument("--skip-logged-since", metavar="ISO_TIME",
                     help="skip postings already attempted at or after this time (resume a dry-run sweep)")
     ap.add_argument("--only-ready", action="store_true",
