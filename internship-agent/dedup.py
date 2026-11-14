@@ -14,11 +14,14 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import re
 import shutil
 import sys
+import time
 import unicodedata
 from collections import Counter
+from contextlib import contextmanager
 from copy import copy
 from datetime import datetime
 from pathlib import Path
@@ -150,6 +153,88 @@ def _plain(value):
     return value
 
 
+LOCK_TIMEOUT_S = 20
+STALE_LOCK_S = 120
+
+
+@contextmanager
+def tracker_lock(path: Path, timeout: float = LOCK_TIMEOUT_S):
+    """One writer at a time. The runner and both dashboards can write the workbook, and each write
+    reads the whole file and saves it back, so two at once would lose a row.
+
+    Raises TimeoutError (an OSError, so callers treat it like Excel holding the file).
+    """
+    lock = Path(path).with_name(Path(path).name + ".lock")
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > STALE_LOCK_S:   # a writer that crashed mid-save
+                    lock.unlink()
+                    continue
+            except OSError:
+                pass
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"{Path(path).name} is being written by another program")
+            time.sleep(0.2)
+    try:
+        yield
+    finally:
+        try:
+            lock.unlink()
+        except OSError:
+            pass
+
+
+def _save(wb, path: Path) -> None:
+    tmp = path.with_suffix(".tmp.xlsx")
+    wb.save(tmp)
+    tmp.replace(path)
+
+
+def delete_from_tracker_xlsx(match, path: Path | None = None, limit: int = 1) -> int:
+    """Remove up to `limit` data rows for which match(row_dict) is true, newest first.
+
+    The summary formulas and the autofilter range below the block are shrunk to match.
+    Returns how many rows were removed.
+    """
+    path = Path(path or config.TRACKER_XLSX)
+    with tracker_lock(path):
+        wb = openpyxl.load_workbook(path)
+        ws = wb.active
+        header_row = _find_header_row(ws)
+        headers = [str(c.value or "").strip() for c in ws[header_row]]
+        last = _last_data_row(ws, header_row)
+        first_data = header_row + 1
+        doomed = []
+        for r in range(last, first_data - 1, -1):
+            if len(doomed) >= limit:
+                break
+            if match({h: c.value for h, c in zip(headers, ws[r]) if h}):
+                doomed.append(r)
+        if not doomed or len(doomed) > last - header_row - 1:      # never empty the block entirely
+            return 0
+        for r in doomed:                                       # bottom-up keeps the other indexes valid
+            ws.delete_rows(r)
+        new_last = last - len(doomed)
+        range_re = re.compile(rf"([A-Z]+)\$?{first_data}:([A-Z]+)\$?{last}\b")
+        for row in ws.iter_rows(min_row=new_last + 1):
+            for c in row:
+                if isinstance(c.value, str) and c.value.startswith("="):
+                    c.value = range_re.sub(rf"\g<1>{first_data}:\g<2>{new_last}", c.value)
+        if ws.auto_filter.ref:
+            m = re.match(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", ws.auto_filter.ref)
+            if m and int(m.group(4)) == last:
+                ws.auto_filter.ref = f"{m.group(1)}{m.group(2)}:{m.group(3)}{new_last}"
+        _save(wb, path)
+        return len(doomed)
+
+
 def append_to_tracker_xlsx(row: dict, path: Path | None = None) -> int:
     """Insert one application row at the end of the data block.
 
@@ -158,6 +243,11 @@ def append_to_tracker_xlsx(row: dict, path: Path | None = None) -> int:
     Returns the 1-based row number written.
     """
     path = Path(path or config.TRACKER_XLSX)
+    with tracker_lock(path):
+        return _append_unlocked(row, path)
+
+
+def _append_unlocked(row: dict, path: Path) -> int:
     wb = openpyxl.load_workbook(path)
     ws = wb.active
     header_row = _find_header_row(ws)
@@ -191,9 +281,7 @@ def append_to_tracker_xlsx(row: dict, path: Path | None = None) -> int:
         if m and int(m.group(4)) == last:
             ws.auto_filter.ref = f"{m.group(1)}{m.group(2)}:{m.group(3)}{new_row}"
 
-    tmp = path.with_suffix(".tmp.xlsx")
-    wb.save(tmp)
-    tmp.replace(path)
+    _save(wb, path)
     return new_row
 
 
@@ -204,15 +292,59 @@ def append_to_tracker_xlsx(row: dict, path: Path | None = None) -> int:
 class Ledger:
     """In-memory view of everything already applied to (workbook + CSV)."""
 
-    def __init__(self, xlsx: Path | None = None, csv_path: Path | None = None):
+    def __init__(self, xlsx: Path | None = None, csv_path: Path | None = None,
+                 pending_path: Path | None = None):
         self.xlsx = Path(xlsx or config.TRACKER_XLSX)
         self.csv_path = Path(csv_path or config.LEDGER_CSV)
+        self.pending_path = Path(pending_path or self.csv_path.with_name(config.PENDING_XLSX_JSON.name))
         self.rows: list[dict] = []
         self.companies: set[str] = set()
         self.company_roles: set[tuple[str, str]] = set()
         self.urls: set[str] = set()
-        self.pending_xlsx: list[tuple] = []                # submitted, but the workbook was locked
+        # Submitted, but the workbook was locked. Kept on disk (pending_xlsx.json) so a later run
+        # still writes the row, with the confirmation e-mail's subject, sender and date.
+        self.pending_xlsx: list[dict] = self._load_pending()
         self.reload()
+
+    def _load_pending(self) -> list[dict]:
+        try:
+            data = json.loads(self.pending_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        return [e for e in data if isinstance(e, dict) and isinstance(e.get("row"), dict)] \
+            if isinstance(data, list) else []
+
+    def _save_pending(self) -> None:
+        if not self.pending_xlsx:
+            try:
+                self.pending_path.unlink()
+            except OSError:
+                pass
+            return
+        tmp = self.pending_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.pending_xlsx, indent=1, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(self.pending_path)
+
+    @staticmethod
+    def _pending_entry(job: dict, row: dict, when: datetime, location: str, receipt: dict | None) -> dict:
+        receipt = receipt if receipt and receipt.get("confirmed") else {}
+        return {
+            "job": {"terms": list(job.get("terms") or []), "ats_job_id": job.get("ats_job_id") or None},
+            "row": dict(row),
+            "when": when.strftime("%Y-%m-%d %H:%M:%S"),
+            "location": location,
+            "receipt_subject": receipt.get("subject", ""),
+            "receipt_sender": receipt.get("sender", ""),
+            "receipt_date": receipt.get("received_at", ""),
+            "receipt_ats": receipt.get("ats", ""),
+        }
+
+    @staticmethod
+    def _receipt_of(entry: dict) -> dict | None:
+        if not entry.get("receipt_subject"):
+            return None
+        return {"confirmed": True, "subject": entry["receipt_subject"], "sender": entry.get("receipt_sender", ""),
+                "received_at": entry.get("receipt_date", ""), "ats": entry.get("receipt_ats", "")}
 
     # -- loading ------------------------------------------------------------
     def reload(self) -> None:
@@ -322,7 +454,8 @@ class Ledger:
             try:
                 self._append_xlsx(job, row, when, location, receipt)
             except OSError as exc:                         # e.g. the workbook is open in Excel
-                self.pending_xlsx.append((job, row, when, location, receipt))
+                self.pending_xlsx.append(self._pending_entry(job, row, when, location, receipt))
+                self._save_pending()
                 print(f"  ! could not write {self.xlsx.name} ({type(exc).__name__}): close it in Excel. "
                       "The application is saved in applied_tracker.csv and will be added on the next write.",
                       flush=True)
@@ -335,9 +468,10 @@ class Ledger:
         (it was open in Excel, or a run was interrupted). Returns how many rows were added."""
         if not self.xlsx.exists():
             return 0
+        flushed = self.flush_pending_xlsx()                # rows with a receipt go in first, receipt and all
         in_book: Counter = Counter((normalize_company(t.get("Company")), normalize_role(t.get("Role")))
                                    for t in load_tracker_rows(self.xlsx))
-        added = 0
+        added = flushed
         for r in self._read_csv():
             if not r.get("ATS_Platform"):                  # rows that came from the workbook in the first place
                 continue
@@ -356,13 +490,24 @@ class Ledger:
             added += 1
         return added
 
-    def flush_pending_xlsx(self) -> None:
+    def flush_pending_xlsx(self) -> int:
+        """Write the rows a locked workbook held back. Returns how many went in."""
+        written = 0
         while self.pending_xlsx:
+            entry = self.pending_xlsx[0]
             try:
-                self._append_xlsx(*self.pending_xlsx[0])
+                when = datetime.strptime(entry.get("when") or "", "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                when = datetime.now()
+            try:
+                self._append_xlsx(entry.get("job") or {}, entry["row"], when, entry.get("location") or "",
+                                  self._receipt_of(entry))
             except OSError:
-                return
+                return written
             self.pending_xlsx.pop(0)
+            self._save_pending()
+            written += 1
+        return written
 
     def record_unconfirmed(self, job: dict, detail: str = "", *, when: datetime | None = None,
                            path: Path | None = None) -> dict:

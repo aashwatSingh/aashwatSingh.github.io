@@ -103,3 +103,94 @@ def clear_choice() -> None:
         choice_path().unlink()
     except OSError:
         pass
+
+
+# ---- blitz control (Mission Control's Start / Pause / Stop) -------------------------------- #
+# control.json is written by Mission Control and read by the runner between applications;
+# runner.json is written by the runner while it is alive. Both are git-ignored.
+
+def control_path() -> Path:
+    return config.BASE / "run_control.json"
+
+
+def runner_path() -> Path:
+    return config.BASE / "runner.json"
+
+
+def read_control() -> dict:
+    try:
+        data = json.loads(control_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"paused": False, "stop": False}
+    return {"paused": bool(data.get("paused")), "stop": bool(data.get("stop"))}
+
+
+def set_control(*, paused: bool | None = None, stop: bool | None = None) -> dict:
+    data = read_control()
+    if paused is not None:
+        data["paused"] = paused
+    if stop is not None:
+        data["stop"] = stop
+    _write(control_path(), data)
+    return data
+
+
+def clear_control() -> None:
+    try:
+        control_path().unlink()
+    except OSError:
+        pass
+
+
+def runner_started(args: list[str]) -> None:
+    try:
+        _write(runner_path(), {"pid": os.getpid(), "started": time.strftime("%Y-%m-%d %H:%M:%S"), "args": args})
+    except OSError:
+        pass
+
+
+def runner_finished() -> None:
+    try:
+        data = json.loads(runner_path().read_text(encoding="utf-8"))
+        if data.get("pid") != os.getpid():
+            return                                         # another runner took over the file
+        runner_path().unlink()
+    except (OSError, ValueError):
+        pass
+
+
+def pid_alive(pid) -> bool:
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        try:
+            ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            return bool(ok) and code.value == 259          # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def read_runner() -> dict | None:
+    """The live runner's {pid, started, args}, or None. A file left by a crashed runner is ignored."""
+    try:
+        data = json.loads(runner_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) and pid_alive(data.get("pid")) else None

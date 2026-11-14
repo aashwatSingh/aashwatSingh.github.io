@@ -19,6 +19,9 @@ LEDGER_CSV = BASE / "applied_tracker.csv"
 QUEUE_JSON = BASE / "job_queue.json"
 MANUAL_REVIEW_CSV = BASE / "manual_review_queue.csv"
 UNCONFIRMED_CSV = BASE / "unconfirmed_applications.csv"
+# Submitted applications whose workbook row could not be written yet (Excel had it open),
+# with the confirmation e-mail that proved them, so the late row still carries its subject.
+PENDING_XLSX_JSON = BASE / "pending_xlsx.json"
 CUSTOM_ANSWERS_JSON = BASE / "custom_answers.json"
 RUN_STATE_JSON = BASE / "run_state.json"
 LOG_DIR = BASE / "logs"

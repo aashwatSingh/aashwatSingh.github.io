@@ -476,12 +476,34 @@ def test_dashboard_marks_the_code_step_skipped_when_no_code_was_asked_for(home):
     assert _statuses(app_server.build_state())[run_state.ENTERING_OTP] == "skipped"
 
 
-def test_dashboard_counts_confirmed_and_held_separately(home):
-    (home / "applied.csv").write_text("Timestamp,Company\n1,A\n2,B\n", encoding="utf-8")
-    (home / "unconfirmed_applications.csv").write_text("Timestamp,Company\n1,C\n", encoding="utf-8")
+def test_dashboard_counts_come_from_the_tracker_workbook(home, monkeypatch):
+    summary = {"total": 169, "target": 500, "remaining": 331, "pendingWrites": 1, "unconfirmed": 2,
+               "byStatus": [{"status": "Rejected", "count": 58}], "rows": [{"company": "x"}]}
+    monkeypatch.setattr(app_server, "tracker", app_server.TrackerCache(compute=lambda: summary))
     state = app_server.build_state()
-    assert (state["confirmed_total"], state["unconfirmed_total"], state["target"]) == (2, 1, 500)
-    assert state["job"] is None and state["timed_out"] is False
+    t = state["tracker"]
+    assert (t["total"], t["remaining"], t["pendingWrites"], t["unconfirmed"]) == (169, 331, 1, 2)
+    assert "rows" not in t and state["job"] is None and state["timed_out"] is False
+
+
+def test_blitz_starts_only_the_fixed_command_and_controls_through_files(home, monkeypatch):
+    started = []
+
+    class Proc:
+        pid, returncode = 4242, None
+
+        def poll(self):
+            return self.returncode
+    monkeypatch.setattr(app_server, "blitz_log_path", lambda: home / "logs" / "blitz.log")
+    b = app_server.Blitz(popen=lambda args, **kw: started.append(args) or Proc(), kill=lambda pid: None)
+    assert b.act("rm -rf")[0] == 400 and b.act("pause")[0] == 409
+    assert b.act("start")[0] == 200 and started[0][-5:] == app_server.BLITZ_ARGS
+    assert b.act("start")[0] == 409
+    b.act("pause"); assert run_state.read_control()["paused"] and b.status()["paused"]
+    b.act("resume"); assert not run_state.read_control()["paused"]
+    b.act("stop"); assert run_state.read_control()["stop"] and b.status()["stopping"]
+    assert run(agent_runner.hold_if_paused(poll_s=0.01)) is True
+    agent_runner._stop = False
 
 
 def test_choice_buttons_only_work_while_the_runner_is_waiting(home):

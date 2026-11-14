@@ -195,6 +195,29 @@ async def confirm_receipt(gate: ReceiptGate, context, job: dict, *, attended: bo
         return UNCONFIRMED, {}
 
 
+async def hold_if_paused(*, poll_s: float = 1.0) -> bool:
+    """Mission Control's Pause and Stop, checked between applications. True means stop now."""
+    global _stop
+    announced = False
+    while True:
+        control = run_state.read_control()
+        if _stop or control["stop"]:
+            if control["stop"] and not _stop:
+                log("stop requested from Mission Control")
+            _stop = True
+            return True
+        if not control["paused"]:
+            if announced:
+                log("resumed from Mission Control")
+                run_state.update(None, "", "Resumed")
+            return False
+        if not announced:
+            log("paused from Mission Control: no new application starts until you press Resume")
+            run_state.update(None, "", "Paused between applications")
+            announced = True
+        await asyncio.sleep(poll_s)
+
+
 async def _close_page(page) -> None:
     try:
         if page is not None and not page.is_closed():
@@ -360,8 +383,12 @@ async def run(args) -> int:
     async with async_playwright() as pw:
         context = await launch_browser(pw, args)
         context.set_default_timeout(15000)
+        run_state.clear_control()
+        run_state.runner_started(sys.argv[1:])
         try:
             for job in jobs:
+                if await hold_if_paused():
+                    break
                 if _stop or (deadline and time.time() > deadline):
                     break
                 if not args.dry_run and ledger.total >= args.target:
@@ -429,6 +456,7 @@ async def run(args) -> int:
             save_queue(queue)
             if gate:
                 run_state.update(None, "", "Runner stopped")
+            run_state.runner_finished()
 
     ledger.flush_pending_xlsx()
     if ledger.pending_xlsx:

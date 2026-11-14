@@ -25,3 +25,8 @@ blocking_questions.csv
 chrome_profile/
 essay_requests.json
 blocking_questions.json
+run_control.json
+runner.json
+pending_xlsx.json
+pending_xlsx.tmp
+*.xlsx.lock

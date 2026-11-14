@@ -3,3 +3,4 @@ __pycache__/
 
 # Playwright MCP output (snapshots, screenshots)
 .playwright-mcp/
+desktop.ini
