@@ -5,14 +5,17 @@
  *   anything. A provider already connected in Settings > Connections counts as that consent, so the
  *   prompt is skipped. Spreadsheet tab: choose sheets; financial sheets are only offered to owners and managers
  *   (the server enforces the same rule). Shows "Nothing to export" and success counts from the server.
+ *   If an export fails the choices stay as they were and the dialog offers Retry or Cancel; it never
+ *   reports success for an export that did not happen.
  * @traces SE-FR-19, SE-FR-20, UC-14, UC-15
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import type { CalendarExportResult, Role, SheetsExportResult, SpreadsheetSection } from '../../shared/types';
 import { isManager } from '../../shared/permissions';
 import { formatDateTime } from '../../shared/format';
-import { Alert, Icon, Modal, Segmented } from '../../shared/ui';
+import { Alert, Icon, Modal, RetryBanner, Segmented } from '../../shared/ui';
+import type { ApiError } from '../../services/apiClient';
 import { toApiError } from '../../shared/useSave';
 import { exportController, type CalendarIncludes } from './exportController';
 
@@ -48,20 +51,29 @@ export function ExportModal({ open, onClose, projectId, projectName, role, initi
     }
   }, [open, initialTab, initialTarget]);
 
+  // UC-14 "On failure, show an error and offer retry": the failed export and how to repeat it.
+  const [failure, setFailure] = useState<ApiError | null>(null);
+  const lastAttempt = useRef<(() => Promise<void>) | null>(null);
+
   const reset = () => {
     setMessage(null);
     setLinks([]);
     setSheets(null);
+    setFailure(null);
   };
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
     reset();
+    lastAttempt.current = fn;
     try {
       await fn();
     } catch (err) {
       const e = toApiError(err);
-      setMessage({ tone: e.detail === 'Nothing to export' ? 'warn' : 'danger', text: e.detail });
+      // Answers that explain themselves (nothing to export, consent declined, access denied) are shown as
+      // a message. Anything else - no connection, timeout, server fault - gets Retry / Cancel.
+      if (e.isConnectivity || e.status >= 500) setFailure(e);
+      else setMessage({ tone: e.detail === 'Nothing to export' ? 'warn' : 'danger', text: e.detail });
     } finally {
       setBusy(false);
     }
@@ -112,6 +124,14 @@ export function ExportModal({ open, onClose, projectId, projectName, role, initi
       <div className="space-y-5">
         <Segmented ariaLabel="Export type" value={tab} onChange={(t) => { setTab(t); reset(); }} options={[{ value: 'calendar', label: 'Calendar' }, { value: 'spreadsheet', label: 'Spreadsheet' }]} />
         {message ? <Alert tone={message.tone} onClose={() => setMessage(null)}>{message.text}</Alert> : null}
+        <RetryBanner
+          error={failure}
+          busy={busy}
+          title="The export did not finish."
+          hint="Nothing was exported and your choices are kept - retry now or cancel."
+          onRetry={() => lastAttempt.current && void run(lastAttempt.current)}
+          onCancel={() => setFailure(null)}
+        />
 
         {tab === 'calendar' ? (
           <div className="space-y-4">

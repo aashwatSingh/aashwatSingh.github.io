@@ -159,6 +159,14 @@ export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
 
+  // Escape closes the slide-in navigation drawer on small screens.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMobileOpen(false);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [mobileOpen]);
+
   const refreshUnread = useCallback(() => {
     notificationController.list(true).then((r) => setUnread(r.unread_count)).catch(() => undefined);
   }, []);
@@ -177,7 +185,7 @@ export function AppShell() {
           <Sidebar unread={unread} />
         </aside>
         {mobileOpen ? (
-          <div className="fixed inset-0 z-40 lg:hidden">
+          <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
             <div className="absolute inset-0 bg-black/60" onClick={() => setMobileOpen(false)} />
             <aside className="absolute inset-y-0 left-0 w-60 border-r border-line bg-surface-2">
               <Sidebar unread={unread} onNavigate={() => setMobileOpen(false)} />

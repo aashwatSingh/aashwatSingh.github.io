@@ -5,7 +5,8 @@
     against the project's members: members get a notification pushed live within two seconds, while an
     @name that is not on the project is turned into plain text and the author gets a warning - the comment
     is still posted. The notification list also produces automatic reminders for work due within 24 hours.
-    Each user's notification preferences decide which kinds they receive.
+    Each user's notification preferences decide which kinds they receive, and a notification about a
+    project is only ever created for people who are members of that project at that moment.
 @traces: SE-FR-28, SE-FR-29, SE-NFR-11, SE-NFR-12, UC-21, UC-22
 """
 
@@ -74,10 +75,24 @@ def create_notifications(
     link: str = "",
     dedupe_key: str | None = None,
 ) -> list[Notification]:
-    """Bulk-adds one notification per distinct user (skipping users who already have `dedupe_key`)."""
+    """Bulk-adds one notification per distinct user (skipping users who already have `dedupe_key`).
+
+    SE-NFR-11: when `project_id` is given, recipients are narrowed to that project's current members, so
+    a former member (for example the creator of a task who has since been removed) never receives a
+    message that quotes project content. One query, whatever the number of recipients.
+    """
     targets = list(dict.fromkeys(uid for uid in user_ids if uid))
     if not targets:
         return []
+    if project_id is not None:
+        current = set(
+            db.execute(
+                select(ProjectMember.user_id).where(ProjectMember.project_id == project_id, ProjectMember.user_id.in_(targets))
+            ).scalars()
+        )
+        targets = [uid for uid in targets if uid in current]
+        if not targets:
+            return []
     if dedupe_key is not None:
         existing = set(
             db.execute(
@@ -118,9 +133,11 @@ def extract_mentions(text: str) -> list[str]:
     return list(dict.fromkeys(m.group(1) for m in MENTION_RE.finditer(text)))
 
 
-def _strip_mention(text: str, username: str) -> str:
-    pattern = re.compile(rf"(?<![A-Za-z0-9_@])@({re.escape(username)})(?![A-Za-z0-9_])", re.IGNORECASE)
-    return pattern.sub(lambda m: m.group(1), text)
+def strip_mentions(text: str, usernames: set[str]) -> str:
+    """Removes the "@" from every mention of the given (lower-case) names in one O(L) pass."""
+    if not usernames:
+        return text
+    return MENTION_RE.sub(lambda m: m.group(1) if m.group(1).lower() in usernames else m.group(0), text)
 
 
 def _comment_out(comment: Comment, viewer_id: str, viewer_role: str) -> CommentOut:
@@ -179,18 +196,20 @@ def create_comment(
     members = {username.lower(): (uid, username) for uid, username in member_rows}
 
     warnings: list[str] = []
-    notify_ids: list[str] = []
-    names: dict[str, str] = {}
+    names: dict[str, str] = {}  # user id -> canonical username, in order of first mention
+    invalid: set[str] = set()
     for name in extract_mentions(text):
-        match = members.get(name.lower())
+        match = members.get(name.lower())  # O(1) hash lookup per mention
         if match is None:
-            text = _strip_mention(text, name)
-            warnings.append(f"@{name} is not a project member and was not notified")
+            if name.lower() not in invalid:
+                invalid.add(name.lower())
+                warnings.append(f"@{name} is not a project member and was not notified")
             continue
         uid, canonical = match
-        if uid != user.id and uid not in notify_ids:
-            notify_ids.append(uid)
-            names[uid] = canonical
+        if uid != user.id:
+            names.setdefault(uid, canonical)
+    text = strip_mentions(text, invalid)
+    notify_ids = list(names)
 
     now = utcnow()
     comment = Comment(task_id=task.id, project_id=task.project_id, author_id=user.id, body=text, created_at=now)
@@ -242,11 +261,13 @@ def ensure_deadline_reminders(db: Session, user: UserProfile) -> list[Notificati
     if not wants_notification(user.notification_prefs, "deadline_reminder"):
         return created
 
+    # Joined to the user's current memberships: reminders are never built from a project they have left.
+    member_of = select(ProjectMember.project_id).where(ProjectMember.user_id == user.id)
     due_tasks = db.execute(
         select(Task).where(
             Task.assignee_id == user.id,
+            Task.project_id.in_(member_of),
             Task.status != "done",
-            Task.due_date.is_not(None),
             Task.due_date > now,
             Task.due_date <= horizon,
         )
@@ -256,6 +277,7 @@ def ensure_deadline_reminders(db: Session, user: UserProfile) -> list[Notificati
         .join(Task, Task.id == SoftDeadline.task_id)
         .where(
             Task.assignee_id == user.id,
+            Task.project_id.in_(member_of),
             SoftDeadline.is_completed.is_(False),
             SoftDeadline.due_at > now,
             SoftDeadline.due_at <= horizon,

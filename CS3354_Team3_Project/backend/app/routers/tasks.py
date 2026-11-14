@@ -31,7 +31,7 @@ from app.core.permissions import (
 )
 from app.core.realtime import hub
 from app.core.security import get_current_user
-from app.models.entities import Comment, Project, SoftDeadline, Task, TaskList, TimeEntry, UserProfile
+from app.models.entities import Comment, Project, ProjectMember, SoftDeadline, Task, TaskList, TimeEntry, UserProfile
 from app.routers.collaboration import create_notifications, publish_notifications
 from app.routers.projects import broadcast_progress, project_member_ids
 from app.schemas.dto import (
@@ -196,9 +196,11 @@ def _notify_status_change(db: Session, task: Task, actor: UserProfile, old_statu
     )
 
 
-def _broadcast_task(db: Session, task_or_project_id: str, task_id: str, action: str) -> None:
-    hub.publish(project_member_ids(db, task_or_project_id), "task_changed", {"project_id": task_or_project_id, "task_id": task_id, "action": action})
-    broadcast_progress(db, task_or_project_id)
+def _broadcast_task(db: Session, project_id: str, task_id: str, action: str) -> None:
+    """Tells the project's *current* members (one membership query, reused for the progress event)."""
+    recipients = project_member_ids(db, project_id)
+    hub.publish(recipients, "task_changed", {"project_id": project_id, "task_id": task_id, "action": action})
+    broadcast_progress(db, project_id, recipients)
 
 
 # ---------------------------------------------------------------------------
@@ -301,10 +303,19 @@ def list_tasks(
 def my_tasks(
     include_done: bool = Query(False), user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> list[TaskOut]:
-    stmt = select(Task).options(joinedload(Task.assignee)).where(Task.assignee_id == user.id)
+    # Only tasks in projects the caller still belongs to (SE-NFR-11). A task that was finished before its
+    # assignee was removed stays assigned to them for the record, but they can no longer read it here.
+    stmt = (
+        select(Task)
+        .options(joinedload(Task.assignee))
+        .where(
+            Task.assignee_id == user.id,
+            Task.project_id.in_(select(ProjectMember.project_id).where(ProjectMember.user_id == user.id)),
+        )
+    )
     if not include_done:
         stmt = stmt.where(Task.status != "done")
-    tasks = db.execute(stmt.order_by(Task.due_date.is_(None), Task.due_date, Task.created_at)).scalars().all()
+    tasks = db.execute(stmt.order_by(Task.due_date, Task.created_at).limit(500)).scalars().all()
     return serialize_tasks(db, list(tasks))
 
 

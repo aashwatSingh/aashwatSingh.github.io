@@ -5,17 +5,22 @@
     after 5 wrong passwords and emails a single-use unlock link. Every failure message is generic so an
     attacker cannot tell which emails have accounts. Sign-up and log-in are also limited to 5 requests
     per minute per IP address by the middleware in core/security.py.
+    Failed attempts are counted with one atomic database UPDATE, so parallel guesses cannot slip past
+    the limit. Unlocking and password reset are separate: a reset link changes the password but leaves a
+    locked account locked, and an unlock link never touches the password. Both links work once.
 @traces: SE-FR-11, SE-NFR-06, UC-08, UC-09, UC-10, UC-11
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db, utcnow
+from app.core.realtime import hub
 from app.core.security import (
     DEV_OUTBOX,
     TOKEN_MFA,
@@ -66,32 +71,55 @@ INVALID_UNLOCK = "This unlock link is invalid or has expired."
 DEMO_USERS: dict[str, str] = {"jon": "Owner", "tyler": "Manager", "staff": "Member"}
 
 
-def _find_user(db: Session, identifier: str) -> UserProfile | None:
+def _find_user(db: Session, identifier: str, lock: bool = False) -> UserProfile | None:
+    """Looks an account up by email or username. With lock=True the row is locked (SELECT ... FOR UPDATE)
+    until the request's transaction ends, so two sign-in attempts on one account are checked one after
+    the other and both see an up-to-date failure count and lock state."""
     ident = identifier.strip()
     if not ident:
         return None
-    return db.execute(
-        select(UserProfile).where(
-            or_(func.lower(UserProfile.email) == ident.lower(), func.lower(UserProfile.username) == ident.lower())
-        )
-    ).scalar_one_or_none()
+    stmt = select(UserProfile).where(
+        or_(func.lower(UserProfile.email) == ident.lower(), func.lower(UserProfile.username) == ident.lower())
+    )
+    if lock:
+        stmt = stmt.with_for_update()
+    return db.execute(stmt).scalars().first()
 
 
 def _session_response(user: UserProfile) -> LoginResponse:
     return LoginResponse(
         mfa_required=False,
-        access_token=create_access_token(user.id),
+        access_token=create_access_token(user.id, user.password_hash),
         user=UserOut.model_validate(user),
     )
 
 
 def _register_failure(db: Session, user: UserProfile) -> None:
-    """Counts a failed password / code and locks the account at the threshold (UC-10)."""
-    user.failed_login_attempts += 1
-    if user.failed_login_attempts >= settings.lockout_threshold and not user.is_locked(utcnow()):
-        user.locked_until = lockout_expiry()
-        token, jti = create_token(user.id, TOKEN_UNLOCK, settings.unlock_token_minutes)
-        user.unlock_token_jti = jti
+    """Counts a failed password / code and locks the account at the threshold (UC-09, UC-10).
+
+    The count is incremented by the database in a single UPDATE (not read, added to and written back in
+    Python), so concurrent wrong guesses each count. The lock itself is a conditional UPDATE: only the
+    request that actually flips the account from unlocked to locked sends the unlock email.
+    """
+    now = utcnow()
+    db.execute(
+        update(UserProfile)
+        .where(UserProfile.id == user.id)
+        .values(failed_login_attempts=UserProfile.failed_login_attempts + 1)
+    )
+    token, jti = create_token(user.id, TOKEN_UNLOCK, settings.unlock_token_minutes)
+    locked_now = db.execute(
+        update(UserProfile)
+        .where(
+            UserProfile.id == user.id,
+            UserProfile.failed_login_attempts >= settings.lockout_threshold,
+            or_(UserProfile.locked_until.is_(None), UserProfile.locked_until <= now),
+        )
+        .values(locked_until=lockout_expiry(), unlock_token_jti=jti)
+    ).rowcount
+    db.commit()
+    db.refresh(user)
+    if locked_now:
         link = f"{settings.frontend_url}/login?unlock_token={token}"
         send_email(
             user.email,
@@ -100,7 +128,6 @@ def _register_failure(db: Session, user: UserProfile) -> None:
             f"Use this single-use link to unlock it: {link}",
             link,
         )
-    db.commit()
 
 
 @router.post("/signup", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
@@ -123,7 +150,12 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)) -> LoginResponse:
         default_project_type="work",
     )
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two sign-ups raced for the same name / email; the unique indexes let exactly one through.
+        db.rollback()
+        raise FieldValidationError({"username": "That username or email was just taken. Try another."}) from None
     db.refresh(user)
     return _session_response(user)
 
@@ -131,7 +163,7 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)) -> LoginResponse:
 @router.post("/login", response_model=LoginResponse)
 def login(body: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
     """UC-09: lockout check first, then password, then optional 2FA step."""
-    user = _find_user(db, body.email)
+    user = _find_user(db, body.email, lock=True)
     now = utcnow()
 
     if user is not None:
@@ -142,6 +174,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
             user.locked_until = None
             user.failed_login_attempts = 0
             user.unlock_token_jti = None
+            db.flush()  # written now (still inside the locked transaction) so the counter below starts at 0
 
     if user is None or not verify_password(body.password, user.password_hash if user else None):
         if user is not None:
@@ -165,7 +198,7 @@ def verify_mfa(body: VerifyMfaRequest, db: Session = Depends(get_db)) -> LoginRe
     payload = decode_token(body.temp_token, TOKEN_MFA)
     if payload is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Your sign-in session expired. Sign in again.")
-    user = db.get(UserProfile, payload["sub"])
+    user = db.get(UserProfile, payload["sub"], with_for_update=True)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Your sign-in session expired. Sign in again.")
     if user.is_locked(utcnow()):
@@ -180,7 +213,7 @@ def verify_mfa(body: VerifyMfaRequest, db: Session = Depends(get_db)) -> LoginRe
 
 @router.post("/unlock", response_model=MessageOut)
 def unlock_account(body: UnlockRequest, db: Session = Depends(get_db)) -> MessageOut:
-    """User.unlockAccount(token): single-use, signed, expiring unlock link (UC-10)."""
+    """User.unlockAccount(token): single-use, signed, expiring unlock link (UC-10). Never changes the password."""
     payload = decode_token(body.unlock_token, TOKEN_UNLOCK)
     user = db.get(UserProfile, payload["sub"]) if payload else None
     if user is None or not jti_matches(user.unlock_token_jti, payload.get("jti") if payload else None):
@@ -217,12 +250,14 @@ def confirm_password_reset(body: ResetPasswordConfirm, db: Session = Depends(get
     user = db.get(UserProfile, payload["sub"]) if payload else None
     if user is None or not jti_matches(user.reset_token_jti, payload.get("jti") if payload else None):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=INVALID_RESET)
+    # UC-11: "Password reset is separate from account unlocking". Only the password and the used link
+    # change here; failed_login_attempts, locked_until and the unlock link are deliberately left alone, so
+    # a locked account stays locked until its unlock link is used or the lock expires.
     user.password_hash = hash_password(body.new_password)
     user.reset_token_jti = None
-    user.failed_login_attempts = 0
-    user.locked_until = None
-    user.unlock_token_jti = None
     db.commit()
+    # The new password hash invalidates every earlier session token; drop their live connections too.
+    hub.close_user(user.id)
     return MessageOut(message="Your password was updated. Sign in with your new password.")
 
 

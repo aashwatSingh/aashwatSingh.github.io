@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -72,14 +73,14 @@ def performance_report(
     range_end = datetime.combine(end + timedelta(days=1), time.min)
 
     people_stmt = (
-        select(UserProfile)
+        select(UserProfile.id, UserProfile.username, UserProfile.display_name)
         .join(ProjectMember, ProjectMember.user_id == UserProfile.id)
         .where(ProjectMember.project_id == project_id)
         .order_by(UserProfile.username)
     )
     if scope_user:
         people_stmt = people_stmt.where(UserProfile.id == scope_user)
-    people = db.execute(people_stmt).scalars().all()
+    people = db.execute(people_stmt).all()
     people_ids = {p.id for p in people}
 
     entry_stmt = select(TimeEntry.user_id, TimeEntry.task_id, TimeEntry.started_at, TimeEntry.duration_hours).where(
@@ -169,10 +170,13 @@ def performance_report(
     scope_tasks = db.execute(scope_stmt).all()
     total_scope = len(scope_tasks)
     done_scope = sum(1 for status_value, _ in scope_tasks if status_value == "done")
+    # Sort the completion times once, then binary-search each week: O(T log T + W log T) instead of
+    # re-scanning every task for every week (O(W * T)).
+    completed_times = sorted(completed for status_value, completed in scope_tasks if status_value == "done" and completed is not None)
     progress_points = []
     for wk in weeks:
         week_end = datetime.combine(min(wk.week_start + timedelta(days=7), end + timedelta(days=1)), time.min)
-        finished = sum(1 for status_value, completed in scope_tasks if status_value == "done" and completed is not None and completed < week_end)
+        finished = bisect_left(completed_times, week_end)  # completions strictly before the week's end
         progress_points.append(WeeklyProgress(week_start=wk.week_start, completion_pct=percent(finished, total_scope)))
 
     usernames = {p.id: p.username for p in people}

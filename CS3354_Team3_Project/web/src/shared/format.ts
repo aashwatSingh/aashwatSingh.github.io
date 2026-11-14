@@ -91,3 +91,17 @@ export function initials(name: string): string {
   if (parts.length === 0) return '?';
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
 }
+
+/**
+ * Reduces a link to a same-site path ("/reset-password?token=...") so it can only ever navigate inside
+ * this app. Returns null for anything that is not an http(s) URL (javascript:, data:, mailto:, ...).
+ */
+export function sameSitePath(link: string, origin: string = typeof window !== 'undefined' ? window.location.origin : 'http://localhost'): string | null {
+  try {
+    const url = new URL(link, origin);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return null;
+  }
+}

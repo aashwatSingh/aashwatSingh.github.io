@@ -65,9 +65,16 @@ export function WidgetGrid({ widgets, columns, editing, onMove, onHide, onRemove
     if (!drag) return;
     const widget = visible.find((w) => w.id === drag.id);
     if (!widget) return;
+    // The grid is measured once when the drag starts, not on every pointer event: reading clientWidth
+    // inside the move handler would force the browser to recalculate layout dozens of times a second.
+    const cell = cellWidth();
     const onMovePointer = (e: PointerEvent) => {
-      const t = targetCell(widget, e.clientX - drag.startX, e.clientY - drag.startY, cellWidth(), ROW_HEIGHT, GAP, columns);
-      if (dragRef.current) setDrag({ ...dragRef.current, x: t.x, y: t.y });
+      const current = dragRef.current;
+      if (!current) return;
+      const t = targetCell(widget, e.clientX - drag.startX, e.clientY - drag.startY, cell, ROW_HEIGHT, GAP, columns);
+      // Pure arithmetic per event; React re-renders (and the O(W) overlap check runs) only when the
+      // pointer has crossed into a different grid cell.
+      if (t.x !== current.x || t.y !== current.y) setDrag({ ...current, x: t.x, y: t.y });
     };
     const onUp = async () => {
       const current = dragRef.current;

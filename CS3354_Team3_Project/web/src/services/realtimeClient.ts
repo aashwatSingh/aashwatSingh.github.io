@@ -3,7 +3,9 @@
  * @description Keeps one WebSocket open to the backend while the user is signed in and hands each live
  *   event (progress changed, new notification, task moved, ...) to whichever screens are listening, so
  *   progress bars and the notification bell update within 2 seconds. Reconnects automatically with backoff.
- * @traces SE-FR-18, SE-FR-29, SE-NFR-10, SE-NFR-12
+ *   The access token is sent as the first message inside the socket, never in the URL, so it cannot end
+ *   up in server logs or browser history (SE-NFR-06). The server closes sockets that do not sign in.
+ * @traces SE-FR-18, SE-FR-29, SE-NFR-06, SE-NFR-10, SE-NFR-11, SE-NFR-12
  */
 import { useEffect, useRef } from 'react';
 
@@ -22,11 +24,11 @@ export type RealtimeEventType =
 
 type Handler = (data: any) => void; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-function socketUrl(token: string): string {
+export function socketUrl(): string {
   const base = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '');
-  if (base) return `${base.replace(/^http/, 'ws')}/ws?token=${encodeURIComponent(token)}`;
+  if (base) return `${base.replace(/^http/, 'ws')}/ws`;
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${proto}://${window.location.host}/ws?token=${encodeURIComponent(token)}`;
+  return `${proto}://${window.location.host}/ws`;
 }
 
 class RealtimeClient {
@@ -79,16 +81,21 @@ class RealtimeClient {
 
   private open(): void {
     if (!this.token || typeof WebSocket === 'undefined') return;
-    const socket = new WebSocket(socketUrl(this.token));
+    const token = this.token;
+    const socket = new WebSocket(socketUrl());
     this.socket = socket;
     socket.onopen = () => {
-      this.retryMs = 1000;
-      this.setConnected(true);
+      // First frame: sign in. Nothing is delivered until the server answers "connected".
+      socket.send(JSON.stringify({ type: 'auth', token }));
       this.pingTimer = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send('ping'), 25_000);
     };
     socket.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data as string) as { type: string; data: unknown };
+        if (message.type === 'connected') {
+          this.retryMs = 1000;
+          this.setConnected(true);
+        }
         this.handlers.get(message.type)?.forEach((h) => h(message.data));
       } catch {
         /* ignore malformed frames */

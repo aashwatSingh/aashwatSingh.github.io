@@ -4,7 +4,8 @@
  *   drag-and-drop (Task.moveTo) and a Task details panel for the selected card (status, due date, priority,
  *   assignee, tags, soft deadlines). Moves appear instantly and are rolled back if the server refuses them or
  *   the connection fails (with Retry). Filters by text, assignee, tag and feature list. Only owners and
- *   managers see "New task"; members can drag only the tasks assigned to them.
+ *   managers see "New task"; members can drag only the tasks assigned to them. Escape closes the task
+ *   details panel.
  * @traces SE-FR-26, SE-FR-27, SE-FR-18, SE-NFR-04, SE-NFR-10, SE-NFR-11, UC-18
  */
 import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react';
@@ -87,6 +88,17 @@ export function BoardPage() {
   const [error, setError] = useState<string | null>(null);
   const [failedMove, setFailedMove] = useState<{ taskId: string; status: TaskStatus; index: number; error: ApiError } | null>(null);
   const [creating, setCreating] = useState<TaskStatus | null>(null);
+
+  // Escape closes the task details panel (a slide-in drawer on smaller screens), unless a dialog is open
+  // on top of it - the dialog handles its own Escape first.
+  useEffect(() => {
+    if (!selectedId || creating) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !document.querySelector('[role="dialog"]')) setSelectedId(null);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [selectedId, creating]);
 
   const load = useCallback(async () => {
     if (!currentProjectId) return;

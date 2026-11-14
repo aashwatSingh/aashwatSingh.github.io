@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db, utcnow
 from app.core.permissions import ALL_ROLES, MANAGERS, require_project_role
-from app.core.sanitizer import sanitize_spreadsheet_cell
+from app.core.sanitizer import clean_text, sanitize_spreadsheet_cell
 from app.core.security import get_current_user
 from app.models.entities import Expense, Project, ProjectFinancials, SoftDeadline, StageCost, Task, TimeEntry, UserProfile
 from app.schemas.dto import (
@@ -111,10 +111,20 @@ def collect_deadlines(db: Session, project: Project, body: CalendarExportRequest
     return items
 
 
+_ICS_LINE_BREAK = re.compile(r"\r\n|[\r\n\x0b\x0c\x85\u2028\u2029]")
+
+
 def _ics_escape(text: str) -> str:
-    return (
-        text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\r\n", "\\n").replace("\n", "\\n")
-    )
+    """RFC 5545 section 3.3.11 TEXT escaping, so user text can never start a new property line.
+
+    Order matters: backslash first, then ";" and ",", then every kind of line break (CRLF, a lone CR, a
+    lone LF and the Unicode separators some parsers honour) becomes the two characters "\\n". Remaining
+    control characters are dropped. A title such as "x\r\nBEGIN:VALARM" therefore stays one SUMMARY
+    value: the file never gains a raw CR or LF from user data, so no VALARM, ATTACH or other property
+    can be injected.
+    """
+    text = clean_text(_ICS_LINE_BREAK.sub("\n", text))
+    return text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
 
 
 def _ics_fold(line: str) -> list[str]:
@@ -349,7 +359,11 @@ class ExportJob:
         return sheet
 
     def generate_file(self) -> bytes:
-        """ExportJob.generateFile(): in-memory .xlsx with every cell sanitized (CWE-1236)."""
+        """ExportJob.generateFile(): in-memory .xlsx with every string cell sanitized (CWE-1236).
+
+        Every value of every sheet - titles, tags, notes, descriptions, categories, names, headers - goes
+        through sanitize_spreadsheet_cell(); there is no code path that appends a row without it.
+        """
         workbook = Workbook()
         workbook.remove(workbook.active)
         bold = Font(bold=True, color="FFFFFF")
@@ -362,6 +376,9 @@ class ExportJob:
                 cell.fill = fill
             for row in sheet.rows:
                 ws.append([sanitize_spreadsheet_cell(_xlsx_value(v)) for v in row])
+                for cell, value in zip(ws[ws.max_row], row):
+                    if isinstance(value, Decimal):
+                        cell.number_format = "0.00"  # money and hours keep exactly two decimals
             for index, header in enumerate(sheet.header, start=1):
                 width = max([len(str(header))] + [len(str(r[index - 1])) for r in sheet.rows if r[index - 1] is not None])
                 ws.column_dimensions[get_column_letter(index)].width = min(60, max(10, width + 2))
@@ -383,10 +400,9 @@ class ExportJob:
 
 
 def _xlsx_value(value: Any) -> Any:
+    """Decimals are written as exact decimal numbers (openpyxl stores their string form), never as floats."""
     if value is None:
         return ""
-    if isinstance(value, Decimal):
-        return float(value)
     return value
 
 

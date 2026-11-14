@@ -7,7 +7,7 @@
  *   (assignee or manager), and the server re-checks every action.
  * @traces SE-FR-26, SE-FR-27, SE-FR-28, SE-FR-29, SE-FR-04, SE-FR-06..SE-FR-10, SE-NFR-03, SE-NFR-11, UC-03, UC-04, UC-05, UC-06, UC-07, UC-18, UC-21
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { CommentThread } from '../features/collaboration/CommentThread';
 import { SafeMarkdown } from '../features/collaboration/SafeMarkdown';
@@ -85,6 +85,8 @@ export function TaskDetailPage() {
   const navigate = useNavigate();
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
+  // Hash set of member usernames: each @mention in the description is checked in O(1).
+  const memberNames = useMemo(() => new Set(members.map((m) => m.username.toLowerCase())), [members]);
   const [lists, setLists] = useState<TaskList[]>([]);
   const [error, setError] = useState<{ status: number; detail: string } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -163,7 +165,7 @@ export function TaskDetailPage() {
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <Card title="Description">
-            {task.description ? <SafeMarkdown source={task.description} memberNames={new Set(members.map((m) => m.username.toLowerCase()))} /> : <p className="text-sm text-muted">No description.</p>}
+            {task.description ? <SafeMarkdown source={task.description} memberNames={memberNames} /> : <p className="text-sm text-muted">No description.</p>}
           </Card>
           <Card title="Soft deadlines">
             <SoftDeadlineList taskId={task.id} taskDueDate={task.due_date} canManage={task.can_edit} />

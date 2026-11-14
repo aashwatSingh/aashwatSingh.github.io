@@ -79,7 +79,6 @@ class Settings:
     db_fallback_to_sqlite: bool
     sqlite_url: str
     jwt_secret: str
-    jwt_algorithm: str
     access_token_minutes: int
     mfa_token_minutes: int
     reset_token_minutes: int
@@ -88,7 +87,15 @@ class Settings:
     cors_origins: list[str] = field(default_factory=list)
     rate_limit_requests: int = 5
     rate_limit_window_seconds: int = 60
-    rate_limited_paths: tuple[str, ...] = ("/api/auth/signup", "/api/auth/login")
+    # UC-08 / UC-09 name sign-up and log-in; the other three are limited too so the 6-digit code cannot be
+    # guessed in bulk and nobody's inbox can be flooded with reset links.
+    rate_limited_paths: tuple[str, ...] = (
+        "/api/auth/signup",
+        "/api/auth/login",
+        "/api/auth/verify-mfa",
+        "/api/auth/reset-password/request",
+        "/api/auth/reset-password/confirm",
+    )
     lockout_threshold: int = 5
     lockout_minutes: int = 30
     seed_demo_data: bool = True
@@ -125,7 +132,6 @@ def get_settings() -> Settings:
         db_fallback_to_sqlite=_bool("DB_FALLBACK_TO_SQLITE", True),
         sqlite_url=sqlite_url,
         jwt_secret=_jwt_secret(environment),
-        jwt_algorithm="HS256",
         access_token_minutes=_int("ACCESS_TOKEN_MINUTES", 60 * 8),
         mfa_token_minutes=_int("MFA_TOKEN_MINUTES", 5),
         reset_token_minutes=_int("RESET_TOKEN_MINUTES", 30),

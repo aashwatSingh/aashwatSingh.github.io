@@ -13,7 +13,7 @@ import { AUTH_BUTTON, AUTH_INPUT, AuthLayout } from '../features/auth/AuthLayout
 import { authController } from '../features/auth/authController';
 import { passwordRules, validatePassword } from '../features/auth/validation';
 import type { OutboxMessage } from '../shared/types';
-import { relativeTime } from '../shared/format';
+import { relativeTime, sameSitePath } from '../shared/format';
 import { Alert, Field, Icon } from '../shared/ui';
 import { toApiError } from '../shared/useSave';
 
@@ -35,7 +35,7 @@ function DemoInbox() {
           <li key={m.sent_at + m.link} className="rounded-btn border border-line bg-surface p-3">
             <p className="font-semibold text-ink">{m.subject}</p>
             <p className="text-xs text-muted">To {m.to} · {relativeTime(m.sent_at)}</p>
-            {m.link ? <a href={m.link.replace(/^https?:\/\/[^/]+/, '')} className="mt-1 inline-block text-xs font-semibold text-accent">Open link →</a> : null}
+            {sameSitePath(m.link) ? <a href={sameSitePath(m.link)!} className="mt-1 inline-block text-xs font-semibold text-accent">Open link →</a> : null}
           </li>
         ))}
       </ul>

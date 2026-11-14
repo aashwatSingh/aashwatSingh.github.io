@@ -162,9 +162,10 @@ def build_widget_data(db: Session, user: UserProfile, visible_types: set[str]) -
         .order_by(ProjectMember.card_order)
     ).all()
     project_ids = [p.id for _, p in memberships]
+    # One grouped COUNT for both progress widgets instead of one query each.
+    counts = task_counts(db, project_ids) if visible_types & {"project_progress", "task_progress"} else {}
 
     if "project_progress" in visible_types:
-        counts = task_counts(db, project_ids)
         data["project_progress"] = [
             {
                 "project_id": p.id,
@@ -181,13 +182,13 @@ def build_widget_data(db: Session, user: UserProfile, visible_types: set[str]) -
         ]
 
     if "task_progress" in visible_types:
-        counts = task_counts(db, project_ids)
         total = sum(t for t, _ in counts.values())
         done = sum(d for _, d in counts.values())
         day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         due_today = db.execute(
             select(func.count(Task.id)).where(
                 Task.assignee_id == user.id,
+                Task.project_id.in_(project_ids),  # current memberships only (SE-NFR-11)
                 Task.status != "done",
                 Task.due_date >= day_start,
                 Task.due_date < day_start + timedelta(days=1),
@@ -199,8 +200,8 @@ def build_widget_data(db: Session, user: UserProfile, visible_types: set[str]) -
         names = {p.id: p.name for _, p in memberships}
         tasks = db.execute(
             select(Task)
-            .where(Task.assignee_id == user.id, Task.status != "done")
-            .order_by(Task.due_date.is_(None), Task.due_date, Task.created_at)
+            .where(Task.assignee_id == user.id, Task.project_id.in_(project_ids), Task.status != "done")
+            .order_by(Task.due_date, Task.created_at)
             .limit(8)
         ).scalars().all()
         data["my_tasks"] = [
@@ -248,14 +249,19 @@ def build_widget_data(db: Session, user: UserProfile, visible_types: set[str]) -
         week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         entries = db.execute(
             select(TimeEntry.started_at, TimeEntry.duration_hours).where(
-                TimeEntry.user_id == user.id, TimeEntry.ended_at.is_not(None), TimeEntry.started_at >= week_start
+                TimeEntry.user_id == user.id,
+                TimeEntry.project_id.in_(project_ids),
+                TimeEntry.ended_at.is_not(None),
+                TimeEntry.started_at >= week_start,
             )
         ).all()
         per_day = [Decimal("0")] * 7
         for started_at, hours in entries:
             per_day[(started_at.date() - week_start.date()).days % 7] += Decimal(str(hours or 0))
         running = db.execute(
-            select(TimeEntry).options(joinedload(TimeEntry.task)).where(TimeEntry.user_id == user.id, TimeEntry.ended_at.is_(None))
+            select(TimeEntry)
+            .options(joinedload(TimeEntry.task))
+            .where(TimeEntry.user_id == user.id, TimeEntry.project_id.in_(project_ids), TimeEntry.ended_at.is_(None))
         ).scalars().first()
         data["time_summary"] = {
             "week_start": week_start.date().isoformat(),

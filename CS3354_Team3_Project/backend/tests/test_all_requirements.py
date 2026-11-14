@@ -627,7 +627,8 @@ def test_uc18_uc20_uc21_tasks_last_owner_and_mentions_se_fr26_to_se_fr30_se_nfr1
     url = f"/api/tasks/{mine['id']}/comments"
     assert client.post(url, headers=H(client, "aashwat"), json={"body": "   \n "}).json()["detail"] == "Comment can't be empty"
     assert client.post(url, headers=H(client, "aashwat"), json={"body": "<script>alert(1)</script>"}).status_code == 400
-    with client.websocket_connect(f"/ws?token={token(client, 'staff')}") as ws:
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "auth", "token": token(client, "staff")})  # token inside the socket, never in the URL
         assert ws.receive_json()["type"] == "connected"
         sent_at = time.perf_counter()
         r = client.post(url, headers=H(client, "aashwat"), json={
@@ -800,7 +801,8 @@ def test_se_nfr10_progress_broadcast_over_websocket_se_fr18(client):
     project = new_project(client, members=["staff"], name="Live progress")
     pid = project["id"]
     task = new_task(client, pid, title="Finish me", assignee_id=user_id("staff"))
-    with client.websocket_connect(f"/ws?token={token(client, 'jon')}") as ws:
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "auth", "token": token(client, "jon")})  # token inside the socket, never in the URL
         assert ws.receive_json()["type"] == "connected"
         started = time.perf_counter()
         assert client.put(f"/api/tasks/{task['id']}", headers=H(client, "staff"), json={"status": "done"}).status_code == 200

@@ -52,13 +52,27 @@ def update_profile(
         user.default_project_type = body.default_project_type
     if body.notification_prefs is not None:
         changes = body.notification_prefs.model_dump(exclude_none=True)
-        # JSON columns are not mutation-tracked: assign a new dict so the change is saved.
-        user.notification_prefs = {**DEFAULT_NOTIFICATION_PREFS, **(user.notification_prefs or {}), **changes}
+        stored = user.notification_prefs if isinstance(user.notification_prefs, dict) else {}
+        # The saved object is rebuilt from the four known switches every time, so it can never carry an
+        # unexpected key or a non-boolean value, whatever was in the column before. (A new dict is also
+        # what makes SQLAlchemy notice the change: JSON columns are not mutation-tracked.)
+        user.notification_prefs = {
+            key: changes[key] if key in changes else (stored[key] if isinstance(stored.get(key), bool) else default)
+            for key, default in DEFAULT_NOTIFICATION_PREFS.items()
+        }
     if body.connected_accounts is not None:
-        accounts = dict(user.connected_accounts or {})
-        for provider, connected in body.connected_accounts.model_dump(exclude_none=True).items():
-            if provider in CONNECTED_PROVIDERS:
+        changes = body.connected_accounts.model_dump(exclude_none=True)
+        stored = user.connected_accounts if isinstance(user.connected_accounts, dict) else {}
+        accounts: dict[str, dict] = {}
+        for provider in CONNECTED_PROVIDERS:
+            if provider in changes:
+                connected = changes[provider]
                 accounts[provider] = {"connected": connected, "connected_at": utcnow().isoformat() if connected else None}
+            else:
+                entry = stored.get(provider)
+                if isinstance(entry, dict) and isinstance(entry.get("connected"), bool):
+                    stamp = entry.get("connected_at")
+                    accounts[provider] = {"connected": entry["connected"], "connected_at": stamp if isinstance(stamp, str) else None}
         user.connected_accounts = accounts
     db.commit()
     db.refresh(user)

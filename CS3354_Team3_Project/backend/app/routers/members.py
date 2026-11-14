@@ -22,6 +22,7 @@ from app.core.security import get_current_user
 from app.models.entities import Project, ProjectMember, Task, TimeEntry, UserProfile
 from app.routers.collaboration import create_notifications, publish_notifications
 from app.routers.projects import CARD_PALETTE, list_members, project_member_ids
+from app.routers.time_tracking import finish_entry
 from app.schemas.dto import InviteRequest, MemberOut, RemoveMemberResult, RoleChangeRequest
 
 router = APIRouter(prefix="/api/projects/{project_id}/members", tags=["members"])
@@ -47,11 +48,41 @@ def _project(db: Session, project_id: str) -> Project:
     return project
 
 
+def _lock_project(db: Session, project_id: str) -> Project:
+    """Serialises membership changes per project (UC-19, UC-20).
+
+    SELECT ... FOR UPDATE on the project row is the first statement of every role change and removal, so
+    two such requests for one project run one after the other. Whatever is read after this call - who the
+    caller is, the target's role, how many owners remain - is still true when the change is committed.
+    Without it two owners could demote each other at the same instant and leave the project with none.
+    """
+    project = db.execute(select(Project).where(Project.id == project_id).with_for_update()).scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    return project
+
+
+def _fresh_membership(db: Session, user_id: str, project_id: str) -> ProjectMember | None:
+    """Re-reads a membership from the database (not the session cache) after the project lock is held."""
+    return db.execute(
+        select(ProjectMember)
+        .where(ProjectMember.project_id == project_id, ProjectMember.user_id == user_id)
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
+
+
+def _require_fresh_role(db: Session, user_id: str, project_id: str, allowed: frozenset[str] | set[str]) -> ProjectMember:
+    membership = _fresh_membership(db, user_id, project_id)
+    if membership is None or membership.role not in allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    return membership
+
+
 def _member_out(db: Session, project_id: str, user_id: str) -> MemberOut:
-    for member in list_members(db, project_id):
-        if member.user_id == user_id:
-            return member
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+    members = list_members(db, project_id, only_user_id=user_id)  # one member, not the whole project
+    if not members:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+    return members[0]
 
 
 @router.get("", response_model=list[MemberOut])
@@ -65,8 +96,9 @@ def invite_member(
     project_id: str, body: InviteRequest, user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> MemberOut:
     """UC-19: owners / managers add an existing user by username or email."""
-    caller = require_project_role(db, user.id, project_id, MANAGERS)
-    project = _project(db, project_id)
+    require_project_role(db, user.id, project_id, MANAGERS)
+    project = _lock_project(db, project_id)
+    caller = _require_fresh_role(db, user.id, project_id, MANAGERS)
     if body.role == OWNER and caller.role != OWNER:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=OWNER_ONLY)
     ident = body.identifier.strip().lstrip("@").lower()
@@ -116,9 +148,11 @@ def remove_member(
 ) -> RemoveMemberResult:
     """UC-19: remove a member and atomically reassign (or unassign) their open tasks."""
     leaving_self = user_id == user.id
-    caller = require_project_role(db, user.id, project_id, ALL_ROLES if leaving_self else MANAGERS)
-    project = _project(db, project_id)
-    target = get_membership(db, user_id, project_id)
+    allowed = ALL_ROLES if leaving_self else MANAGERS
+    require_project_role(db, user.id, project_id, allowed)  # cheap refusal before taking the lock
+    project = _lock_project(db, project_id)
+    caller = _require_fresh_role(db, user.id, project_id, allowed)
+    target = caller if leaving_self else _fresh_membership(db, user_id, project_id)
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
     if target.role == OWNER:
@@ -129,7 +163,7 @@ def remove_member(
     if reassign_to_user_id is not None:
         if reassign_to_user_id == user_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose a different person to take over the tasks")
-        if get_membership(db, reassign_to_user_id, project_id) is None:
+        if _fresh_membership(db, reassign_to_user_id, project_id) is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tasks can only be reassigned to a current project member")
 
     now = utcnow()
@@ -143,11 +177,11 @@ def remove_member(
         db.execute(
             update(Task).where(Task.id.in_(open_task_ids)).values(assignee_id=reassign_to_user_id, updated_at=now)
         )
-    db.execute(
-        update(TimeEntry)
-        .where(TimeEntry.project_id == project_id, TimeEntry.user_id == user_id, TimeEntry.ended_at.is_(None))
-        .values(ended_at=now, pause_started_at=None)
-    )
+    # Stop the leaving member's running timer properly, so the hours worked so far are kept (UC-04).
+    for entry in db.execute(
+        select(TimeEntry).where(TimeEntry.project_id == project_id, TimeEntry.user_id == user_id, TimeEntry.ended_at.is_(None))
+    ).scalars():
+        finish_entry(entry, now)
     db.delete(target)
 
     notes = []
@@ -189,10 +223,15 @@ def change_role(
     user: UserProfile = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> MemberOut:
-    """UC-20: change a member's role; the last owner can never be demoted (SE-NFR-11)."""
-    caller = require_project_role(db, user.id, project_id, MANAGERS)
-    project = _project(db, project_id)
-    target = get_membership(db, user_id, project_id)
+    """UC-20: change a member's role; the last owner can never be demoted (SE-NFR-11).
+
+    The owner count is read after _lock_project(), inside the same transaction that writes the new role,
+    so concurrent requests cannot both pass the "is another owner left?" check.
+    """
+    require_project_role(db, user.id, project_id, MANAGERS)  # cheap refusal before taking the lock
+    project = _lock_project(db, project_id)
+    caller = _require_fresh_role(db, user.id, project_id, MANAGERS)
+    target = caller if user_id == user.id else _fresh_membership(db, user_id, project_id)
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
     if body.role == target.role:

@@ -14,13 +14,14 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db, utcnow
 from app.core.permissions import ALL_ROLES, MANAGERS, get_membership, require_project_role, require_task_access
 from app.core.realtime import hub
 from app.core.security import get_current_user
-from app.models.entities import Project, Task, TimeEntry, UserProfile
+from app.models.entities import Project, ProjectMember, Task, TimeEntry, UserProfile
 from app.schemas.dto import HoursUpdate, TaskHoursOut, TimeEntryOut, TimerAction, TimerStart
 
 router = APIRouter(tags=["time-tracking"])
@@ -28,6 +29,7 @@ router = APIRouter(tags=["time-tracking"])
 CENT = Decimal("0.01")
 HOURS_DENIED = "Only owners and managers can set estimated or assigned hours"
 TRACK_DENIED = "You can only log time on tasks assigned to you"
+ALREADY_RUNNING = "You already have a running timer. Stop it first."
 
 
 def duration_hours(started_at: datetime, ended_at: datetime, paused_seconds: int) -> Decimal:
@@ -80,6 +82,19 @@ def actual_hours(db: Session, task_id: str) -> Decimal:
         )
     ).scalar_one()
     return Decimal(str(value)).quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def finish_entry(entry: TimeEntry, now: datetime) -> None:
+    """Stops a running entry: closes an open pause and stores end minus start minus paused time.
+
+    Every time comes from the server clock (the client never sends a start or end), and the end can never
+    be earlier than the start, so a stored duration is never negative.
+    """
+    if entry.pause_started_at is not None:
+        entry.paused_seconds += max(0, int((now - entry.pause_started_at).total_seconds()))
+        entry.pause_started_at = None
+    entry.ended_at = max(now, entry.started_at)
+    entry.duration_hours = duration_hours(entry.started_at, entry.ended_at, entry.paused_seconds)
 
 
 def _may_track(role: str, task: Task, user_id: str) -> bool:
@@ -163,7 +178,12 @@ def active_timer(user: UserProfile = Depends(get_current_user), db: Session = De
 
 @router.post("/api/time-entries/timer/start", response_model=TimeEntryOut, status_code=status.HTTP_201_CREATED)
 def start_timer(body: TimerStart, user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)) -> TimeEntryOut:
-    """UC-04: one running timer per person, only on tasks they may track."""
+    """UC-04: one running timer per person, only on tasks they may track.
+
+    The check below gives the friendly message; the guarantee is the partial unique index
+    uq_time_entries_one_running_per_user (user_id WHERE ended_at IS NULL). Two simultaneous "start"
+    requests both pass the check, but the database accepts only one insert and the other gets the 409.
+    """
     task, membership = require_task_access(db, user.id, body.task_id, ALL_ROLES)
     if not _may_track(membership.role, task, user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=TRACK_DENIED)
@@ -171,7 +191,7 @@ def start_timer(body: TimerStart, user: UserProfile = Depends(get_current_user),
         select(TimeEntry.id).where(TimeEntry.user_id == user.id, TimeEntry.ended_at.is_(None))
     ).first()
     if running:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="You already have a running timer. Stop it first.")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=ALREADY_RUNNING)
     now = utcnow()
     entry = TimeEntry(
         project_id=task.project_id,
@@ -184,7 +204,11 @@ def start_timer(body: TimerStart, user: UserProfile = Depends(get_current_user),
         created_at=now,
     )
     db.add(entry)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=ALREADY_RUNNING) from None
     _publish_time(db, entry, "started")
     return _entry_out_loaded(db, entry)
 
@@ -221,12 +245,7 @@ def stop_timer(
     body: TimerAction | None = None, user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> TimeEntryOut:
     entry = _running_entry(db, user.id, body.entry_id if body else None)
-    now = utcnow()
-    if entry.pause_started_at is not None:
-        entry.paused_seconds += max(0, int((now - entry.pause_started_at).total_seconds()))
-        entry.pause_started_at = None
-    entry.ended_at = now
-    entry.duration_hours = duration_hours(entry.started_at, entry.ended_at, entry.paused_seconds)
+    finish_entry(entry, utcnow())
     db.commit()
     _publish_time(db, entry, "stopped")
     return _entry_out_loaded(db, entry)
@@ -263,7 +282,12 @@ def list_time_entries(
     else:
         if user_id and user_id != user.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-        stmt = stmt.where(TimeEntry.user_id == user.id)
+        # Own rows, and only from projects the caller still belongs to (SE-NFR-11): the task and project
+        # names of a project they have left are no longer returned.
+        stmt = stmt.where(
+            TimeEntry.user_id == user.id,
+            TimeEntry.project_id.in_(select(ProjectMember.project_id).where(ProjectMember.user_id == user.id)),
+        )
     if start_date:
         stmt = stmt.where(TimeEntry.started_at >= datetime.combine(start_date, time.min))
     if end_date:
@@ -278,7 +302,9 @@ def delete_time_entry(entry_id: str, user: UserProfile = Depends(get_current_use
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found")
     membership = get_membership(db, user.id, entry.project_id)
-    if entry.user_id != user.id and (membership is None or membership.role not in MANAGERS):
+    # Current membership is required even for the caller's own entry: someone removed from a project can
+    # no longer alter that project's time records.
+    if membership is None or (entry.user_id != user.id and membership.role not in MANAGERS):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     db.delete(entry)
     db.commit()

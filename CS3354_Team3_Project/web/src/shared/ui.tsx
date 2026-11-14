@@ -311,14 +311,18 @@ export function Alert({ tone = 'danger', title, children, onClose }: { tone?: To
 }
 
 /** SE-NFR-04: shown when a save timed out / failed twice. The form keeps everything the user typed. */
-export function RetryBanner({ error, onRetry, onCancel, busy }: { error: ApiError | null; onRetry: () => void; onCancel: () => void; busy?: boolean }) {
+/**
+ * The explicit Retry / Cancel choice after a failed save, load or export (UC-01, UC-02, UC-05, UC-06, UC-14,
+ * UC-17). Whatever the user entered stays on screen; Retry repeats the same request, Cancel dismisses it.
+ */
+export function RetryBanner({ error, onRetry, onCancel, busy, title = 'Your changes were not saved yet.', hint = 'We tried again automatically. Your input is kept - retry now or cancel.' }: { error: ApiError | null; onRetry: () => void; onCancel: () => void; busy?: boolean; title?: string; hint?: string }) {
   if (!error) return null;
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm sm:flex-row sm:items-center" role="alert">
       <Icon name="alert" className="h-5 w-5 text-warn" />
       <div className="flex-1">
-        <p className="font-semibold text-ink">Your changes were not saved yet.</p>
-        <p className="text-body">{error.detail} We tried again automatically. Your input is kept - retry now or cancel.</p>
+        <p className="font-semibold text-ink">{title}</p>
+        <p className="text-body">{error.detail} {hint}</p>
       </div>
       <div className="flex gap-2">
         <button type="button" className="btn-primary btn-sm" onClick={onRetry} disabled={busy}>
@@ -385,13 +389,45 @@ export function Toggle({ checked, onChange, label, disabled }: { checked: boolea
 
 export function Modal({ open, title, onClose, children, footer, wide }: { open: boolean; title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   const panel = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  // Kept in a ref so the effect below runs once per open, not on every parent render (which would pull
+  // focus back to the first field while the user is typing in another one).
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const opener = document.activeElement as HTMLElement | null;
+    const focusable = () =>
+      Array.from(panel.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? []);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        close.current();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      // Keep keyboard focus inside the dialog while it is open.
+      const items = focusable();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && (active === first || !panel.current?.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !panel.current?.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     document.addEventListener('keydown', onKey);
-    panel.current?.querySelector<HTMLElement>('input, select, textarea, button')?.focus();
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+    // First form field of the dialog, or its first button when it has none.
+    (body.current?.querySelector<HTMLElement>('input:not([disabled]), select:not([disabled]), textarea:not([disabled])') ?? focusable()[0])?.focus();
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      opener?.focus?.(); // hand focus back to whatever opened the dialog
+    };
+  }, [open]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 pt-[8vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -402,7 +438,7 @@ export function Modal({ open, title, onClose, children, footer, wide }: { open: 
             <Icon name="x" />
           </button>
         </header>
-        <div className="max-h-[70vh] overflow-y-auto p-6">{children}</div>
+        <div ref={body} className="max-h-[70vh] overflow-y-auto p-6">{children}</div>
         {footer ? <footer className="flex justify-end gap-3 border-t border-line px-6 py-4">{footer}</footer> : null}
       </div>
     </div>

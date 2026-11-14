@@ -4,6 +4,8 @@
  *   of plain data (paragraphs, lists, quotes, code, bold, italic, links, @mentions) that React renders as
  *   ordinary elements - raw HTML is never inserted, and links are only allowed for http, https and mailto.
  *   This is the browser-side half of the XSS defence (the server sanitizes too).
+ *   Every pattern is written so the parser's work grows in step with the length of the text (no
+ *   catastrophic backtracking), and text longer than the server allows is not parsed at all.
  * @traces SE-FR-28, UC-21
  */
 
@@ -34,7 +36,16 @@ export function safeHref(raw: string): string | null {
   }
 }
 
-const INLINE_PATTERN = /`([^`\n]+)`|\[([^\]\n]+)\]\(([^)\s]+(?:\([^)\s]*\))?[^)\s]*)\)|\*\*([^*\n]+?)\*\*|(?<![\w*])\*([^*\n]+?)\*(?![\w*])|(?<![\w_])_([^_\n]+?)_(?![\w_])|(?<![A-Za-z0-9_@])@([A-Za-z0-9_]{3,30})(?![A-Za-z0-9_])|(https?:\/\/[^\s<>()]+[^\s<>().,!?;:'"])/g;
+/** The longest text the server stores in one field (task description); longer input is shown as plain text. */
+export const MAX_MARKDOWN_LENGTH = 20000;
+
+// Link alternative: [label](target).
+//   label  = [^\[\]\n]{1,500}   cannot contain "[" so a run of "[[[[..." is abandoned at the next "["
+//   target = [^()\s]{1,2000}, optionally one "(...)" group, then [^()\s]{0,2000}
+// The three target pieces use the same class WITHOUT parentheses, so there is exactly one way to split a
+// target between them. The earlier form ([^)\s]+(?:\([^)\s]*\))?[^)\s]*) let "(" match in every piece;
+// a comment like "[a]([a]([a](..." then took time cubic in its length (30+ seconds for 8,000 characters).
+const INLINE_PATTERN = /`([^`\n]+)`|\[([^[\]\n]{1,500})\]\(([^()\s]{1,2000}(?:\([^()\s]{0,500}\)[^()\s]{0,2000})?)\)|\*\*([^*\n]+?)\*\*|(?<![\w*])\*([^*\n]+?)\*(?![\w*])|(?<![\w_])_([^_\n]+?)_(?![\w_])|(?<![A-Za-z0-9_@])@([A-Za-z0-9_]{3,30})(?![A-Za-z0-9_])|(https?:\/\/[^\s<>()]+[^\s<>().,!?;:'"])/g;
 
 export function parseInline(text: string): Inline[] {
   const out: Inline[] = [];
@@ -63,6 +74,7 @@ export function parseInline(text: string): Inline[] {
 }
 
 export function parseMarkdown(source: string): Block[] {
+  if (source.length > MAX_MARKDOWN_LENGTH) return [{ type: 'code', text: source.slice(0, MAX_MARKDOWN_LENGTH) }];
   const lines = source.replace(/\r\n?/g, '\n').split('\n');
   const blocks: Block[] = [];
   let i = 0;

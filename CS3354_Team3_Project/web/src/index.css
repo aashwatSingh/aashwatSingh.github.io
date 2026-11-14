@@ -127,8 +127,11 @@
   h4 {
     @apply text-ink;
   }
+  /* Keyboard focus: every interactive element gets a 2px outline in the theme's primary colour (visible
+     on the dark, light and colour-blind palettes; the high-contrast palette thickens it to 3px above).
+     Form fields show the same colour as a border plus ring, see .input. */
   :focus-visible {
-    outline: 2px solid rgb(var(--c-brand) / 0.8);
+    outline: 2px solid rgb(var(--c-brand) / 0.9);
     outline-offset: 2px;
   }
   input,
@@ -160,7 +163,7 @@
     @apply mt-1 text-[15px] leading-[22px] text-body;
   }
   .input {
-    @apply w-full rounded-btn border border-line-strong bg-field px-3.5 py-2.5 text-[15px] leading-[22px] text-ink placeholder:text-muted focus:border-brand focus:outline-none disabled:cursor-not-allowed disabled:opacity-60;
+    @apply w-full rounded-btn border border-line-strong bg-field px-3.5 py-2.5 text-[15px] leading-[22px] text-ink placeholder:text-muted focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/45 disabled:cursor-not-allowed disabled:opacity-60;
   }
   .label {
     @apply mb-2 block text-[13px] font-semibold leading-[18px] text-ink;

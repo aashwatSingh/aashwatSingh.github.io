@@ -16,7 +16,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import case, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db, utcnow
@@ -81,20 +81,36 @@ def member_counts(db: Session, project_ids: list[str]) -> dict[str, int]:
 
 
 def member_previews(db: Session, project_ids: list[str], limit: int = 5) -> dict[str, list[UserBrief]]:
-    """One query for the avatar stacks on project cards (no N+1, fine for 50+ member projects)."""
+    """One query for the avatar stacks on project cards (SE-NFR-09).
+
+    A ROW_NUMBER() window keeps only the first `limit` members of each project inside the database, so the
+    result is O(P * limit) rows and four small columns per row - not every member (and every column,
+    password hash included) of every project, which is what the 50+ member case would otherwise load.
+    """
     if not project_ids:
         return {}
-    rows = db.execute(
-        select(ProjectMember.project_id, UserProfile)
+    rank = case((ProjectMember.role == "owner", 0), (ProjectMember.role == "manager", 1), else_=2)
+    ranked = (
+        select(
+            ProjectMember.project_id.label("project_id"),
+            UserProfile.id.label("id"),
+            UserProfile.username.label("username"),
+            UserProfile.display_name.label("display_name"),
+            UserProfile.avatar_url.label("avatar_url"),
+            func.row_number()
+            .over(partition_by=ProjectMember.project_id, order_by=(rank, ProjectMember.joined_at, ProjectMember.id))
+            .label("rn"),
+        )
         .join(UserProfile, UserProfile.id == ProjectMember.user_id)
         .where(ProjectMember.project_id.in_(project_ids))
-        .order_by(case((ProjectMember.role == "owner", 0), (ProjectMember.role == "manager", 1), else_=2), ProjectMember.joined_at)
-    ).all()
+        .subquery()
+    )
+    rows = db.execute(select(ranked).where(ranked.c.rn <= limit).order_by(ranked.c.project_id, ranked.c.rn)).all()
     out: dict[str, list[UserBrief]] = {}
-    for pid, user in rows:
-        bucket = out.setdefault(pid, [])
-        if len(bucket) < limit:
-            bucket.append(UserBrief.model_validate(user))
+    for row in rows:
+        out.setdefault(row.project_id, []).append(
+            UserBrief(id=row.id, username=row.username, display_name=row.display_name, avatar_url=row.avatar_url)
+        )
     return out
 
 
@@ -140,10 +156,12 @@ def compute_progress(db: Session, project_id: str) -> ProgressOut:
     )
 
 
-def broadcast_progress(db: Session, project_id: str) -> ProgressOut:
-    """SE-NFR-10: push the recomputed progress to every member (delivered well under 2 seconds)."""
+def broadcast_progress(db: Session, project_id: str, recipients: list[str] | None = None) -> ProgressOut:
+    """SE-NFR-10: push the recomputed progress to every current member (delivered well under 2 seconds)."""
     progress = compute_progress(db, project_id)
-    hub.publish(project_member_ids(db, project_id), "progress", progress.model_dump(mode="json"))
+    if recipients is None:
+        recipients = project_member_ids(db, project_id)
+    hub.publish(recipients, "progress", progress.model_dump(mode="json"))
     return progress
 
 
@@ -168,14 +186,26 @@ def _project_out(project: Project, membership: ProjectMember, counts: dict, memb
     )
 
 
-def list_members(db: Session, project_id: str) -> list[MemberOut]:
-    rows = db.execute(
-        select(ProjectMember, UserProfile)
+def list_members(db: Session, project_id: str, only_user_id: str | None = None) -> list[MemberOut]:
+    """Members with their task counts: two queries for any number of members (no per-member lookups).
+
+    Only the columns shown on the People page are selected; credential columns never leave the database.
+    """
+    member_stmt = (
+        select(
+            ProjectMember.role,
+            ProjectMember.joined_at,
+            UserProfile.id,
+            UserProfile.username,
+            UserProfile.display_name,
+            UserProfile.email,
+            UserProfile.avatar_url,
+        )
         .join(UserProfile, UserProfile.id == ProjectMember.user_id)
         .where(ProjectMember.project_id == project_id)
         .order_by(case((ProjectMember.role == "owner", 0), (ProjectMember.role == "manager", 1), else_=2), UserProfile.username)
-    ).all()
-    task_rows = db.execute(
+    )
+    task_stmt = (
         select(
             Task.assignee_id,
             func.count(Task.id),
@@ -183,22 +213,25 @@ def list_members(db: Session, project_id: str) -> list[MemberOut]:
         )
         .where(Task.project_id == project_id, Task.assignee_id.is_not(None))
         .group_by(Task.assignee_id)
-    ).all()
-    totals = {uid: (int(total), int(done)) for uid, total, done in task_rows}
+    )
+    if only_user_id is not None:
+        member_stmt = member_stmt.where(ProjectMember.user_id == only_user_id)
+        task_stmt = task_stmt.where(Task.assignee_id == only_user_id)
+    totals = {uid: (int(total), int(done)) for uid, total, done in db.execute(task_stmt).all()}
     return [
         MemberOut(
-            user_id=u.id,
-            username=u.username,
-            display_name=u.display_name,
-            email=u.email,
-            avatar_url=u.avatar_url,
-            role=m.role,
-            joined_at=m.joined_at,
-            open_task_count=totals.get(u.id, (0, 0))[0] - totals.get(u.id, (0, 0))[1],
-            task_count=totals.get(u.id, (0, 0))[0],
-            done_task_count=totals.get(u.id, (0, 0))[1],
+            user_id=row.id,
+            username=row.username,
+            display_name=row.display_name,
+            email=row.email,
+            avatar_url=row.avatar_url,
+            role=row.role,
+            joined_at=row.joined_at,
+            open_task_count=totals.get(row.id, (0, 0))[0] - totals.get(row.id, (0, 0))[1],
+            task_count=totals.get(row.id, (0, 0))[0],
+            done_task_count=totals.get(row.id, (0, 0))[1],
         )
-        for m, u in rows
+        for row in db.execute(member_stmt).all()
     ]
 
 
@@ -359,10 +392,15 @@ def update_project(
 def delete_project(project_id: str, user: UserProfile = Depends(get_current_user), db: Session = Depends(get_db)) -> Response:
     """Owner only (RBAC matrix)."""
     require_project_role(db, user.id, project_id, OWNERS)
-    project = _load_project(db, project_id)
+    _load_project(db, project_id)
     recipients = project_member_ids(db, project_id)
-    db.delete(project)
+    # One DELETE; the database removes members, lists, tasks, comments, costs and time entries through
+    # ON DELETE CASCADE. (Deleting the rows one by one from Python would be O(rows) statements, and would
+    # try to remove the last owner's membership while the project still exists, which the database's
+    # "at least one owner" rule rightly refuses.)
+    db.execute(delete(Project).where(Project.id == project_id))
     db.commit()
+    db.expire_all()
     hub.publish(recipients, "project_deleted", {"project_id": project_id})
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

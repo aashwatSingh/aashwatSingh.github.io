@@ -7,7 +7,9 @@
  */
 
 export const USERNAME_RE = /^[A-Za-z0-9_]{3,30}$/;
+// Checked only on input of at most 254 characters (the longest valid address), so its cost is bounded.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const MAX_EMAIL_LENGTH = 254;
 
 export interface PasswordRule {
   id: string;
@@ -35,7 +37,8 @@ export function validateUsername(username: string): string | undefined {
 }
 
 export function validateEmail(email: string): string | undefined {
-  if (!EMAIL_RE.test(email.trim())) return 'Enter a valid email address';
+  const value = email.trim();
+  if (value.length > MAX_EMAIL_LENGTH || !EMAIL_RE.test(value)) return 'Enter a valid email address';
   return undefined;
 }
 

@@ -12,14 +12,16 @@
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated, Any, Literal
 
 from email_validator import EmailNotValidError, validate_email
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, PlainSerializer, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, PlainSerializer, StrictBool, field_validator, model_validator
 
 from app.core.database import to_naive_utc
+from app.core.sanitizer import clean_single_line, clean_text, sanitize_markdown
 from app.core.security import USERNAME_RE, password_error_message
 
 # ---------------------------------------------------------------------------
@@ -72,10 +74,23 @@ class ORMModel(BaseModel):
 
 
 def _non_blank(value: str, label: str) -> str:
-    value = value.strip()
+    """Names and titles: one line, no invisible / control characters (so no CR/LF can reach an export)."""
+    value = clean_single_line(value)
     if not value:
         raise ValueError(f"{label} is required")
     return value
+
+
+def _valid_id(value: str) -> str:
+    """Ids are UUIDs. Anything else is rejected here with a 422 instead of reaching the database."""
+    try:
+        return str(uuid.UUID(value))
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise ValueError("Not a valid id") from exc
+
+
+IdStr = Annotated[str, Field(max_length=36), AfterValidator(_valid_id)]
+Position = Annotated[int, Field(ge=0, le=100_000)]
 
 
 def _normalize_email(value: str) -> str:
@@ -115,6 +130,7 @@ class SignupRequest(BaseModel):
     _username = field_validator("username")(lambda cls, v: _validate_username(v))
     _email = field_validator("email")(lambda cls, v: _normalize_email(v))
     _password = field_validator("password")(lambda cls, v: _validate_password(v))
+    _display = field_validator("display_name")(lambda cls, v: None if v is None else clean_single_line(v))
 
 
 class LoginRequest(BaseModel):
@@ -132,12 +148,19 @@ class NotificationPrefs(BaseModel):
 
 
 class NotificationPrefsUpdate(BaseModel):
+    """Exactly four optional true / false switches.
+
+    extra="forbid" rejects every other key (including "__proto__" / "constructor" style keys and nested
+    objects), and StrictBool rejects "yes", 1, "true" and anything else that merely looks like a boolean,
+    so the stored JSON can never grow beyond these four flags.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    task_assignments: bool | None = None
-    mentions: bool | None = None
-    deadline_reminders: bool | None = None
-    project_updates: bool | None = None
+    task_assignments: StrictBool | None = None
+    mentions: StrictBool | None = None
+    deadline_reminders: StrictBool | None = None
+    project_updates: StrictBool | None = None
 
 
 class ConnectedAccount(BaseModel):
@@ -154,11 +177,13 @@ class ConnectedAccounts(BaseModel):
 
 
 class ConnectedAccountsUpdate(BaseModel):
+    """true connects, false disconnects. Only these three providers; values must be real booleans."""
+
     model_config = ConfigDict(extra="forbid")
 
-    google_calendar: bool | None = None
-    outlook: bool | None = None
-    google_sheets: bool | None = None
+    google_calendar: StrictBool | None = None
+    outlook: StrictBool | None = None
+    google_sheets: StrictBool | None = None
 
 
 class UserOut(ORMModel):
@@ -174,6 +199,27 @@ class UserOut(ORMModel):
     notification_prefs: NotificationPrefs = Field(default_factory=NotificationPrefs)
     connected_accounts: ConnectedAccounts = Field(default_factory=ConnectedAccounts)
     created_at: UTCDateTimeOut
+
+    @field_validator("notification_prefs", mode="before")
+    @classmethod
+    def _stored_prefs(cls, v: Any) -> Any:
+        """Only the known switches, and only real booleans, are ever read back from the JSON column."""
+        if not isinstance(v, dict):
+            return {}
+        return {k: v[k] for k in NotificationPrefs.model_fields if isinstance(v.get(k), bool)}
+
+    @field_validator("connected_accounts", mode="before")
+    @classmethod
+    def _stored_accounts(cls, v: Any) -> Any:
+        if not isinstance(v, dict):
+            return {}
+        out: dict[str, dict[str, Any]] = {}
+        for provider in ConnectedAccounts.model_fields:
+            entry = v.get(provider)
+            if isinstance(entry, dict) and isinstance(entry.get("connected"), bool):
+                stamp = entry.get("connected_at")
+                out[provider] = {"connected": entry["connected"], "connected_at": stamp if isinstance(stamp, str) else None}
+        return out
 
 
 class UserBrief(ORMModel):
@@ -240,7 +286,10 @@ class OutboxMessageOut(BaseModel):
 
 
 class ProfileUpdate(BaseModel):
-    username: str | None = None
+    # Unknown fields (for example "mfa_enabled", "email" or "password_hash") are refused, not ignored.
+    model_config = ConfigDict(extra="forbid")
+
+    username: str | None = Field(default=None, max_length=64)
     display_name: str | None = Field(default=None, max_length=80)
     avatar_url: str | None = Field(default=None, max_length=500)
     theme: Theme | None = None
@@ -257,7 +306,7 @@ class ProfileUpdate(BaseModel):
     @field_validator("display_name")
     @classmethod
     def _check_display(cls, v: str | None) -> str | None:
-        return None if v is None else v.strip()
+        return None if v is None else clean_single_line(v)
 
     @field_validator("avatar_url")
     @classmethod
@@ -267,8 +316,10 @@ class ProfileUpdate(BaseModel):
         v = v.strip()
         if v == "":
             return ""
-        if not re.match(r"^https?://[^\s<>\"']+$", v, re.IGNORECASE):
-            raise ValueError("Avatar URL must start with http:// or https://")
+        # https only: the picture is loaded by every teammate's browser, so plain http would leak that
+        # request (and break the HTTPS-only page). One linear character class, no backtracking.
+        if not re.match(r"^https://[^\s<>\"'\\]+$", v, re.IGNORECASE):
+            raise ValueError("Avatar URL must start with https://")
         return v
 
 
@@ -285,6 +336,7 @@ class ProjectCreate(BaseModel):
     card_color: str | None = None
 
     _name = field_validator("name")(lambda cls, v: _non_blank(v, "Project name"))
+    _description = field_validator("description")(lambda cls, v: clean_text(v))
 
     @field_validator("members")
     @classmethod
@@ -315,6 +367,11 @@ class ProjectUpdate(BaseModel):
     @classmethod
     def _name(cls, v: str | None) -> str | None:
         return None if v is None else _non_blank(v, "Project name")
+
+    @field_validator("description")
+    @classmethod
+    def _description(cls, v: str | None) -> str | None:
+        return None if v is None else clean_text(v)
 
 
 class CardCustomization(BaseModel):
@@ -428,7 +485,7 @@ SpreadsheetSection = Literal["tasks", "soft_deadlines", "time_entries", "financi
 
 class SpreadsheetExportRequest(BaseModel):
     target: Literal["excel", "sheets"]
-    sections: list[SpreadsheetSection] | None = None
+    sections: list[SpreadsheetSection] | None = Field(default=None, max_length=12)
 
 
 class SheetPayload(BaseModel):
@@ -506,14 +563,14 @@ def _normalize_tags(tags: list[str]) -> list[str]:
 
 class TaskListCreate(BaseModel):
     name: str = Field(max_length=80)
-    position: int | None = Field(default=None, ge=0)
+    position: Position | None = None
 
     _name = field_validator("name")(lambda cls, v: _non_blank(v, "List name"))
 
 
 class TaskListUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=80)
-    position: int | None = Field(default=None, ge=0)
+    position: Position | None = None
 
     @field_validator("name")
     @classmethod
@@ -524,19 +581,21 @@ class TaskListUpdate(BaseModel):
 class TaskCreate(BaseModel):
     title: str = Field(max_length=200)
     description: str = Field(default="", max_length=20000)
-    list_id: str | None = None
+    list_id: IdStr | None = None
     status: TaskStatus = "todo"
     priority: TaskPriority = "medium"
-    assignee_id: str | None = None
+    assignee_id: IdStr | None = None
     # UC-18: "Validate required fields (title and due date)". An omitted value is turned into None before
     # validation (see _fill_missing_due), so omitted and null both get the same "Due date is required" error.
     due_date: UTCDateTimeIn | None
-    tags: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list, max_length=50)
     estimated_hours: HoursIn | None = None
     assigned_hours: HoursIn | None = None
 
     _title = field_validator("title")(lambda cls, v: _non_blank(v, "Title"))
     _tags = field_validator("tags")(lambda cls, v: _normalize_tags(v))
+    # The description is Markdown shown to every project member, so it gets the same cleaning as comments.
+    _description = field_validator("description")(lambda cls, v: sanitize_markdown(v))
 
     @model_validator(mode="before")
     @classmethod
@@ -556,12 +615,12 @@ class TaskCreate(BaseModel):
 class TaskUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     description: str | None = Field(default=None, max_length=20000)
-    list_id: str | None = None
+    list_id: IdStr | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
-    assignee_id: str | None = None
+    assignee_id: IdStr | None = None
     due_date: UTCDateTimeIn | None = None
-    tags: list[str] | None = None
+    tags: list[str] | None = Field(default=None, max_length=50)
     estimated_hours: HoursIn | None = None
     assigned_hours: HoursIn | None = None
 
@@ -575,13 +634,18 @@ class TaskUpdate(BaseModel):
     def _tags(cls, v: list[str] | None) -> list[str] | None:
         return None if v is None else _normalize_tags(v)
 
+    @field_validator("description")
+    @classmethod
+    def _description(cls, v: str | None) -> str | None:
+        return None if v is None else sanitize_markdown(v)
+
 
 class TaskMove(BaseModel):
     """Task.moveTo(list_id, position) - board drag-and-drop."""
 
-    list_id: str | None = None
+    list_id: IdStr | None = None
     status: TaskStatus | None = None
-    position: int = Field(ge=0, le=100000)
+    position: Position
 
 
 class TaskOut(BaseModel):
@@ -720,16 +784,22 @@ class StageCostCreate(BaseModel):
     stage_name: str = Field(max_length=80)
     amount: MoneyIn
     notes: str = Field(default="", max_length=2000)
-    position: int | None = Field(default=None, ge=0)
+    position: Position | None = None
 
     _name = field_validator("stage_name")(lambda cls, v: _non_blank(v, "Stage name"))
+    _notes = field_validator("notes")(lambda cls, v: clean_text(v))
 
 
 class StageCostUpdate(BaseModel):
     stage_name: str | None = Field(default=None, max_length=80)
     amount: MoneyIn | None = None
     notes: str | None = Field(default=None, max_length=2000)
-    position: int | None = Field(default=None, ge=0)
+    position: Position | None = None
+
+    @field_validator("notes")
+    @classmethod
+    def _notes(cls, v: str | None) -> str | None:
+        return None if v is None else clean_text(v)
 
     @field_validator("stage_name")
     @classmethod
@@ -742,7 +812,7 @@ class ExpenseCreate(BaseModel):
     description: str = Field(max_length=300)
     amount: MoneyIn
     expense_date: date
-    stage_cost_id: str | None = None
+    stage_cost_id: IdStr | None = None
 
     _desc = field_validator("description")(lambda cls, v: _non_blank(v, "Description"))
 
@@ -752,7 +822,7 @@ class ExpenseUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=300)
     amount: MoneyIn | None = None
     expense_date: date | None = None
-    stage_cost_id: str | None = None
+    stage_cost_id: IdStr | None = None
 
     @field_validator("description")
     @classmethod
@@ -800,6 +870,8 @@ class HoursUpdate(BaseModel):
     work_date: date | None = None
     note: str = Field(default="", max_length=300)
 
+    _note = field_validator("note")(lambda cls, v: clean_single_line(v))
+
 
 class TaskHoursOut(BaseModel):
     task_id: str
@@ -809,12 +881,14 @@ class TaskHoursOut(BaseModel):
 
 
 class TimerStart(BaseModel):
-    task_id: str
+    task_id: IdStr
     note: str = Field(default="", max_length=300)
+
+    _note = field_validator("note")(lambda cls, v: clean_single_line(v))
 
 
 class TimerAction(BaseModel):
-    entry_id: str | None = None
+    entry_id: IdStr | None = None
 
 
 class TimeEntryOut(BaseModel):

@@ -29,6 +29,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -121,7 +122,7 @@ class UserProfile(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=utcnow, onupdate=utcnow)
 
-    memberships: Mapped[list[ProjectMember]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    memberships: Mapped[list[ProjectMember]] = relationship(back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
 
     def is_locked(self, now: datetime) -> bool:
         return self.locked_until is not None and self.locked_until > now
@@ -149,11 +150,13 @@ class Project(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=utcnow, onupdate=utcnow)
 
-    members: Mapped[list[ProjectMember]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    # passive_deletes: children are removed by the database's ON DELETE CASCADE in one statement instead
+    # of being loaded and deleted one row at a time.
+    members: Mapped[list[ProjectMember]] = relationship(back_populates="project", cascade="all, delete-orphan", passive_deletes=True)
     lists: Mapped[list[TaskList]] = relationship(
-        back_populates="project", cascade="all, delete-orphan", order_by="TaskList.position"
+        back_populates="project", cascade="all, delete-orphan", order_by="TaskList.position", passive_deletes=True
     )
-    tasks: Mapped[list[Task]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    tasks: Mapped[list[Task]] = relationship(back_populates="project", cascade="all, delete-orphan", passive_deletes=True)
 
 
 class ProjectMember(Base):
@@ -203,10 +206,14 @@ class Task(Base):
         CheckConstraint(_in("priority", TASK_PRIORITIES), name="ck_tasks_priority"),
         CheckConstraint("estimated_hours is null or estimated_hours >= 0", name="ck_tasks_est"),
         CheckConstraint("assigned_hours is null or assigned_hours >= 0", name="ck_tasks_assigned"),
+        # Board columns: WHERE project_id = ? AND status = ? ORDER BY position.
         Index("ix_tasks_project_status_position", "project_id", "status", "position"),
-        Index("ix_tasks_assignee", "assignee_id"),
+        # Feature lists and per-list progress: WHERE project_id = ? [AND list_id = ?] ORDER BY position.
+        Index("ix_tasks_project_list_position", "project_id", "list_id", "position"),
+        # "My tasks", reminders and the dashboard: WHERE assignee_id = ? AND status <> 'done' ORDER BY due_date.
+        Index("ix_tasks_assignee_status_due", "assignee_id", "status", "due_date"),
         Index("ix_tasks_project_due", "project_id", "due_date"),
-        Index("ix_tasks_list", "list_id"),
+        Index("ix_tasks_list", "list_id"),  # ON DELETE SET NULL from task_lists
     )
 
     id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_id)
@@ -230,7 +237,7 @@ class Task(Base):
     project: Mapped[Project] = relationship(back_populates="tasks")
     assignee: Mapped[UserProfile | None] = relationship(foreign_keys=[assignee_id])
     soft_deadlines: Mapped[list[SoftDeadline]] = relationship(
-        back_populates="task", cascade="all, delete-orphan", order_by="SoftDeadline.due_at"
+        back_populates="task", cascade="all, delete-orphan", order_by="SoftDeadline.due_at", passive_deletes=True
     )
 
 
@@ -259,7 +266,10 @@ class SoftDeadline(Base):
 
 class Comment(Base):
     __tablename__ = "comments"
-    __table_args__ = (Index("ix_comments_task_created", "task_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_comments_task_created", "task_id", "created_at"),
+        Index("ix_comments_project", "project_id"),  # ON DELETE CASCADE from projects
+    )
 
     id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_id)
     task_id: Mapped[str] = mapped_column(GUID(), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
@@ -277,7 +287,12 @@ class Notification(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "dedupe_key", name="uq_notifications_user_dedupe"),
         CheckConstraint(_in("kind", NOTIFICATION_KINDS), name="ck_notifications_kind"),
-        Index("ix_notifications_user_read_created", "user_id", "is_read", "created_at"),
+        # Unread list and unread badge: WHERE user_id = ? AND is_read = false ORDER BY created_at DESC.
+        Index("ix_notifications_user_read_created", "user_id", "is_read", text("created_at DESC")),
+        # Full list: WHERE user_id = ? ORDER BY created_at DESC LIMIT n.
+        Index("ix_notifications_user_created", "user_id", text("created_at DESC")),
+        Index("ix_notifications_task", "task_id"),  # ON DELETE CASCADE from tasks
+        Index("ix_notifications_project", "project_id"),  # ON DELETE CASCADE from projects
     )
 
     id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_id)
@@ -360,8 +375,10 @@ class Expense(Base):
     __table_args__ = (
         CheckConstraint("amount >= 0", name="ck_expenses_amount"),
         CheckConstraint(_in("category", EXPENSE_CATEGORIES), name="ck_expenses_category"),
-        Index("ix_expenses_project_date", "project_id", "expense_date"),
+        # Cost table default view (by date) and date + category filters share one index.
+        Index("ix_expenses_project_date_category", "project_id", "expense_date", "category"),
         Index("ix_expenses_project_category", "project_id", "category"),
+        Index("ix_expenses_stage", "stage_cost_id"),  # ON DELETE SET NULL from stage_costs
         Index("ix_expenses_project_amount", "project_id", "amount"),
     )
 
@@ -382,6 +399,18 @@ class TimeEntry(Base):
     __table_args__ = (
         CheckConstraint("source in ('timer', 'manual')", name="ck_time_entries_source"),
         CheckConstraint("paused_seconds >= 0", name="ck_time_entries_paused"),
+        # A duration can never be negative: the end is never before the start (UC-04).
+        CheckConstraint("ended_at is null or ended_at >= started_at", name="ck_time_entries_end_after_start"),
+        CheckConstraint("duration_hours is null or duration_hours >= 0", name="ck_time_entries_duration"),
+        # UC-04: at most ONE running timer per person. Enforced by the database, so two simultaneous
+        # "start" requests cannot both succeed (the second insert violates this partial unique index).
+        Index(
+            "uq_time_entries_one_running_per_user",
+            "user_id",
+            unique=True,
+            postgresql_where=text("ended_at IS NULL"),
+            sqlite_where=text("ended_at IS NULL"),
+        ),
         Index("ix_time_entries_project_user_started", "project_id", "user_id", "started_at"),
         Index("ix_time_entries_user_ended", "user_id", "ended_at"),
         Index("ix_time_entries_task", "task_id"),
