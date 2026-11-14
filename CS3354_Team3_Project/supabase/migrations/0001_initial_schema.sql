@@ -62,6 +62,14 @@ create table if not exists public.user_profiles (
                          check (color_blind_mode in ('none', 'protanopia', 'deuteranopia', 'tritanopia', 'high_contrast')),
   default_project_type   varchar(10)  not null default 'work'
                          check (default_project_type in ('work', 'school', 'personal')),
+  -- SE-FR-29: which notification kinds this user receives (Settings > Notification preferences).
+  notification_prefs     jsonb        not null default
+                         '{"task_assignments": true, "mentions": true, "deadline_reminders": true, "project_updates": false}'::jsonb
+                         check (jsonb_typeof(notification_prefs) = 'object'),
+  -- SE-FR-19 / SE-FR-20: export targets the user has connected, e.g.
+  -- {"google_calendar": {"connected": true, "connected_at": "2026-11-14T10:00:00"}}. No OAuth tokens are stored here.
+  connected_accounts     jsonb        not null default '{}'::jsonb
+                         check (jsonb_typeof(connected_accounts) = 'object'),
   created_at             timestamptz  not null default now(),
   updated_at             timestamptz  not null default now(),
   constraint uq_user_profiles_username unique (username),
@@ -136,7 +144,7 @@ create table if not exists public.tasks (
   priority         varchar(10)  not null default 'medium'
                    check (priority in ('low', 'medium', 'high', 'urgent')),
   assignee_id      uuid references public.user_profiles(id) on delete set null,
-  due_date         timestamptz,
+  due_date         timestamptz  not null,  -- UC-18: title and due date are required
   position         integer      not null default 0,
   tags             jsonb        not null default '[]'::jsonb,
   estimated_hours  numeric(8, 2) check (estimated_hours is null or estimated_hours >= 0),
@@ -216,7 +224,8 @@ create table if not exists public.notifications (
   task_id     uuid references public.tasks(id) on delete cascade,
   kind        varchar(30)  not null
               check (kind in ('mention', 'assignment', 'role_change', 'member_added', 'member_removed',
-                              'deadline_reminder', 'soft_deadline_reminder', 'task_reassigned', 'system')),
+                              'deadline_reminder', 'soft_deadline_reminder', 'task_reassigned', 'project_update',
+                              'system')),
   message     varchar(500) not null,
   link        varchar(300) not null default '',
   is_read     boolean      not null default false,

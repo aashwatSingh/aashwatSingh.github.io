@@ -58,9 +58,9 @@ If Postgres is unreachable and `DB_FALLBACK_TO_SQLITE=true`, the backend logs a 
 ## Tests
 
 ```bash
-cd backend && python -m pytest                     # 16 tests, UC-01..UC-22 and SE-NFR-01..12
+cd backend && python -m pytest                     # 17 tests, UC-01..UC-22 and SE-NFR-01..12
 TEST_DATABASE_URL=postgresql://user@host/db python -m pytest   # same suite on PostgreSQL
-cd web && npm test                                 # 31 Vitest unit tests
+cd web && npm test                                 # 35 Vitest unit tests
 cd web && npm run build                            # type-check + production build
 ```
 
@@ -124,6 +124,15 @@ The 12 NFRs below use the definitions in the team README (`Jsorey4/CS3354_Team3_
 - Saves retried by the browser carry the same `Idempotency-Key`, so a timed-out request cannot be stored twice.
 - Outside demo mode, HTTP is redirected to HTTPS with HSTS; the served web app carries a strict Content-Security-Policy (SE-NFR-06).
 
+## Notification preferences and connected accounts
+
+Profile & settings has the mockup's **Notification preferences** and **Connections** cards. Both are stored on the user's own `user_profiles` row and saved as soon as a switch or button is used (`PUT /api/settings/profile`).
+
+- `notification_prefs` (`jsonb`): `task_assignments`, `mentions` and `deadline_reminders` default to on; `project_updates` defaults to off. The server checks these values before it creates a notification, so a muted kind is never stored or pushed. The mapping is: assignment and reassignment → task assignments; mention → mentions; deadline and soft-deadline reminders → deadline reminders; status changes on a task you own or created → project updates (a new `project_update` notification kind). Role and membership changes are always sent, because UC-19 and UC-20 require telling the member (SE-FR-29, UC-22).
+- `connected_accounts` (`jsonb`): `{google_calendar | outlook | google_sheets: {connected, connected_at}}`. Connecting records the user's consent for one-way exports, so the export dialog skips its permission prompt for a connected provider. No OAuth tokens are stored, and nothing is imported (SE-FR-19, SE-FR-20, UC-14, UC-15).
+- Updates are partial: only the switches named in the request change. Unknown switch names and non-boolean values return 422.
+- A task's final due date is required on create and cannot be cleared on edit (UC-18: "Validate required fields (title and due date)"). The form and the API both report `Due date is required`, and `tasks.due_date` is `not null`.
+
 ## Deviations from the requested file tree
 
 - `backend/app/core/realtime.py` holds the WebSocket hub. Routers need to broadcast, and importing from `main.py` would be circular. `main.py` mounts the `/ws` endpoint.
@@ -138,11 +147,10 @@ Intentional differences from the mockups:
 - **Landing:** the "AI assistant" feature card and copy are replaced by Time tracking, because no requirement defines an AI assistant.
 - **Tasks:** there are four columns (To Do, In Progress, Review, Done) because the task model has a Review status. On screens narrower than 1536 px the Task details panel slides in when a card is selected, so the columns keep the mockup's card width.
 - **Calendar:** there is no "+ Event" button or Day view; no requirement defines stored calendar events. "Connect Google", "Outlook" and "Export iCal" open the one-way export dialog.
-- **Profile:** the mockup's notification-preference toggles and calendar "Connections" are not shown; nothing in the schema stores them yet (the team README lists notification preferences and OAuth connection state as "required but not modeled"). The page shows Account, Appearance (theme and project mode), Color vision and Security (2FA) instead.
+- **Profile:** the mockup's "Connections" card lists Google Calendar, Outlook and Google Sheets (the three one-way export targets). It drops the "Email reminders / digests" row, because the team README puts digests out of scope; deadline reminders are a notification switch instead. The page adds Appearance (theme and project mode), Color vision and Security (2FA) cards.
 - **Shell:** the mockups have no top bar, so the demo role switcher, live indicator and theme toggle sit in the sidebar footer.
 
 ## Open items against the team README
 
 - **Backend technology:** the team README says "Supabase only" with no second backend. This build has a FastAPI backend (as requested) on top of the Supabase-compatible schema and RLS policies. The team should decide whether to keep FastAPI or move the routers into Edge Functions / RLS.
-- **UC-18:** the team README makes a task's due date required; this build keeps it optional.
 - **UC-10:** who unlocks an account is an open decision; this build unlocks with an emailed, signed, single-use token.

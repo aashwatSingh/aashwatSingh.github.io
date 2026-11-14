@@ -48,7 +48,7 @@ export function TaskCard({ task, list, draggable, selected, onSelect, onOpen, on
       <p className="mt-0.5 truncate text-xs leading-4 text-muted">{list?.name ?? 'No list'}{task.tags.length ? ` · #${task.tags.slice(0, 2).join(' #')}` : ''}</p>
       <div className="mt-2.5 flex items-center justify-between gap-2">
         <span className={`text-xs leading-4 ${overdue ? 'font-semibold text-danger' : done ? 'text-muted' : 'text-body'}`}>
-          {done ? `Done ${formatDate(task.completed_at, { year: undefined })}` : task.due_date ? `${overdue ? 'Overdue · ' : 'Due '}${formatDate(task.due_date, { year: undefined })}` : 'No due date'}
+          {done ? `Done ${formatDate(task.completed_at, { year: undefined })}` : `${overdue ? 'Overdue · ' : 'Due '}${formatDate(task.due_date, { year: undefined })}`}
         </span>
         <span className="flex items-center gap-2 text-xs text-muted">
           {task.soft_deadlines_total > 0 ? (

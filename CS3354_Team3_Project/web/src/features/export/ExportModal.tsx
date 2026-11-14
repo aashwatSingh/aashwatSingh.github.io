@@ -2,11 +2,13 @@
  * @author Saaqib Shaik
  * @description The export dialog. Calendar tab: choose which deadlines to include and a destination; for
  *   Google / Outlook the user must explicitly allow access first - declining cancels without sharing
- *   anything. Spreadsheet tab: choose sheets; financial sheets are only offered to owners and managers
+ *   anything. A provider already connected in Settings > Connections counts as that consent, so the
+ *   prompt is skipped. Spreadsheet tab: choose sheets; financial sheets are only offered to owners and managers
  *   (the server enforces the same rule). Shows "Nothing to export" and success counts from the server.
  * @traces SE-FR-19, SE-FR-20, UC-14, UC-15
  */
 import { useEffect, useState } from 'react';
+import { useAuth } from '../auth/AuthProvider';
 import type { CalendarExportResult, Role, SheetsExportResult, SpreadsheetSection } from '../../shared/types';
 import { isManager } from '../../shared/permissions';
 import { formatDateTime } from '../../shared/format';
@@ -28,6 +30,7 @@ const SECTIONS: { value: SpreadsheetSection; label: string; financial?: boolean 
 
 export function ExportModal({ open, onClose, projectId, projectName, role, initialTab = 'calendar', initialTarget = 'ical' }: { open: boolean; onClose: () => void; projectId: string; projectName: string; role: Role; initialTab?: Tab; initialTarget?: CalTarget }) {
   const manager = isManager(role);
+  const { user } = useAuth();
   const [tab, setTab] = useState<Tab>(initialTab);
   const [target, setTarget] = useState<CalTarget>(initialTarget);
   const [includes, setIncludes] = useState<CalendarIncludes>({ include_project_deadline: true, include_task_due_dates: true, include_soft_deadlines: true });
@@ -64,12 +67,17 @@ export function ExportModal({ open, onClose, projectId, projectName, role, initi
     }
   };
 
+  const providerConnected =
+    target === 'google' ? !!user?.connected_accounts.google_calendar.connected : target === 'outlook' ? !!user?.connected_accounts.outlook.connected : false;
+
   const exportCalendar = () => {
     if (target === 'ical') {
       void run(async () => {
         const { count, filename } = await exportController.downloadIcs(projectId, includes);
         setMessage({ tone: 'ok', text: `${count} deadline${count === 1 ? '' : 's'} saved to ${filename}` });
       });
+    } else if (providerConnected) {
+      answerConsent(true);  // consent was given when the account was connected in Settings
     } else {
       setConsentOpen(true);
     }
@@ -145,9 +153,14 @@ export function ExportModal({ open, onClose, projectId, projectName, role, initi
                 </div>
               </div>
             ) : (
-              <button type="button" className="btn-primary" onClick={exportCalendar} disabled={busy}>
-                <Icon name="download" /> {busy ? 'Exporting…' : 'Export deadlines'}
-              </button>
+              <div className="space-y-2">
+                {providerConnected ? (
+                  <p className="flex items-center gap-1.5 text-xs text-ok"><Icon name="check" className="h-3.5 w-3.5" /> Using your connected {providerName} account (Settings &gt; Connections).</p>
+                ) : null}
+                <button type="button" className="btn-primary" onClick={exportCalendar} disabled={busy}>
+                  <Icon name="download" /> {busy ? 'Exporting…' : 'Export deadlines'}
+                </button>
+              </div>
             )}
             {links.length > 0 ? (
               <ul className="divide-y divide-line rounded-lg border border-line">

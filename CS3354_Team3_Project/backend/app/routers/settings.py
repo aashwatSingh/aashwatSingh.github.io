@@ -1,9 +1,10 @@
 """
 @author: Tyler Gaines
 @description: Lets a signed-in user view and change their own profile and preferences: username, display
-    name, avatar picture link, light / dark theme, color-blindness palette and the default project type
-    (work, school or personal) used when they create new projects.
-@traces: SE-FR-12, SE-FR-13, SE-FR-14, SE-FR-15
+    name, avatar picture link, light / dark theme, color-blindness palette, the default project type
+    (work, school or personal), which notifications they receive, and which export targets (Google
+    Calendar, Outlook, Google Sheets) they have connected. Everything is stored on their own profile row.
+@traces: SE-FR-12, SE-FR-13, SE-FR-14, SE-FR-15, SE-FR-19, SE-FR-20, SE-FR-29, UC-14, UC-15, UC-22
 """
 
 from __future__ import annotations
@@ -12,9 +13,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import get_db, utcnow
 from app.core.security import get_current_user
-from app.models.entities import UserProfile
+from app.models.entities import CONNECTED_PROVIDERS, DEFAULT_NOTIFICATION_PREFS, UserProfile
 from app.schemas.dto import FieldValidationError, ProfileUpdate, UserOut
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -49,6 +50,16 @@ def update_profile(
         user.color_blind_mode = body.color_blind_mode
     if body.default_project_type is not None:
         user.default_project_type = body.default_project_type
+    if body.notification_prefs is not None:
+        changes = body.notification_prefs.model_dump(exclude_none=True)
+        # JSON columns are not mutation-tracked: assign a new dict so the change is saved.
+        user.notification_prefs = {**DEFAULT_NOTIFICATION_PREFS, **(user.notification_prefs or {}), **changes}
+    if body.connected_accounts is not None:
+        accounts = dict(user.connected_accounts or {})
+        for provider, connected in body.connected_accounts.model_dump(exclude_none=True).items():
+            if provider in CONNECTED_PROVIDERS:
+                accounts[provider] = {"connected": connected, "connected_at": utcnow().isoformat() if connected else None}
+        user.connected_accounts = accounts
     db.commit()
     db.refresh(user)
     return UserOut.model_validate(user)

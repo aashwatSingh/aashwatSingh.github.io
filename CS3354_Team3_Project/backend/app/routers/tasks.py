@@ -4,7 +4,9 @@
     task is assigned to (Membership.canAssignTasks); the assignee must be a current project member.
     Members may update or complete the tasks assigned to them. Board drag-and-drop calls Task.moveTo to
     change a task's column / list and position, and every change re-broadcasts project progress live.
-@traces: SE-FR-26, SE-FR-27, SE-FR-18, SE-NFR-10, UC-18
+    A task always has a due date (UC-18); a status change notifies the task's assignee and creator
+    ("project updates", if they opted in).
+@traces: SE-FR-26, SE-FR-27, SE-FR-18, SE-FR-29, SE-NFR-10, SE-NFR-11, UC-18
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from app.models.entities import Comment, Project, SoftDeadline, Task, TaskList, 
 from app.routers.collaboration import create_notifications, publish_notifications
 from app.routers.projects import broadcast_progress, project_member_ids
 from app.schemas.dto import (
+    FieldValidationError,
     TaskCreate,
     TaskDetailOut,
     TaskListCreate,
@@ -163,6 +166,30 @@ def _notify_assignment(db: Session, task: Task, actor: UserProfile) -> list:
         [task.assignee_id],
         kind="assignment",
         message=f"{actor.display_name or actor.username} assigned you “{task.title}”",
+        project_id=task.project_id,
+        task_id=task.id,
+        link=f"/tasks/{task.id}",
+    )
+
+
+STATUS_LABEL = {"todo": "To Do", "in_progress": "In Progress", "review": "Review", "done": "Done"}
+
+
+def _notify_status_change(db: Session, task: Task, actor: UserProfile, old_status: str) -> list:
+    """SE-FR-29 project update: tell the assignee and creator (not the actor) that a task moved."""
+    if old_status == task.status:
+        return []
+    who = actor.display_name or actor.username
+    message = (
+        f"{who} completed \u201c{task.title}\u201d"
+        if task.status == "done"
+        else f"{who} moved \u201c{task.title}\u201d to {STATUS_LABEL[task.status]}"
+    )
+    return create_notifications(
+        db,
+        [uid for uid in (task.assignee_id, task.created_by) if uid and uid != actor.id],
+        kind="project_update",
+        message=message,
         project_id=task.project_id,
         task_id=task.id,
         link=f"/tasks/{task.id}",
@@ -348,13 +375,13 @@ def update_task(
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=HOURS_DENIED)
     if "list_id" in fields:
         _validate_list(db, task.project_id, body.list_id)
+    if "due_date" in fields and body.due_date is None:
+        raise FieldValidationError({"due_date": "Due date is required"})  # UC-18
     if "due_date" in fields and body.due_date != task.due_date:
         latest_soft = db.execute(select(func.max(SoftDeadline.due_at)).where(SoftDeadline.task_id == task.id)).scalar_one()
         if latest_soft is not None:
             if isinstance(latest_soft, str):
                 latest_soft = datetime.fromisoformat(latest_soft)
-            if body.due_date is None:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Remove this task's soft deadlines before clearing its due date")
             if body.due_date <= latest_soft:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The final due date must be later than all of this task's soft deadlines")
 
@@ -380,8 +407,10 @@ def update_task(
     if "assigned_hours" in fields:
         task.assigned_hours = body.assigned_hours
     if body.status is not None and body.status != task.status:
+        old_status = task.status
         task.position = _end_of_column(db, task.project_id, body.status, exclude_id=task.id)
         _set_status(task, body.status)
+        notes = notes + _notify_status_change(db, task, user, old_status)
     task.updated_at = utcnow()
     db.commit()
     db.refresh(task)
@@ -402,7 +431,9 @@ def move_task(
         _validate_list(db, task.project_id, body.list_id)
         task.list_id = body.list_id
     target_status = body.status or task.status
+    old_status = task.status
     _set_status(task, target_status)
+    notes = _notify_status_change(db, task, user, old_status)
 
     column = db.execute(
         select(Task)
@@ -415,6 +446,7 @@ def move_task(
         row.position = pos
     task.updated_at = utcnow()
     db.commit()
+    publish_notifications(notes)
     _broadcast_task(db, task.project_id, task.id, "moved")
     refreshed = db.execute(
         select(Task)

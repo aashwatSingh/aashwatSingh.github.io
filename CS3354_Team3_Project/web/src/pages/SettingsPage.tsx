@@ -1,11 +1,14 @@
 /**
  * @author Tyler Gaines - matches profile.html
  * @description "Profile & settings" in the mockup's two-column card grid. Account: avatar, name, username,
- *   avatar link and email, with Change password and Log out. Appearance: Dark theme switch and the default
+ *   avatar link and email, with Change password and Log out. Notification preferences: task assignments,
+ *   mentions, deadline reminders and project updates switches, saved as soon as they are flipped.
+ *   Connections: Google Calendar, Outlook and Google Sheets connect / disconnect for one-way exports.
+ *   Appearance: Dark theme switch and the default
  *   project-type mode (School / Personal / Work). Color vision: None, Deuteranopia, Protanopia, Tritanopia
  *   or High contrast. Security: two-factor authentication setup (secret + authenticator link, confirm with a
  *   6-digit code) or removal. All account data travels only over HTTPS in production (SE-NFR-06).
- * @traces SE-FR-11, SE-FR-12, SE-FR-13, SE-FR-14, SE-FR-15, SE-NFR-06
+ * @traces SE-FR-11, SE-FR-12, SE-FR-13, SE-FR-14, SE-FR-15, SE-FR-19, SE-FR-20, SE-FR-29, SE-NFR-06, UC-22
  */
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -16,6 +19,7 @@ import { MfaCodeInput } from '../features/auth/MfaCodeInput';
 import { validateUsername } from '../features/auth/validation';
 import { PROJECT_TYPES } from '../features/projects/model';
 import { ColorBlindPicker, ThemeToggle } from '../features/settings/AccessibilityToggles';
+import { ConnectedAccountsCard, NotificationPrefsCard } from '../features/settings/PreferenceCards';
 import { settingsController } from '../features/settings/settingsController';
 import type { MfaSetup, ProjectType } from '../shared/types';
 import { Alert, Avatar, Badge, Card, Field, Icon, PageHeader, RetryBanner, Segmented } from '../shared/ui';
@@ -143,6 +147,8 @@ export function SettingsPage() {
             </div>
           </div>
         </Card>
+        <NotificationPrefsCard />
+        <ConnectedAccountsCard />
         <Card title="Appearance">
           {appearanceError ? <div className="mb-3"><Alert>{appearanceError}</Alert></div> : null}
           <ThemeToggle value={theme} onChange={(t) => void appearance(() => setTheme(t))} />

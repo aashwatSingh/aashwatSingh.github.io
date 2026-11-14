@@ -17,7 +17,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated, Any, Literal
 
 from email_validator import EmailNotValidError, validate_email
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, PlainSerializer, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, PlainSerializer, field_validator, model_validator
 
 from app.core.database import to_naive_utc
 from app.core.security import USERNAME_RE, password_error_message
@@ -122,6 +122,45 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class NotificationPrefs(BaseModel):
+    """profile.html "Notification preferences" (SE-FR-29)."""
+
+    task_assignments: bool = True
+    mentions: bool = True
+    deadline_reminders: bool = True
+    project_updates: bool = False
+
+
+class NotificationPrefsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_assignments: bool | None = None
+    mentions: bool | None = None
+    deadline_reminders: bool | None = None
+    project_updates: bool | None = None
+
+
+class ConnectedAccount(BaseModel):
+    connected: bool = False
+    connected_at: UTCDateTimeOut | None = None
+
+
+class ConnectedAccounts(BaseModel):
+    """profile.html "Connections": consent recorded per one-way export target (SE-FR-19, SE-FR-20)."""
+
+    google_calendar: ConnectedAccount = Field(default_factory=ConnectedAccount)
+    outlook: ConnectedAccount = Field(default_factory=ConnectedAccount)
+    google_sheets: ConnectedAccount = Field(default_factory=ConnectedAccount)
+
+
+class ConnectedAccountsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    google_calendar: bool | None = None
+    outlook: bool | None = None
+    google_sheets: bool | None = None
+
+
 class UserOut(ORMModel):
     id: str
     username: str
@@ -132,6 +171,8 @@ class UserOut(ORMModel):
     theme: Theme
     color_blind_mode: ColorBlindMode
     default_project_type: ProjectType
+    notification_prefs: NotificationPrefs = Field(default_factory=NotificationPrefs)
+    connected_accounts: ConnectedAccounts = Field(default_factory=ConnectedAccounts)
     created_at: UTCDateTimeOut
 
 
@@ -205,6 +246,8 @@ class ProfileUpdate(BaseModel):
     theme: Theme | None = None
     color_blind_mode: ColorBlindMode | None = None
     default_project_type: ProjectType | None = None
+    notification_prefs: NotificationPrefsUpdate | None = None
+    connected_accounts: ConnectedAccountsUpdate | None = None
 
     @field_validator("username")
     @classmethod
@@ -485,13 +528,29 @@ class TaskCreate(BaseModel):
     status: TaskStatus = "todo"
     priority: TaskPriority = "medium"
     assignee_id: str | None = None
-    due_date: UTCDateTimeIn | None = None
+    # UC-18: "Validate required fields (title and due date)". An omitted value is turned into None before
+    # validation (see _fill_missing_due), so omitted and null both get the same "Due date is required" error.
+    due_date: UTCDateTimeIn | None
     tags: list[str] = Field(default_factory=list)
     estimated_hours: HoursIn | None = None
     assigned_hours: HoursIn | None = None
 
     _title = field_validator("title")(lambda cls, v: _non_blank(v, "Title"))
     _tags = field_validator("tags")(lambda cls, v: _normalize_tags(v))
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_missing_due(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "due_date" not in data:
+            return {**data, "due_date": None}
+        return data
+
+    @field_validator("due_date")
+    @classmethod
+    def _due_required(cls, v: datetime | None) -> datetime:
+        if v is None:
+            raise ValueError("Due date is required")
+        return v
 
 
 class TaskUpdate(BaseModel):
@@ -535,7 +594,7 @@ class TaskOut(BaseModel):
     priority: TaskPriority
     assignee_id: str | None
     assignee: UserBrief | None
-    due_date: UTCDateTimeOut | None
+    due_date: UTCDateTimeOut
     position: int
     tags: list[str]
     estimated_hours: HoursOut

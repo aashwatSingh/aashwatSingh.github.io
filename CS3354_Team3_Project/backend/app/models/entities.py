@@ -53,8 +53,33 @@ NOTIFICATION_KINDS = (
     "deadline_reminder",
     "soft_deadline_reminder",
     "task_reassigned",
+    "project_update",
     "system",
 )
+
+# SE-FR-29 / profile.html "Notification preferences": which notification kinds a user receives.
+DEFAULT_NOTIFICATION_PREFS: dict[str, bool] = {
+    "task_assignments": True,
+    "mentions": True,
+    "deadline_reminders": True,
+    "project_updates": False,
+}
+# Notification kind -> preference key. Kinds not listed (role / membership changes, system) are always
+# delivered because UC-19 / UC-20 require telling the member.
+NOTIFICATION_KIND_PREF: dict[str, str] = {
+    "assignment": "task_assignments",
+    "task_reassigned": "task_assignments",
+    "mention": "mentions",
+    "deadline_reminder": "deadline_reminders",
+    "soft_deadline_reminder": "deadline_reminders",
+    "project_update": "project_updates",
+}
+# profile.html "Connections": one-way export targets (SE-FR-19, SE-FR-20).
+CONNECTED_PROVIDERS = ("google_calendar", "outlook", "google_sheets")
+
+
+def _default_prefs() -> dict[str, bool]:
+    return dict(DEFAULT_NOTIFICATION_PREFS)
 
 JSONType = JSON().with_variant(JSONB(), "postgresql")
 Money = Numeric(12, 2)
@@ -91,6 +116,8 @@ class UserProfile(Base):
     theme: Mapped[str] = mapped_column(String(10), nullable=False, default="dark")
     color_blind_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="none")
     default_project_type: Mapped[str] = mapped_column(String(10), nullable=False, default="work")
+    notification_prefs: Mapped[dict] = mapped_column(JSONType, nullable=False, default=_default_prefs)
+    connected_accounts: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=utcnow, onupdate=utcnow)
 
@@ -190,7 +217,7 @@ class Task(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="todo")
     priority: Mapped[str] = mapped_column(String(10), nullable=False, default="medium")
     assignee_id: Mapped[str | None] = mapped_column(GUID(), ForeignKey("user_profiles.id", ondelete="SET NULL"))
-    due_date: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    due_date: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)  # required by UC-18
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tags: Mapped[list[str]] = mapped_column(JSONType, nullable=False, default=list)
     estimated_hours: Mapped[Decimal | None] = mapped_column(Hours, nullable=True)

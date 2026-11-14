@@ -1,17 +1,18 @@
 /**
  * @author Aashwat Singh
- * @description Create / edit task form. The assignee picker and the estimated / assigned hours are only
+ * @description Create / edit task form. Title and final due date are required (UC-18). The assignee picker and the estimated / assigned hours are only
  *   editable for owners and managers (Membership.canAssignTasks); members editing their own task can change
  *   the status, priority, list, due date, tags and description. The server enforces the same rules.
  * @traces SE-FR-26, SE-FR-27, SE-FR-04, UC-18, UC-03
  */
 import { useState } from 'react';
 import type { Member, Role, TaskDetail, TaskInput, TaskList, TaskPriority, TaskStatus } from '../../shared/types';
-import { fromLocalInput, titleCase, toLocalInput } from '../../shared/format';
+import { titleCase, toLocalInput } from '../../shared/format';
 import { Alert, Field, Modal, RetryBanner } from '../../shared/ui';
 import { useSave } from '../../shared/useSave';
 import { BOARD_COLUMNS, Membership, PRIORITIES, normalizeTags } from './model';
 import { taskController } from './taskController';
+import { type TaskFormErrors, validateTaskForm } from './validation';
 
 interface Props {
   open: boolean;
@@ -37,16 +38,17 @@ export function TaskForm({ open, onClose, projectId, role, members, lists, task,
   const [tags, setTags] = useState((task?.tags ?? []).join(', '));
   const [estimated, setEstimated] = useState(task?.estimated_hours?.toString() ?? '');
   const [assigned, setAssigned] = useState(task?.assigned_hours?.toString() ?? '');
-  const [titleError, setTitleError] = useState<string>();
+  const [formErrors, setFormErrors] = useState<TaskFormErrors>({});
 
   const buildInput = (): TaskInput => {
+    const checked = validateTaskForm({ title, due }).value;
     const input: TaskInput = {
-      title: title.trim(),
+      title: checked?.title ?? title.trim(),
       description,
       status,
       priority,
       list_id: listId || null,
-      due_date: fromLocalInput(due),
+      due_date: checked?.due_date,
       tags: normalizeTags(tags),
     };
     if (canAssign) {
@@ -67,11 +69,9 @@ export function TaskForm({ open, onClose, projectId, role, members, lists, task,
   });
 
   const submit = () => {
-    if (!title.trim()) {
-      setTitleError('Title is required');
-      return;
-    }
-    setTitleError(undefined);
+    const { errors } = validateTaskForm({ title, due });
+    setFormErrors(errors);
+    if (errors.title || errors.due_date) return;  // UC-18: nothing is sent until both required fields are set
     void save.run();
   };
 
@@ -91,8 +91,8 @@ export function TaskForm({ open, onClose, projectId, role, members, lists, task,
       <div className="space-y-4">
         <RetryBanner error={save.networkError} onRetry={save.retry} onCancel={save.cancel} busy={save.saving} />
         {save.error && !Object.keys(save.fieldErrors).length ? <Alert>{save.error.detail}</Alert> : null}
-        <Field label="Title" error={titleError ?? save.fieldErrors.title} htmlFor="t-title">
-          <input id="t-title" className="input" value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} />
+        <Field label="Title" error={formErrors.title ?? save.fieldErrors.title} htmlFor="t-title">
+          <input id="t-title" className="input" value={title} maxLength={200} required aria-required="true" onChange={(e) => setTitle(e.target.value)} />
         </Field>
         <Field label="Description (Markdown)" htmlFor="t-desc" hint="**bold**, *italic*, `code`, - lists">
           <textarea id="t-desc" className="input min-h-[96px]" value={description} onChange={(e) => setDescription(e.target.value)} />
@@ -122,8 +122,8 @@ export function TaskForm({ open, onClose, projectId, role, members, lists, task,
               {members.map((m) => <option key={m.user_id} value={m.user_id}>{m.display_name} (@{m.username})</option>)}
             </select>
           </Field>
-          <Field label="Final due date" htmlFor="t-due" error={save.fieldErrors.due_date}>
-            <input id="t-due" type="datetime-local" className="input" value={due} onChange={(e) => setDue(e.target.value)} />
+          <Field label="Final due date" htmlFor="t-due" error={formErrors.due_date ?? save.fieldErrors.due_date}>
+            <input id="t-due" type="datetime-local" className="input" value={due} required aria-required="true" onChange={(e) => { setDue(e.target.value); if (formErrors.due_date) setFormErrors((f) => ({ ...f, due_date: undefined })); }} />
           </Field>
         </div>
         <Field label="Tags" htmlFor="t-tags" hint="Comma separated, up to 10" error={save.fieldErrors.tags}>

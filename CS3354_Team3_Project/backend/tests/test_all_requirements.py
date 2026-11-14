@@ -126,7 +126,8 @@ def set_role(client: TestClient, project_id: str, actor: str, target: str, role:
 
 
 def new_task(client: TestClient, project_id: str, actor: str = "jon", **fields) -> dict:
-    body = {"title": fields.pop("title", "A task"), **fields}
+    # UC-18: title and due date are both required, so the fixture always supplies a due date.
+    body = {"title": fields.pop("title", "A task"), "due_date": fields.pop("due_date", iso(future(14))), **fields}
     r = client.post(f"/api/projects/{project_id}/tasks", headers=H(client, actor), json=body)
     assert r.status_code == 201, r.text
     return r.json()
@@ -217,9 +218,11 @@ def test_uc02_performance_report_role_scoping_se_fr05_se_nfr02(client):
     project = new_project(client, members=["tyler", "staff"], name="Perf")
     pid = project["id"]
     assert set_role(client, pid, "jon", "tyler", "manager").status_code == 200
-    staff_task = new_task(client, pid, title="Staff work", assignee_id=user_id("staff"), estimated_hours=4, assigned_hours=5)
-    tyler_task = new_task(client, pid, title="Tyler work", assignee_id=user_id("tyler"), estimated_hours=10)
-    idle_task = new_task(client, pid, title="Not started", assignee_id=user_id("staff"), estimated_hours=3)
+    # Due dates inside the default 30-day report period (UC-18 makes every task carry one).
+    in_period = iso(future(-2))
+    staff_task = new_task(client, pid, title="Staff work", assignee_id=user_id("staff"), estimated_hours=4, assigned_hours=5, due_date=in_period)
+    tyler_task = new_task(client, pid, title="Tyler work", assignee_id=user_id("tyler"), estimated_hours=10, due_date=in_period)
+    idle_task = new_task(client, pid, title="Not started", assignee_id=user_id("staff"), estimated_hours=3, due_date=in_period)
     hours = f"/api/projects/{pid}/tasks/{{}}/hours"
     assert client.post(hours.format(staff_task["id"]), headers=H(client, "staff"), json={"actual_hours": 5}).status_code == 200
     assert client.post(hours.format(tyler_task["id"]), headers=H(client, "tyler"), json={"actual_hours": 8}).status_code == 200
@@ -303,9 +306,12 @@ def test_uc05_uc06_soft_deadline_validation_se_fr06_se_fr07_se_fr08_se_fr09_se_f
     assert done.status_code == 200 and done.json()["state"] == "completed"
     assert client.delete(f"/api/soft-deadlines/{second.json()['id']}", headers=H(client, "staff")).status_code == 204
 
-    no_due = new_task(client, pid, title="No due date")
-    r = client.post(f"/api/tasks/{no_due['id']}/soft-deadlines", headers=H(client, "jon"), json={"title": "x", "due_at": iso(future(1))})
-    assert r.status_code == 400 and "final due date" in r.json()["detail"]
+    # UC-18 makes the final due date mandatory, so a soft deadline always has a date to be earlier than:
+    # a task cannot be created without one and an existing one cannot be cleared.
+    no_due = client.post(f"/api/projects/{pid}/tasks", headers=H(client, "jon"), json={"title": "No due date"})
+    assert no_due.status_code == 422 and no_due.json()["errors"]["due_date"] == "Due date is required"
+    cleared = client.put(f"/api/tasks/{task['id']}", headers=H(client, "jon"), json={"due_date": None})
+    assert cleared.status_code == 422 and cleared.json()["errors"]["due_date"] == "Due date is required"
     # Moving the final due date before an existing soft deadline is refused (keeps SE-FR-06 true forever).
     r = client.put(f"/api/tasks/{task['id']}", headers=H(client, "jon"), json={"due_date": iso(due - timedelta(days=6))})
     assert r.status_code == 400
@@ -447,19 +453,19 @@ def test_uc12_uc14_uc15_project_and_exports_uc13_se_fr16_to_se_fr20_se_nfr09_se_
     # UC-14 calendar export.
     hostile = new_task(client, pid, title='=HYPERLINK("http://evil.example","click"), with; commas', due_date=iso(future(5)))
     new_task(client, pid, title="+cmd|' /C calc'!A0", due_date=iso(future(6)))
-    new_task(client, pid, title="@SUM(1+1)")
+    new_task(client, pid, title="@SUM(1+1)", due_date=iso(future(7)))
     ics = client.post(f"/api/projects/{pid}/export/calendar", headers=H(client, "jon"), json={"target": "ical"})
     assert ics.status_code == 200 and ics.headers["content-type"].startswith("text/calendar")
     text = ics.text
     assert text.startswith("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n") and text.endswith("END:VCALENDAR\r\n")
-    assert text.count("BEGIN:VEVENT") == int(ics.headers["x-export-count"]) == 3  # project + 2 due tasks
+    assert text.count("BEGIN:VEVENT") == int(ics.headers["x-export-count"]) == 7  # project deadline + 6 task due dates (UC-18: every task has one)
     assert all(len(line.encode("utf-8")) <= 75 for line in text.split("\r\n"))
     assert "with\\; commas" in text.replace("\r\n ", "")
 
     declined = client.post(f"/api/projects/{pid}/export/calendar", headers=H(client, "jon"), json={"target": "google", "oauth_consent": False})
     assert declined.status_code == 400 and "provider_links" not in declined.json()
     google = client.post(f"/api/projects/{pid}/export/calendar", headers=H(client, "jon"), json={"target": "google", "oauth_consent": True}).json()
-    assert google["message"] == "3 deadlines added" and google["count"] == 3
+    assert google["message"] == "7 deadlines added" and google["count"] == 7
     assert all(link["url"].startswith("https://calendar.google.com/") for link in google["provider_links"])
     outlook = client.post(f"/api/projects/{pid}/export/calendar", headers=H(client, "jon"), json={"target": "outlook", "oauth_consent": True}).json()
     assert outlook["provider_links"][0]["url"].startswith("https://outlook.live.com/")
@@ -564,10 +570,20 @@ def test_uc18_uc20_uc21_tasks_last_owner_and_mentions_se_fr26_to_se_fr30_se_nfr1
     assert set_role(client, pid, "jon", "tyler", "manager").status_code == 200
 
     # UC-18: Membership.canAssignTasks().
-    denied = client.post(f"/api/projects/{pid}/tasks", headers=H(client, "staff"), json={"title": "Sneaky"})
+    due = iso(future(10))
+    denied = client.post(f"/api/projects/{pid}/tasks", headers=H(client, "staff"), json={"title": "Sneaky", "due_date": due})
     assert denied.status_code == 403
-    outsider = client.post(f"/api/projects/{pid}/tasks", headers=H(client, "tyler"), json={"title": "x", "assignee_id": user_id("preethi")})
+    outsider = client.post(
+        f"/api/projects/{pid}/tasks", headers=H(client, "tyler"), json={"title": "x", "due_date": due, "assignee_id": user_id("preethi")}
+    )
     assert outsider.status_code == 400 and "member" in outsider.json()["detail"]
+    # UC-18 "Validate required fields (title and due date)": each missing field is reported by name.
+    for body in ({"title": "No due date"}, {"title": "Null due date", "due_date": None}):
+        missing_due = client.post(f"/api/projects/{pid}/tasks", headers=H(client, "tyler"), json=body)
+        assert missing_due.status_code == 422 and missing_due.json()["errors"] == {"due_date": "Due date is required"}
+    missing_both = client.post(f"/api/projects/{pid}/tasks", headers=H(client, "tyler"), json={"title": "   "})
+    assert missing_both.status_code == 422 and set(missing_both.json()["errors"]) == {"title", "due_date"}
+    assert client.get(f"/api/projects/{pid}/tasks", headers=H(client, "tyler")).json() == []  # nothing was saved
     mine = new_task(client, pid, actor="tyler", title="Staff task", assignee_id=user_id("staff"))
     theirs = new_task(client, pid, actor="tyler", title="Aashwat task", assignee_id=user_id("aashwat"))
     assert mine["can_assign"] is True
@@ -603,7 +619,7 @@ def test_uc18_uc20_uc21_tasks_last_owner_and_mentions_se_fr26_to_se_fr30_se_nfr1
     promoted = set_role(client, pid, "tyler", "staff", "manager")
     assert promoted.status_code == 200 and promoted.json()["role"] == "manager"
     # New role applies on the very next request.
-    assert client.post(f"/api/projects/{pid}/tasks", headers=H(client, "staff"), json={"title": "Now allowed"}).status_code == 201
+    assert client.post(f"/api/projects/{pid}/tasks", headers=H(client, "staff"), json={"title": "Now allowed", "due_date": due}).status_code == 201
     notes = client.get("/api/notifications", headers=H(client, "staff")).json()["items"]
     assert any(n["kind"] == "role_change" and "manager" in n["message"] for n in notes)
 
@@ -820,3 +836,71 @@ def test_se_nfr06_https_transport_and_bearer_only_sessions_se_fr11(client):
     finally:
         os.environ["DEMO_MODE"] = "true"
         cfg.get_settings.cache_clear()
+
+
+def test_se_fr29_notification_preferences_and_connected_accounts_uc22_uc14(client):
+    """profile.html: the notification switches and export connections persist and are enforced on the server."""
+    project = new_project(client, members=["staff", "aashwat"], name="Preferences")
+    pid = project["id"]
+    put = lambda who, body: client.put("/api/settings/profile", headers=H(client, who), json=body)  # noqa: E731
+    kinds = lambda who: [  # noqa: E731
+        n["kind"] for n in client.get("/api/notifications", headers=H(client, who)).json()["items"] if n["project_id"] == pid
+    ]
+
+    me = client.get("/api/auth/me", headers=H(client, "staff")).json()
+    assert me["notification_prefs"] == {"task_assignments": True, "mentions": True, "deadline_reminders": True, "project_updates": False}
+    assert all(me["connected_accounts"][p] == {"connected": False, "connected_at": None} for p in ("google_calendar", "outlook", "google_sheets"))
+
+    # Defaults: assignment is delivered, a status change by someone else ("project update") is not.
+    first = new_task(client, pid, title="First", assignee_id=user_id("staff"))
+    assert client.put(f"/api/tasks/{first['id']}", headers=H(client, "jon"), json={"status": "in_progress"}).status_code == 200
+    assert kinds("staff").count("assignment") == 1 and "project_update" not in kinds("staff")
+
+    # A partial update flips only the named switches and survives a fresh read (it is stored, not UI state).
+    saved = put("staff", {"notification_prefs": {"task_assignments": False, "mentions": False, "project_updates": True}})
+    assert saved.status_code == 200
+    expected = {"task_assignments": False, "mentions": False, "deadline_reminders": True, "project_updates": True}
+    assert saved.json()["notification_prefs"] == expected
+    assert client.get("/api/settings/profile", headers=H(client, "staff")).json()["notification_prefs"] == expected
+
+    second = new_task(client, pid, title="Second", assignee_id=user_id("staff"))
+    assert kinds("staff").count("assignment") == 1  # muted: no second assignment notification
+    comment = client.post(f"/api/tasks/{second['id']}/comments", headers=H(client, "jon"), json={"body": "ping @staff and @aashwat"})
+    assert comment.status_code == 201 and comment.json()["notified"] == ["aashwat"]  # staff muted mentions
+    assert "mention" not in kinds("staff") and "mention" in kinds("aashwat")
+    moved = client.patch(f"/api/tasks/{second['id']}/move", headers=H(client, "jon"), json={"status": "done", "position": 0})
+    assert moved.status_code == 200
+    updates = [n for n in client.get("/api/notifications", headers=H(client, "staff")).json()["items"] if n["kind"] == "project_update"]
+    assert len(updates) == 1 and "completed" in updates[0]["message"] and updates[0]["task_id"] == second["id"]
+    # Nobody is notified about their own action.
+    assert client.put(f"/api/tasks/{first['id']}", headers=H(client, "staff"), json={"status": "review"}).status_code == 200
+    assert len([k for k in kinds("staff") if k == "project_update"]) == 1
+    # UC-20 role changes are always delivered, whatever the switches say.
+    assert set_role(client, pid, "jon", "staff", "manager").status_code == 200
+    assert "role_change" in kinds("staff")
+
+    # Deadline reminders switch (UC-22).
+    soon = new_task(client, pid, title="Due tomorrow", assignee_id=user_id("aashwat"), due_date=iso(future(0.5)))
+    assert put("aashwat", {"notification_prefs": {"deadline_reminders": False}}).status_code == 200
+    assert "deadline_reminder" not in kinds("aashwat")
+    assert put("aashwat", {"notification_prefs": {"deadline_reminders": True}}).status_code == 200
+    reminders = [n for n in client.get("/api/notifications", headers=H(client, "aashwat")).json()["items"] if n["kind"] == "deadline_reminder"]
+    assert any(n["task_id"] == soon["id"] for n in reminders)
+
+    # Connected accounts: connect two, disconnect one; the third is untouched.
+    connected = put("staff", {"connected_accounts": {"google_calendar": True, "google_sheets": True}}).json()["connected_accounts"]
+    assert connected["google_calendar"]["connected"] is True and connected["google_calendar"]["connected_at"]
+    assert connected["google_sheets"]["connected"] is True and connected["outlook"] == {"connected": False, "connected_at": None}
+    after = put("staff", {"connected_accounts": {"google_sheets": False}}).json()["connected_accounts"]
+    assert after["google_sheets"] == {"connected": False, "connected_at": None}
+    assert after["google_calendar"] == connected["google_calendar"]  # unchanged, including its timestamp
+    # Each user only ever edits their own row; unknown switches and non-boolean values are rejected.
+    assert client.get("/api/auth/me", headers=H(client, "jon")).json()["connected_accounts"]["google_calendar"]["connected"] is False
+    assert put("staff", {"notification_prefs": {"sms": True}}).status_code == 422
+    assert put("staff", {"connected_accounts": {"dropbox": True}}).status_code == 422
+    assert put("staff", {"notification_prefs": {"mentions": "sometimes"}}).status_code == 422
+
+    # Restore the shared demo accounts for any later test.
+    restore = {"task_assignments": True, "mentions": True, "deadline_reminders": True, "project_updates": False}
+    assert put("staff", {"notification_prefs": restore, "connected_accounts": {"google_calendar": False}}).status_code == 200
+    assert set_role(client, pid, "jon", "staff", "member").status_code == 200

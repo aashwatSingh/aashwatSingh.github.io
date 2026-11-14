@@ -153,7 +153,7 @@ def seed_demo_data(db: Session) -> bool:
             status=status,
             priority=priority,
             assignee_id=u[assignee] if assignee else None,
-            due_date=_day(now, due_days) if due_days is not None else None,
+            due_date=_day(now, due_days),  # UC-18: every task has a due date
             position=pos,
             tags=list(tags),
             estimated_hours=Decimal(str(est)) if est is not None else None,

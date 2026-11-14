@@ -9,7 +9,7 @@ import { Membership, applyMove, canEditTask, filterTasks, groupByStatus, normali
 
 const t = (id: string, status: Task['status'], position: number, assignee: string | null = null): Task => ({
   id, project_id: 'p', list_id: null, title: id, description: '', status, priority: 'medium', assignee_id: assignee, assignee: null,
-  due_date: null, position, tags: id === 'b' ? ['ux'] : [], estimated_hours: null, assigned_hours: null, actual_hours: 0, completed_at: null,
+  due_date: '2026-12-01T17:00:00Z', position, tags: id === 'b' ? ['ux'] : [], estimated_hours: null, assigned_hours: null, actual_hours: 0, completed_at: null,
   created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', soft_deadlines_total: 0, soft_deadlines_done: 0, next_soft_deadline_at: null, comment_count: 0,
 });
 

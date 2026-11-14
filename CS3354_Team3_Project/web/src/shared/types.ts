@@ -18,6 +18,22 @@ export type Efficiency = number | 'N/A';
 export type SoftDeadlinePriority = 'high' | 'medium' | 'low';
 
 // --- Auth & settings (Tyler Gaines) -------------------------------------------------
+/** Settings > Notification preferences (SE-FR-29). Stored on the user's profile row. */
+export interface NotificationPrefs {
+  task_assignments: boolean;
+  mentions: boolean;
+  deadline_reminders: boolean;
+  project_updates: boolean;
+}
+
+/** One-way export targets the user has connected in Settings > Connected accounts (SE-FR-19, SE-FR-20). */
+export type ConnectedProvider = 'google_calendar' | 'outlook' | 'google_sheets';
+
+export interface ConnectedAccount {
+  connected: boolean;
+  connected_at: string | null;
+}
+
 export interface User {
   id: string;
   username: string;
@@ -28,6 +44,8 @@ export interface User {
   theme: Theme;
   color_blind_mode: ColorBlindMode;
   default_project_type: ProjectType;
+  notification_prefs: NotificationPrefs;
+  connected_accounts: Record<ConnectedProvider, ConnectedAccount>;
   created_at: string;
 }
 
@@ -73,6 +91,10 @@ export interface ProfileUpdate {
   theme?: Theme;
   color_blind_mode?: ColorBlindMode;
   default_project_type?: ProjectType;
+  /** Partial: only the switches named are changed. */
+  notification_prefs?: Partial<NotificationPrefs>;
+  /** true connects, false disconnects; providers not named are left alone. */
+  connected_accounts?: Partial<Record<ConnectedProvider, boolean>>;
 }
 
 // --- Projects (Saaqib Shaik) -------------------------------------------------------
@@ -221,7 +243,8 @@ export interface Task {
   priority: TaskPriority;
   assignee_id: string | null;
   assignee: UserBrief | null;
-  due_date: string | null;
+  /** Always set: UC-18 makes the final due date required. */
+  due_date: string;
   position: number;
   tags: string[];
   estimated_hours: number | null;
@@ -250,7 +273,8 @@ export interface TaskInput {
   status?: TaskStatus;
   priority?: TaskPriority;
   assignee_id?: string | null;
-  due_date?: string | null;
+  /** Required on create (UC-18); cannot be cleared on edit. */
+  due_date?: string;
   tags?: string[];
   estimated_hours?: number | null;
   assigned_hours?: number | null;

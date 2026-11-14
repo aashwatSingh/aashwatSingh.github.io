@@ -107,7 +107,6 @@ def performance_report(
         Task.assignee_id.is_not(None),
         or_(
             and_(Task.due_date >= range_start, Task.due_date < range_end),
-            Task.due_date.is_(None),
             Task.id.in_(list(actual_by_task) or [""]),
         ),
     )

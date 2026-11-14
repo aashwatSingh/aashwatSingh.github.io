@@ -5,7 +5,8 @@
     against the project's members: members get a notification pushed live within two seconds, while an
     @name that is not on the project is turned into plain text and the author gets a warning - the comment
     is still posted. The notification list also produces automatic reminders for work due within 24 hours.
-@traces: SE-FR-28, SE-FR-29, SE-NFR-12, UC-21, UC-22
+    Each user's notification preferences decide which kinds they receive.
+@traces: SE-FR-28, SE-FR-29, SE-NFR-11, SE-NFR-12, UC-21, UC-22
 """
 
 from __future__ import annotations
@@ -23,7 +24,16 @@ from app.core.permissions import ALL_ROLES, MANAGERS, get_membership, require_ta
 from app.core.realtime import hub
 from app.core.sanitizer import sanitize_markdown
 from app.core.security import get_current_user
-from app.models.entities import Comment, Notification, ProjectMember, SoftDeadline, Task, UserProfile
+from app.models.entities import (
+    DEFAULT_NOTIFICATION_PREFS,
+    NOTIFICATION_KIND_PREF,
+    Comment,
+    Notification,
+    ProjectMember,
+    SoftDeadline,
+    Task,
+    UserProfile,
+)
 from app.schemas.dto import (
     CommentCreate,
     CommentCreateResult,
@@ -44,6 +54,15 @@ REMINDER_WINDOW = timedelta(hours=24)
 # ---------------------------------------------------------------------------
 # Notification helpers (shared with tasks.py and members.py)
 # ---------------------------------------------------------------------------
+def wants_notification(prefs: dict | None, kind: str) -> bool:
+    """True when the user's notification preferences allow this kind (unlisted kinds always pass)."""
+    key = NOTIFICATION_KIND_PREF.get(kind)
+    if key is None:
+        return True
+    merged = {**DEFAULT_NOTIFICATION_PREFS, **(prefs or {})}
+    return bool(merged.get(key, True))
+
+
 def create_notifications(
     db: Session,
     user_ids: Iterable[str],
@@ -68,6 +87,9 @@ def create_notifications(
             ).scalars()
         )
         targets = [uid for uid in targets if uid not in existing]
+    if targets and kind in NOTIFICATION_KIND_PREF:
+        prefs = dict(db.execute(select(UserProfile.id, UserProfile.notification_prefs).where(UserProfile.id.in_(targets))).all())
+        targets = [uid for uid in targets if wants_notification(prefs.get(uid), kind)]
     rows = [
         Notification(
             user_id=uid,
@@ -158,7 +180,7 @@ def create_comment(
 
     warnings: list[str] = []
     notify_ids: list[str] = []
-    notified: list[str] = []
+    names: dict[str, str] = {}
     for name in extract_mentions(text):
         match = members.get(name.lower())
         if match is None:
@@ -168,7 +190,7 @@ def create_comment(
         uid, canonical = match
         if uid != user.id and uid not in notify_ids:
             notify_ids.append(uid)
-            notified.append(canonical)
+            names[uid] = canonical
 
     now = utcnow()
     comment = Comment(task_id=task.id, project_id=task.project_id, author_id=user.id, body=text, created_at=now)
@@ -186,6 +208,7 @@ def create_comment(
     db.commit()
     db.refresh(comment)
     publish_notifications(rows)
+    notified = [names[r.user_id] for r in rows]  # members who muted mentions are not listed
 
     out = _comment_out(comment, user.id, membership.role)
     project_member_ids = [uid for uid, _ in members.values()]
@@ -216,6 +239,8 @@ def ensure_deadline_reminders(db: Session, user: UserProfile) -> list[Notificati
     now = utcnow()
     horizon = now + REMINDER_WINDOW
     created: list[Notification] = []
+    if not wants_notification(user.notification_prefs, "deadline_reminder"):
+        return created
 
     due_tasks = db.execute(
         select(Task).where(

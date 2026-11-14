@@ -37,7 +37,7 @@ function MiniTask({ task }: { task: Task }) {
       </span>
       <span className="mt-1.5 flex items-center justify-between">
         <span className="text-xs text-muted">
-          {done ? `Done ${formatDate(task.completed_at, { year: undefined })}` : task.due_date ? `Due ${formatDate(task.due_date, { year: undefined })}` : 'No due date'}
+          {done ? `Done ${formatDate(task.completed_at, { year: undefined })}` : `Due ${formatDate(task.due_date, { year: undefined })}`}
         </span>
         {task.assignee ? <Avatar name={task.assignee.display_name} url={task.assignee.avatar_url} size="h-[22px] w-[22px]" text="text-[9px]" /> : null}
       </span>

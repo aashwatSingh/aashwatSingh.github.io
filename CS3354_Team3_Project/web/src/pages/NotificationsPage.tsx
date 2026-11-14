@@ -25,6 +25,7 @@ const KIND: Record<string, { tone: Tone; label: string }> = {
   member_added: { tone: 'ok', label: 'Added to project' },
   member_removed: { tone: 'danger', label: 'Removed' },
   task_reassigned: { tone: 'brand', label: 'Update' },
+  project_update: { tone: 'info', label: 'Update' },
   system: { tone: 'neutral', label: 'ProjectForge' },
 };
 
