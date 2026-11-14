@@ -110,6 +110,44 @@ runs never do this: the posting goes to manual review as before.
 
 If neither finds a code, or Greenhouse rejects it, the run falls back to you pasting the code.
 
+**Confirmation e-mail gate.** On a live run, a submission counts only once its confirmation e-mail
+("Thank you for applying to ...") is in your Gmail inbox. The browser's confirmation page is not
+enough: until the e-mail arrives the runner does not write `internship_tracker.xlsx`, does not
+count the application, and does not open the next posting.
+
+* Right before the final Submit click (and again right before the Greenhouse code is submitted)
+  the runner notes the highest message UID in `INBOX`. Afterwards it reads only newer messages,
+  every 4 s for up to 120 s (`email_receipt_verifier.py`). It uses IMAP with `GMAIL_APP_PASSWORD`,
+  and the Gmail tab (`gmail_tab_otp.py`) when there is no app password or IMAP cannot be opened.
+  The mailbox is opened read-only; nothing is marked read.
+* A message passes when it has confirmation wording ("thank you for applying", "application
+  received", "successfully submitted", ...) and either names the company or comes from a known
+  ATS domain (Greenhouse, Ashby, Lever, Workday).
+* A security-code or account e-mail never passes ("security code", "verification code", "verify
+  your email", "activate your account", "confirm you're a human"), so the Greenhouse code e-mail
+  cannot be mistaken for the receipt. A rejection for an earlier application does not pass either.
+* The tracker row is written from the e-mail itself: `Next Step / Notes` reads "Application
+  confirmation received via <ATS> (<date>); verified by Gmail receipt." and `Source Email Subject`
+  holds the exact subject.
+
+If no e-mail arrives in 120 s the queue pauses, the bell rings, and you choose:
+
+1. **Wait another 60s**: keep checking Gmail.
+2. **Check browser & retry submit**: the form's tab is still open. If it shows a confirmation the
+   runner does not submit again and checks Gmail for another 60 s; otherwise it opens the form again.
+3. **Log as "Application incomplete / Unconfirmed" & move on**: the posting goes to
+   `unconfirmed_applications.csv`, a hold list that is not counted toward the 500.
+
+Type 1, 2 or 3 in the terminal, or use the buttons in Mission Control. An unattended run (no
+`--assist` / `--local-blitz`) has nobody to ask, so a timeout there goes straight to the hold list.
+A `--dry-run` never submits, so the gate does not apply.
+
+**Mission Control.** `python app_server.py` serves a local page at http://127.0.0.1:4760 showing
+the active posting and its step (Submitting Form, Entering OTP Code, Verifying Receipt Email in
+Gmail, Confirmed with the e-mail's subject), the confirmed total, the hold-list count, the last
+runner log lines, and the three buttons when a confirmation times out. It only reads the runner's
+files; the one thing it writes is your button press.
+
 **It does not invent answers.** `answers.py` answers a question only from
 `candidate_profile.json`: your stated facts and preferences (relocation, office order, salary,
 years of experience, preferred language, start date...). "Do you have experience with X?" is Yes

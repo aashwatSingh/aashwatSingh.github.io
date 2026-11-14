@@ -1,0 +1,105 @@
+"""What the runner is doing right now, for the dashboard (app_server.py), and the dashboard's answer.
+
+Two small git-ignored files next to the code:
+
+* run_state.json   written by the runner: the active posting and which step it is on.
+* gate_choice.json written by the dashboard when the candidate presses a button after a
+                   confirmation e-mail timed out; the runner reads it once and deletes it.
+"""
+from __future__ import annotations
+
+import json
+import os
+import time
+from pathlib import Path
+
+import config
+
+SUBMITTING = "SUBMITTING_FORM"
+ENTERING_OTP = "ENTERING_OTP"
+AWAITING_EMAIL = "AWAITING_EMAIL_CONFIRMATION"
+CONFIRMED = "CONFIRMED"
+UNCONFIRMED = "UNCONFIRMED"
+
+STEPS = [
+    (SUBMITTING, "Submitting Form"),
+    (ENTERING_OTP, "Entering OTP Code"),
+    (AWAITING_EMAIL, "Verifying Receipt Email in Gmail (polling...)"),
+    (CONFIRMED, "Confirmed"),
+]
+
+WAIT, RETRY, SKIP = "wait", "retry", "skip"
+CHOICES = {
+    WAIT: "Wait another 60s",
+    RETRY: "Check browser & retry submit",
+    SKIP: 'Log as "Application incomplete / Unconfirmed" & move on',
+}
+
+
+def choice_path() -> Path:
+    return config.BASE / "gate_choice.json"
+
+
+def _write(path: Path, data: dict) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def update(job: dict | None, step: str = "", message: str = "", **extra) -> dict:
+    """Record the active posting and step. Never raises: a dashboard file must not stop an application."""
+    state = {
+        "updated": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "step": step,
+        "message": message,
+        "job": ({k: job.get(k) for k in ("id", "company", "title", "ats", "url")} if job else None),
+        "timed_out": False,
+        "subject": "",
+        **extra,
+    }
+    try:
+        _write(config.RUN_STATE_JSON, state)
+    except OSError:
+        pass
+    return state
+
+
+def read() -> dict:
+    try:
+        data = json.loads(config.RUN_STATE_JSON.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def post_choice(choice: str, job_id: str = "") -> bool:
+    """Dashboard side: leave an answer for the runner. False for anything that is not one of the three."""
+    if choice not in CHOICES:
+        return False
+    _write(choice_path(), {"choice": choice, "job_id": str(job_id or ""), "at": time.time()})
+    return True
+
+
+def take_choice(job_id: str = "") -> str | None:
+    """Runner side: the pending answer for this posting, consumed. A stale or foreign file is discarded."""
+    path = choice_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    try:
+        path.unlink()
+    except OSError:
+        pass
+    if not isinstance(data, dict) or data.get("choice") not in CHOICES:
+        return None
+    if job_id and data.get("job_id") and data["job_id"] != str(job_id):
+        return None                                        # pressed for an earlier posting
+    return data["choice"]
+
+
+def clear_choice() -> None:
+    try:
+        choice_path().unlink()
+    except OSError:
+        pass

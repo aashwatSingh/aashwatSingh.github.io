@@ -19,9 +19,11 @@ import asyncio
 import csv
 import json
 import os
+from queue import Queue
 import re
 import signal
 import sys
+import threading
 import time
 from collections import Counter
 from datetime import datetime
@@ -30,10 +32,13 @@ from playwright.async_api import async_playwright
 
 import config
 import dedup
+import email_receipt_verifier
+import run_state
 import scraper
 from answers import AnswerEngine, Context, load_custom_answers, remember_answers
 from ats import ADAPTERS, DEFAULT_ATS, adapter_for
 from ats.base import (CLOSED, DRY_RUN_OK, ERROR, MANUAL_REVIEW, SKIPPED_INELIGIBLE, SUBMITTED, ApplyResult)
+from receipt_gate import ReceiptGate
 
 APPLICATION_TIMEOUT_S = 240       # whole form, including uploads and option lookups (+ --assist wait)
 _stop = False
@@ -72,12 +77,15 @@ def write_application_log(job: dict, result: ApplyResult) -> None:
 
 
 async def apply_one(context, job: dict, engine: AnswerEngine, ledger: dedup.Ledger,
-                    *, dry_run: bool, use_llm: bool) -> ApplyResult:
+                    *, dry_run: bool, use_llm: bool, keep_open: bool = False) -> ApplyResult:
+    """One posting. With keep_open, a submitted form's tab is returned open in result.page so the
+    browser can still be checked while the confirmation e-mail is awaited; the caller closes it."""
     adapter = adapter_for(job["url"])
     shot = str(config.MANUAL_REVIEW_DIR / f"{job['id']}.png")
     ctx = Context(company=job["company"], title=job["title"], locations=list(job.get("locations") or []),
                   applied_before=ledger.has_company(job["company"]))
     page = await context.new_page()
+    kept = False
     try:
         if adapter is None:
             if not use_llm:
@@ -85,10 +93,13 @@ async def apply_one(context, job: dict, engine: AnswerEngine, ledger: dedup.Ledg
                                    f"{job['ats']} needs the LLM agent (set ANTHROPIC_API_KEY, --ats all)")
             import llm_agent                                       # optional dependency
             return await llm_agent.apply(context, job, engine.p, dry_run=dry_run, shot_path=shot)
-        return await asyncio.wait_for(
+        result = await asyncio.wait_for(
             adapter.apply(page, job, engine, ctx, dry_run=dry_run, shot_path=shot),
             timeout=getattr(adapter, "timeout_s", APPLICATION_TIMEOUT_S)
             + ((8 if adapter.name == "Workday" else 2) * max(adapter.human_wait_s, 180) if adapter.human_wait_s else 0))
+        if keep_open and result.status == SUBMITTED:
+            result.page, kept = page, True
+        return result
     except asyncio.TimeoutError:
         await _safe_shot(page, shot)
         return ApplyResult(MANUAL_REVIEW, "TIMEOUT", f"gave up after {APPLICATION_TIMEOUT_S}s", screenshot=shot)
@@ -98,7 +109,141 @@ async def apply_one(context, job: dict, engine: AnswerEngine, ledger: dedup.Ledg
         await _safe_shot(page, shot)
         return ApplyResult(ERROR, type(exc).__name__, str(exc)[:300], screenshot=shot)
     finally:
-        await page.close()
+        if not kept:
+            await page.close()
+
+
+# ---- confirmation e-mail gate ------------------------------------------------------- #
+
+CONFIRMED, RETRY, UNCONFIRMED = "confirmed", "retry", "unconfirmed"
+_typed: "Queue[str]" = Queue()
+_reader_started = False
+
+
+def _start_stdin_reader() -> None:
+    """Lines typed in the terminal, read on a daemon thread so the dashboard can answer first."""
+    global _reader_started
+    if _reader_started or not sys.stdin or not sys.stdin.isatty():
+        return
+    _reader_started = True
+
+    def pump() -> None:
+        for line in sys.stdin:
+            _typed.put(line.strip().lower())
+    threading.Thread(target=pump, daemon=True).start()
+
+
+_KEYS = {"1": run_state.WAIT, "w": run_state.WAIT, "wait": run_state.WAIT,
+         "2": run_state.RETRY, "r": run_state.RETRY, "retry": run_state.RETRY,
+         "3": run_state.SKIP, "s": run_state.SKIP, "skip": run_state.SKIP}
+
+
+async def ask_gate_choice(job: dict, *, poll_s: float = 0.5, bell_every_s: float = 30) -> str:
+    """Queue paused: ring, show the three choices, and wait for one from the terminal or the dashboard."""
+    _start_stdin_reader()
+    while not _typed.empty():                              # anything typed before the question was asked
+        _typed.get_nowait()
+    run_state.clear_choice()
+    print(f"\a[ACTION REQUIRED] No confirmation e-mail for {job['company']} — {job['title']}. The queue is paused.\n"
+          f"      1) {run_state.CHOICES[run_state.WAIT]} (keep checking Gmail)\n"
+          f"      2) {run_state.CHOICES[run_state.RETRY]} (in case the form did not actually submit)\n"
+          f"      3) {run_state.CHOICES[run_state.SKIP]}\n"
+          "      Type 1, 2 or 3 and press Enter, or use the buttons in Mission Control (app_server.py).", flush=True)
+    last_bell = time.monotonic()
+    while True:
+        if _stop:
+            return run_state.SKIP
+        choice = run_state.take_choice(job.get("id", ""))
+        if not choice and not _typed.empty():
+            choice = _KEYS.get(_typed.get_nowait())
+            if not choice:
+                print("      Type 1, 2 or 3.", flush=True)
+        if choice:
+            return choice
+        if time.monotonic() - last_bell >= bell_every_s:
+            print("\a      Still waiting for your choice (1 / 2 / 3)...", flush=True)
+            last_bell = time.monotonic()
+        await asyncio.sleep(poll_s)
+
+
+async def confirm_receipt(gate: ReceiptGate, context, job: dict, *, attended: bool, ask=ask_gate_choice,
+                          timeout: float = email_receipt_verifier.POLL_TIMEOUT_S,
+                          extra: float = email_receipt_verifier.EXTRA_WAIT_S) -> tuple[str, dict]:
+    """Block until the confirmation e-mail is in Gmail, or the candidate decides what to do.
+
+    Returns (CONFIRMED, receipt), (RETRY, {}) or (UNCONFIRMED, {}). An unattended run has nobody
+    to ask, so a timeout there goes to the hold list; it is never counted as submitted.
+    """
+    while True:
+        gate.step(run_state.AWAITING_EMAIL, "Waiting for confirmation email in Gmail...")
+        receipt = await gate.wait(context, job["company"], timeout)
+        if receipt.get("confirmed"):
+            gate.step(run_state.CONFIRMED, f'Confirmed: "{receipt["subject"]}"', subject=receipt["subject"])
+            return CONFIRMED, receipt
+        if not attended:
+            gate.step(run_state.UNCONFIRMED, "No confirmation e-mail; logged as unconfirmed (unattended run)")
+            return UNCONFIRMED, {}
+        gate.step(run_state.AWAITING_EMAIL, f"No confirmation e-mail after {int(timeout)}s. Queue paused.",
+                  timed_out=True)
+        choice = await ask(job)
+        if choice == run_state.WAIT:
+            timeout = extra
+            continue
+        if choice == run_state.RETRY:
+            return RETRY, {}
+        gate.step(run_state.UNCONFIRMED, "Logged as unconfirmed")
+        return UNCONFIRMED, {}
+
+
+async def _close_page(page) -> None:
+    try:
+        if page is not None and not page.is_closed():
+            await page.close()
+    except Exception:                                              # noqa: BLE001
+        pass
+
+
+async def submit_and_confirm(context, job: dict, engine: AnswerEngine, ledger: dedup.Ledger, gate: ReceiptGate,
+                             *, use_llm: bool, attended: bool, apply=None, confirm=confirm_receipt
+                             ) -> tuple[ApplyResult, str, dict]:
+    """Apply, then hold the queue on this posting until its confirmation e-mail arrives.
+
+    Returns (result, outcome, receipt); outcome is CONFIRMED or UNCONFIRMED for a submitted form
+    and "" for every other result. "Check browser & retry" re-opens the form only when the
+    browser is not already showing a confirmation: a second submission is never sent on top of one
+    the page says went through.
+    """
+    apply = apply or apply_one
+    adapter = adapter_for(job["url"])
+    timeout = email_receipt_verifier.POLL_TIMEOUT_S
+    gate.start(job)
+    await gate.snapshot(context)                           # baseline; adapters refine it right before Submit
+    result = await apply(context, job, engine, ledger, dry_run=False, use_llm=use_llm, keep_open=True)
+    while True:
+        if result.status != SUBMITTED:
+            return result, "", {}
+        outcome, receipt = await confirm(gate, context, job, attended=attended, timeout=timeout)
+        if outcome != RETRY:
+            await _close_page(result.page)
+            return result, outcome, receipt
+        proof = None
+        try:
+            if adapter is not None and result.page is not None and not result.page.is_closed():
+                await result.page.bring_to_front()
+                proof = await adapter.confirmed(result.page)
+        except Exception:                                          # noqa: BLE001 - tab gone or navigating
+            proof = None
+        if proof:
+            log(f"  the browser shows the confirmation ({str(proof)[:80]}): not submitting again; "
+                f"checking Gmail for another {int(email_receipt_verifier.EXTRA_WAIT_S)}s")
+            timeout = email_receipt_verifier.EXTRA_WAIT_S
+            continue
+        log("  no confirmation in the browser: opening the form again")
+        await _close_page(result.page)
+        gate.start(job)
+        await gate.snapshot(context)
+        timeout = email_receipt_verifier.POLL_TIMEOUT_S
+        result = await apply(context, job, engine, ledger, dry_run=False, use_llm=use_llm, keep_open=True)
 
 
 async def _safe_shot(page, path: str) -> None:
@@ -206,6 +351,12 @@ async def run(args) -> int:
 
     tally: Counter = Counter()
     deadline = time.time() + args.max_minutes * 60 if args.max_minutes else None
+    gate = None if args.dry_run else ReceiptGate(log=log)
+    for adapter in ADAPTERS.values():
+        adapter.receipt_gate = gate
+    if gate:
+        log("confirmation gate: each submission waits for its confirmation e-mail in Gmail "
+            f"(up to {email_receipt_verifier.POLL_TIMEOUT_S}s) before it is counted")
     async with async_playwright() as pw:
         context = await launch_browser(pw, args)
         context.set_default_timeout(15000)
@@ -224,16 +375,26 @@ async def run(args) -> int:
                         continue
 
                 t0 = time.time()
-                result = await apply_one(context, job, engine, ledger, dry_run=args.dry_run, use_llm=use_llm)
-                tally[result.status] += 1
+                outcome, receipt = "", {}
+                if gate:
+                    result, outcome, receipt = await submit_and_confirm(
+                        context, job, engine, ledger, gate, use_llm=use_llm, attended=bool(args.assist))
+                else:
+                    result = await apply_one(context, job, engine, ledger, dry_run=args.dry_run, use_llm=use_llm)
+                tally[UNCONFIRMED if outcome == UNCONFIRMED else result.status] += 1
                 write_application_log(job, result)
 
                 if result.status in (SUBMITTED, DRY_RUN_OK) and result.screenshot \
                         and os.path.exists(result.screenshot):
                     # the filled form as it looked right before submit: audit trail, not a review item
                     os.replace(result.screenshot, config.SUBMITTED_DIR / os.path.basename(result.screenshot))
-                if result.status == SUBMITTED:
-                    ledger.record_application(job)
+                if result.status == SUBMITTED and outcome == UNCONFIRMED:
+                    # Submitted in the browser but never confirmed by e-mail: hold list, not counted.
+                    ledger.record_unconfirmed(job, f"{result.reason}: {result.detail}"[:300])
+                    job["status"] = "unconfirmed"
+                    job["status_detail"] = "no confirmation e-mail arrived"
+                elif result.status == SUBMITTED:
+                    ledger.record_application(job, receipt=receipt)
                     job["status"] = "applied"
                     if result.learned:
                         kept = remember_answers(result.learned, job["company"])
@@ -256,13 +417,18 @@ async def run(args) -> int:
                 if result.status not in (SUBMITTED, DRY_RUN_OK):
                     job["status_detail"] = f"{result.reason}: {result.detail}"[:300]
                 save_queue(queue)
-                log(f"{result.status.upper():<18} {job['company']} — {job['title']} [{job['ats']}] "
+                label = "UNCONFIRMED" if outcome == UNCONFIRMED else result.status.upper()
+                log(f"{label:<18} {job['company']} — {job['title']} [{job['ats']}] "
                     f"({time.time() - t0:.0f}s) {result.reason}"
                     + (f": {result.detail[:140]}" if result.detail else "")
+                    + (f'  | receipt "{receipt["subject"][:80]}"' if receipt.get("confirmed") else "")
+                    + ("  | no confirmation e-mail: on the hold list, not counted" if outcome == UNCONFIRMED else "")
                     + (f"  | total {ledger.total}/{args.target}" if result.status == SUBMITTED else ""))
         finally:
             await context.close()
             save_queue(queue)
+            if gate:
+                run_state.update(None, "", "Runner stopped")
 
     ledger.flush_pending_xlsx()
     if ledger.pending_xlsx:

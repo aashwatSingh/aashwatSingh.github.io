@@ -6,12 +6,14 @@ internship_tracker.xlsx
 internship_tracker.backup-*.xlsx
 applied_tracker.csv
 manual_review_queue.csv
+unconfirmed_applications.csv
 custom_answers.json
 .env
 
 # --- Runtime state ---
 job_queue.json
 run_state.json
+gate_choice.json
 logs/
 .browser_profile/
 .cache/

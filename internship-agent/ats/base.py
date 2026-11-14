@@ -49,6 +49,7 @@ class ApplyResult:
     unknowns: list[str] = field(default_factory=list)
     screenshot: str = ""
     learned: list[dict] = field(default_factory=list)     # answers the candidate typed in the browser
+    page: object = None           # left open after a submission, until the confirmation e-mail is in
 
 
 @dataclass
@@ -130,6 +131,13 @@ class BaseAdapter:
     # Open-ended questions the fact rules cannot answer are drafted from the
     # resume by essays.generate (templates, or Claude when a key is set).
     write_essays = True
+    # Set by the runner on a live run: notes the inbox position right before the final Submit
+    # click, so the confirmation e-mail can be told apart from older mail (receipt_gate.py).
+    receipt_gate = None
+
+    async def before_submit(self, page: Page, step: str = "SUBMITTING_FORM") -> None:
+        if self.receipt_gate is not None:
+            await self.receipt_gate.before_submit(page.context, step)
 
     # ---- adapter hooks ----------------------------------------------------
     def form_url(self, job: dict) -> str:
@@ -296,6 +304,7 @@ class BaseAdapter:
         await _screenshot(page, shot_path)
         if unknowns:
             if self.human_wait_s and not dry_run:
+                await self.before_submit(page)             # the candidate presses Submit during this wait
                 done, learned = await self.wait_for_human_finish(page, unknown_fields)
                 if done:
                     return ApplyResult(*done, answers, unknowns, shot_path, learned)
@@ -305,6 +314,7 @@ class BaseAdapter:
             return ApplyResult(DRY_RUN_OK, "all required questions answered (not submitted)",
                                answers=answers, screenshot=shot_path)
 
+        await self.before_submit(page)
         status, reason, detail = await self.submit(page)
         if status != SUBMITTED:
             await _screenshot(page, shot_path)

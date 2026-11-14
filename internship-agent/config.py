@@ -18,6 +18,7 @@ TRACKER_XLSX = BASE / "internship_tracker.xlsx"
 LEDGER_CSV = BASE / "applied_tracker.csv"
 QUEUE_JSON = BASE / "job_queue.json"
 MANUAL_REVIEW_CSV = BASE / "manual_review_queue.csv"
+UNCONFIRMED_CSV = BASE / "unconfirmed_applications.csv"
 CUSTOM_ANSWERS_JSON = BASE / "custom_answers.json"
 RUN_STATE_JSON = BASE / "run_state.json"
 LOG_DIR = BASE / "logs"
@@ -37,6 +38,10 @@ MANUAL_REVIEW_COLUMNS = ["Timestamp", "Company", "Role", "ATS_Platform", "URL", 
 # summary COUNTIF formulas key off this exact string.
 XLSX_APPLIED_STATUS = "Application submitted / Awaiting response"
 LEDGER_APPLIED_STATUS = "Applied"
+# Submitted in the browser, but no confirmation e-mail arrived: kept on a hold list
+# (UNCONFIRMED_CSV) and never counted toward TARGET_TOTAL.
+UNCONFIRMED_STATUS = "Application incomplete / Unconfirmed"
+UNCONFIRMED_COLUMNS = ["Timestamp", "Company", "Role", "ATS_Platform", "URL", "Status", "Detail"]
 
 USER_AGENT_NOTE = "internship-agent"
 

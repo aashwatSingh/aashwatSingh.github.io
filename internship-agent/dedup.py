@@ -299,8 +299,12 @@ class Ledger:
         tmp.replace(self.csv_path)
 
     def record_application(self, job: dict, *, when: datetime | None = None,
-                           write_xlsx: bool = True) -> dict:
-        """Append a submitted application to the CSV and the workbook."""
+                           write_xlsx: bool = True, receipt: dict | None = None) -> dict:
+        """Append a submitted application to the CSV and the workbook.
+
+        `receipt` is the confirmation e-mail that proved it (email_receipt_verifier): its subject
+        and date go into the workbook row.
+        """
         when = when or datetime.now()
         location = "; ".join(job.get("locations") or []) or job.get("location", "")
         row = {
@@ -316,9 +320,9 @@ class Ledger:
         self.write_csv()
         if write_xlsx and self.xlsx.exists():
             try:
-                self._append_xlsx(job, row, when, location)
+                self._append_xlsx(job, row, when, location, receipt)
             except OSError as exc:                         # e.g. the workbook is open in Excel
-                self.pending_xlsx.append((job, row, when, location))
+                self.pending_xlsx.append((job, row, when, location, receipt))
                 print(f"  ! could not write {self.xlsx.name} ({type(exc).__name__}): close it in Excel. "
                       "The application is saved in applied_tracker.csv and will be added on the next write.",
                       flush=True)
@@ -360,9 +364,41 @@ class Ledger:
                 return
             self.pending_xlsx.pop(0)
 
-    def _append_xlsx(self, job: dict, row: dict, when: datetime, location: str) -> None:
+    def record_unconfirmed(self, job: dict, detail: str = "", *, when: datetime | None = None,
+                           path: Path | None = None) -> dict:
+        """Hold list for a submission whose confirmation e-mail never arrived.
+
+        It is deliberately not in the ledger or the workbook, so it does not count toward the total.
+        """
+        path = Path(path or config.UNCONFIRMED_CSV)
+        row = {
+            "Timestamp": (when or datetime.now()).strftime("%Y-%m-%d %H:%M:%S"),
+            "Company": job.get("company", ""), "Role": job.get("title", ""),
+            "ATS_Platform": job.get("ats", ""), "URL": job.get("url", ""),
+            "Status": config.UNCONFIRMED_STATUS, "Detail": detail,
+        }
+        new = not path.exists()
+        with path.open("a", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=config.UNCONFIRMED_COLUMNS)
+            if new:
+                w.writeheader()
+            w.writerow({k: _plain(v) for k, v in row.items()})
+        return row
+
+    def _append_xlsx(self, job: dict, row: dict, when: datetime, location: str,
+                     receipt: dict | None = None) -> None:
         if True:
             day = when.strftime("%Y-%m-%d")
+            if receipt and receipt.get("confirmed"):
+                ats = receipt.get("ats") or row["ATS_Platform"] or "ATS"
+                date = (receipt.get("received_at") or "")[:10] or day
+                notes = (f"Application confirmation received via {ats} ({date}); verified by Gmail receipt."
+                         + (f" {location}." if location else "") + f" {row['URL']}")
+                subject = receipt.get("subject") or None
+            else:
+                notes = (f"Auto-applied via {row['ATS_Platform'] or 'ATS'}"
+                         + (f" — {location}" if location else "") + f" — {row['URL']}")
+                subject = None
             append_to_tracker_xlsx({
                 "Company": row["Company"],
                 "Role": row["Role"],
@@ -371,12 +407,8 @@ class Ledger:
                 "Current Status": config.XLSX_APPLIED_STATUS,
                 "Status Date": day,
                 "Application ID / Ref": job.get("ats_job_id") or None,
-                "Next Step / Notes": (
-                    f"Auto-applied via {row['ATS_Platform'] or 'ATS'}"
-                    + (f" — {location}" if location else "")
-                    + f" — {row['URL']}"
-                ),
-                "Source Email Subject": None,
+                "Next Step / Notes": notes,
+                "Source Email Subject": subject,
             }, self.xlsx)
 
 

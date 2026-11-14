@@ -387,12 +387,16 @@ class GreenhouseAdapter(BaseAdapter):
                 if self.human_wait_s and not auto_tried:
                     auto_tried = True
                     watch.extend(imap_otp.POLL_TIMEOUT_S + gmail_tab_otp.SIGN_IN_WAIT_S + 90)
+                    if self.receipt_gate is not None:
+                        self.receipt_gate.step("ENTERING_OTP", "Reading the e-mailed code")
                     code = await retrieve_code(page, clicked_at)
                     if code and await enter_code(page, code):
                         imap_otp.mark_used(code)
                         sent_code = code
                         print("      Code entered; submitting.", flush=True)
                         await page.wait_for_timeout(400)
+                        # The code e-mail is in the inbox by now; the confirmation is sent on this click.
+                        await self.before_submit(page, "ENTERING_OTP")
                         await button.click()
                         auto_grace = time.monotonic() + 12
                     watch.deadline = time.monotonic() + 20
