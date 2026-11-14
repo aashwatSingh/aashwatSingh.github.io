@@ -1,0 +1,172 @@
+/*
+ * @author Tyler Gaines (themes & accessibility)
+ * @description Global styles. Defines the light and dark color themes and the color-blindness palettes
+ *   (protanopia, deuteranopia, tritanopia, high contrast) as CSS variables that every component uses.
+ * @traces SE-FR-14, SE-FR-15
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --c-canvas: 246 247 251;
+  --c-surface: 255 255 255;
+  --c-surface-2: 241 243 249;
+  --c-line: 226 229 239;
+  --c-ink: 17 24 39;
+  --c-muted: 100 108 128;
+  --c-brand: 79 70 229;
+  --c-brand-ink: 255 255 255;
+  --c-ok: 22 163 74;
+  --c-warn: 217 119 6;
+  --c-danger: 220 38 38;
+  --c-info: 2 132 199;
+  --c-accent: 139 92 246;
+  color-scheme: light;
+}
+
+.dark {
+  --c-canvas: 11 15 25;
+  --c-surface: 19 25 39;
+  --c-surface-2: 28 36 54;
+  --c-line: 44 54 77;
+  --c-ink: 236 239 247;
+  --c-muted: 150 160 184;
+  --c-brand: 129 140 248;
+  --c-brand-ink: 15 17 35;
+  --c-ok: 74 222 128;
+  --c-warn: 251 191 36;
+  --c-danger: 248 113 113;
+  --c-info: 56 189 248;
+  --c-accent: 167 139 250;
+  color-scheme: dark;
+}
+
+/* Red-green safe (Okabe-Ito): success = blue, danger = vermillion, warning = yellow-orange. */
+[data-cb='protanopia'],
+[data-cb='deuteranopia'] {
+  --c-ok: 0 114 178;
+  --c-warn: 230 159 0;
+  --c-danger: 213 94 0;
+  --c-info: 86 180 233;
+  --c-accent: 204 121 167;
+}
+.dark[data-cb='protanopia'],
+.dark[data-cb='deuteranopia'] {
+  --c-ok: 86 180 233;
+  --c-warn: 240 228 66;
+  --c-danger: 230 120 50;
+  --c-info: 120 200 240;
+}
+
+/* Blue-yellow safe: success = teal, warning = magenta, danger = crimson, info = slate blue. */
+[data-cb='tritanopia'] {
+  --c-ok: 0 150 136;
+  --c-warn: 204 51 153;
+  --c-danger: 200 0 40;
+  --c-info: 60 90 150;
+  --c-brand: 200 40 90;
+  --c-accent: 0 120 120;
+}
+.dark[data-cb='tritanopia'] {
+  --c-ok: 80 210 190;
+  --c-warn: 240 110 190;
+  --c-danger: 255 90 110;
+  --c-info: 150 170 230;
+  --c-brand: 255 110 150;
+}
+
+[data-cb='high_contrast'] {
+  --c-line: 90 96 110;
+  --c-muted: 50 55 66;
+  --c-ink: 0 0 0;
+  --c-brand: 49 40 200;
+}
+.dark[data-cb='high_contrast'] {
+  --c-line: 170 176 190;
+  --c-muted: 215 220 230;
+  --c-ink: 255 255 255;
+  --c-surface: 0 0 0;
+  --c-canvas: 0 0 0;
+}
+[data-cb='high_contrast'] body {
+  filter: contrast(1.15);
+}
+[data-cb='high_contrast'] :focus-visible {
+  outline: 3px solid rgb(var(--c-brand));
+  outline-offset: 2px;
+}
+
+@layer base {
+  html {
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+  body {
+    @apply bg-canvas text-ink;
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-brand) / 0.7);
+    outline-offset: 2px;
+  }
+  input,
+  select,
+  textarea {
+    @apply text-ink;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-line bg-surface shadow-card;
+  }
+  .input {
+    @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted/70 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  .label {
+    @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-muted;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-brand text-brand-ink hover:bg-brand/90;
+  }
+  .btn-secondary {
+    @apply btn border border-line bg-surface text-ink hover:bg-surface-2;
+  }
+  .btn-ghost {
+    @apply btn text-muted hover:bg-surface-2 hover:text-ink;
+  }
+  .btn-danger {
+    @apply btn bg-danger text-white hover:bg-danger/90;
+  }
+  .table-head {
+    @apply px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted;
+  }
+  .table-cell {
+    @apply px-3 py-2.5 text-sm;
+  }
+}
+
+.markdown p {
+  margin: 0.25rem 0;
+}
+.markdown ul,
+.markdown ol {
+  margin: 0.25rem 0 0.25rem 1.25rem;
+}
+.markdown ul {
+  list-style: disc;
+}
+.markdown ol {
+  list-style: decimal;
+}
+.markdown code {
+  @apply rounded bg-surface-2 px-1 py-0.5 font-mono text-[0.85em];
+}
+.markdown pre {
+  @apply my-2 overflow-x-auto rounded-lg bg-surface-2 p-3 font-mono text-xs;
+}
+.markdown blockquote {
+  @apply my-1 border-l-4 border-line pl-3 text-muted;
+}
