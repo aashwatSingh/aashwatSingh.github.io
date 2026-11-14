@@ -62,10 +62,10 @@ insert into public.tasks (id, project_id, list_id, title, status, priority, assi
    'Design document with UML diagrams', 'in_progress', 'high', '00000000-0000-4000-8000-000000000003', now() + interval '5 days', 0, '["deliverable","uml"]', 15, 14, null)
 on conflict (id) do nothing;
 
-insert into public.soft_deadlines (task_id, project_id, title, due_at, is_completed, created_by) values
-  ('30000000-0000-4000-8000-000000000003', '10000000-0000-4000-8000-000000000001', 'Prototype drag handles', now() + interval '1 day', true,  '00000000-0000-4000-8000-000000000003'),
-  ('30000000-0000-4000-8000-000000000003', '10000000-0000-4000-8000-000000000001', 'Review with Myoram',     now() + interval '3 days', false, '00000000-0000-4000-8000-000000000003'),
-  ('30000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000002', 'Class diagram draft',    now() + interval '2 days', false, '00000000-0000-4000-8000-000000000003');
+insert into public.soft_deadlines (task_id, project_id, title, due_at, priority, is_completed, created_by) values
+  ('30000000-0000-4000-8000-000000000003', '10000000-0000-4000-8000-000000000001', 'Prototype drag handles', now() + interval '1 day', 'high', true,  '00000000-0000-4000-8000-000000000003'),
+  ('30000000-0000-4000-8000-000000000003', '10000000-0000-4000-8000-000000000001', 'Review with Myoram',     now() + interval '3 days', 'medium', false, '00000000-0000-4000-8000-000000000003'),
+  ('30000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000002', 'Class diagram draft',    now() + interval '2 days', 'high', false, '00000000-0000-4000-8000-000000000003');
 
 insert into public.comments (task_id, project_id, author_id, body) values
   ('30000000-0000-4000-8000-000000000003', '10000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002',

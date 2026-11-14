@@ -1,5 +1,5 @@
 /**
- * @author Saaqib Shaik
+ * @author Saaqib Shaik - detail view styled like the selected-project panel in projects.html
  * @description One project's overview: details, overall progress and a progress bar for every feature list
  *   (to 0.01%, updated live within 2 seconds of any task change), feature-list management for managers,
  *   the team at a glance, shortcuts to its board / costs / people / charts, export, edit and delete.
@@ -15,19 +15,24 @@ import { useRealtime } from '../services/realtimeClient';
 import { isManager, isOwner } from '../shared/permissions';
 import type { Progress, ProjectDetail, ProjectStatus, ProjectType } from '../shared/types';
 import { formatDateTime, fromLocalInput, toLocalInput } from '../shared/format';
-import { AccessDenied, Alert, Avatar, Badge, Card, Field, Icon, Modal, PageHeader, ProgressBar, RetryBanner, RoleBadge, Spinner, StatusBadge } from '../shared/ui';
+import { AccessDenied, Alert, Avatar, AvatarStack, Card, Field, Icon, Modal, ModeBadge, PageHeader, ProgressBar, RetryBanner, RoleBadge, Spinner, StatusBadge } from '../shared/ui';
 import { toApiError, useSave } from '../shared/useSave';
 
-function ProgressRing({ value, color }: { value: number; color: string }) {
-  const r = 52;
+/** Donut styled like charts.html: 208px, purple arc on a navy track, big percentage in the middle. */
+function ProgressRing({ value }: { value: number }) {
+  const r = 84;
   const c = 2 * Math.PI * r;
   return (
-    <svg viewBox="0 0 120 120" className="h-36 w-36" role="img" aria-label={`Overall progress ${value.toFixed(2)} percent`}>
-      <circle cx="60" cy="60" r={r} fill="none" stroke="rgb(var(--c-surface-2))" strokeWidth="12" />
-      <circle cx="60" cy="60" r={r} fill="none" stroke={color} strokeWidth="12" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - value / 100)} transform="rotate(-90 60 60)" style={{ transition: 'stroke-dashoffset .6s' }} />
-      <text x="60" y="58" textAnchor="middle" fontSize="20" fontWeight="700" fill="rgb(var(--c-ink))">{value.toFixed(2)}%</text>
-      <text x="60" y="76" textAnchor="middle" fontSize="10" fill="rgb(var(--c-muted))">complete</text>
-    </svg>
+    <div className="relative h-[208px] w-[208px] shrink-0">
+      <svg viewBox="0 0 208 208" className="h-[208px] w-[208px]" role="img" aria-label={`Overall progress ${value.toFixed(2)} percent`}>
+        <circle cx="104" cy="104" r={r} fill="none" stroke="rgb(var(--c-line))" strokeWidth="20" />
+        <circle cx="104" cy="104" r={r} fill="none" stroke="rgb(var(--c-accent))" strokeWidth="20" strokeDasharray={c} strokeDashoffset={c * (1 - value / 100)} transform="rotate(-90 104 104)" style={{ transition: 'stroke-dashoffset .6s' }} />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-[40px] font-extrabold leading-[48px] tracking-[-0.02em] text-ink">{value.toFixed(2)}%</span>
+        <span className="text-[13px] text-muted">complete</span>
+      </div>
+    </div>
   );
 }
 
@@ -126,9 +131,10 @@ export function ProjectDetailsPage() {
         title={project.name}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
+            <ModeBadge mode={project.project_type} />
             <StatusBadge status={project.status} />
-            <Badge tone="neutral" icon={PROJECT_TYPES.find((t) => t.value === project.project_type)?.icon}>{PROJECT_TYPES.find((t) => t.value === project.project_type)?.label}</Badge>
             <RoleBadge role={project.my_role} />
+            <AvatarStack people={project.members.map((m) => ({ name: m.display_name, url: m.avatar_url }))} max={5} />
             <span className={due.overdue ? 'font-semibold text-danger' : due.soon ? 'font-semibold text-warn' : ''}>Deadline {formatDateTime(project.deadline)} · {due.text}</span>
           </span>
         }
@@ -140,11 +146,11 @@ export function ProjectDetailsPage() {
           </>
         }
       />
-      {project.description ? <p className="mb-6 max-w-3xl text-sm text-muted">{project.description}</p> : null}
+      {project.description ? <p className="-mt-4 mb-6 max-w-3xl text-[15px] text-body">{project.description}</p> : null}
       <div className="grid gap-6 lg:grid-cols-3">
         <Card title="Progress" className={`lg:col-span-2 transition ${flash ? 'ring-2 ring-ok/50' : ''}`} actions={<span className="text-xs text-muted">{progress.done_tasks}/{progress.total_tasks} tasks done · live</span>}>
           <div className="flex flex-col items-center gap-6 sm:flex-row">
-            <ProgressRing value={progress.overall_progress_pct} color={project.card_color} />
+            <ProgressRing value={progress.overall_progress_pct} />
             <div className="w-full flex-1 space-y-4">
               {progress.feature_progress.length === 0 ? <p className="text-sm text-muted">No feature lists yet.</p> : progress.feature_progress.map((f) => (
                 <div key={f.list_id ?? 'none'}>
@@ -160,7 +166,7 @@ export function ProjectDetailsPage() {
             </div>
           ) : null}
         </Card>
-        <Card title={`Team (${project.members.length})`} actions={<Link to={`/people?project=${project.id}`} className="text-xs font-semibold text-brand">Manage →</Link>}>
+        <Card title={`Team (${project.members.length})`} actions={<Link to={`/people?project=${project.id}`} className="text-xs font-semibold text-accent">Manage →</Link>}>
           <ul className="space-y-3">
             {project.members.slice(0, 8).map((m) => (
               <li key={m.user_id} className="flex items-center gap-3">
@@ -178,14 +184,14 @@ export function ProjectDetailsPage() {
       </div>
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[
-          { to: `/board?project=${project.id}`, icon: 'board', title: 'Task board', text: 'Plan and move work' },
+          { to: `/board?project=${project.id}`, icon: 'tasks', title: 'Task board', text: 'Plan and move work' },
           { to: `/performance?project=${project.id}`, icon: 'chart', title: 'Performance', text: manager ? 'Team efficiency' : 'Your hours' },
           { to: `/time?project=${project.id}`, icon: 'clock', title: 'Time tracking', text: 'Timers and hours' },
           { to: `/costs?project=${project.id}`, icon: manager ? 'dollar' : 'lock', title: 'Costs', text: manager ? 'Bids, budgets, expenses' : 'Owners & managers only' },
         ].map((l) => (
-          <Link key={l.to} to={l.to} className="card flex items-center gap-3 p-4 transition hover:shadow-pop">
-            <span className="rounded-lg bg-brand/10 p-2.5 text-brand"><Icon name={l.icon} className="h-5 w-5" /></span>
-            <span><span className="block font-semibold">{l.title}</span><span className="block text-xs text-muted">{l.text}</span></span>
+          <Link key={l.to} to={l.to} className="card flex items-center gap-3 p-5 transition hover:border-accent">
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent-deep text-accent"><Icon name={l.icon} className="h-5 w-5" /></span>
+            <span><span className="block font-semibold text-ink">{l.title}</span><span className="block text-[13px] text-muted">{l.text}</span></span>
           </Link>
         ))}
       </div>

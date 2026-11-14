@@ -1,9 +1,10 @@
 /**
  * @author Aashwat Singh - matches notifications.html
- * @description Every notification for the signed-in user - @mentions, assignments, role changes, member
- *   changes and automatic deadline / soft-deadline reminders - newest first, with All / Unread tabs,
- *   mark-as-read on open, and "Mark all as read". New notifications appear live.
- * @traces SE-FR-29, SE-NFR-12, UC-22
+ * @description Every notification for the signed-in user - @mentions, assignments, role and member changes,
+ *   and automatic deadline / soft-deadline reminders - newest first in one card: purple dot when unread, the
+ *   message, a type pill, and the time. All / Unread filter, mark-as-read on open or with the per-row button,
+ *   and "Mark all read". New notifications arrive live over the WebSocket (and pop up as a toast).
+ * @traces SE-FR-29, SE-NFR-11, SE-NFR-12, UC-22
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -11,24 +12,20 @@ import { notificationController } from '../features/collaboration/commentControl
 import { useRealtime } from '../services/realtimeClient';
 import type { Notification } from '../shared/types';
 import { formatDateTime, relativeTime } from '../shared/format';
-import { Alert, EmptyState, Icon, PageHeader, Segmented, Spinner, type Tone } from '../shared/ui';
+import { Alert, Badge, EmptyState, Icon, PageHeader, Segmented, Spinner, type Tone } from '../shared/ui';
 import { toApiError } from '../shared/useSave';
 
-const KIND: Record<string, { icon: string; tone: Tone; label: string }> = {
-  mention: { icon: 'comment', tone: 'brand', label: 'Mention' },
-  assignment: { icon: 'check', tone: 'info', label: 'Assignment' },
-  role_change: { icon: 'shield', tone: 'accent', label: 'Role change' },
-  member_added: { icon: 'users', tone: 'ok', label: 'Added to project' },
-  member_removed: { icon: 'logout', tone: 'danger', label: 'Removed' },
-  deadline_reminder: { icon: 'clock', tone: 'warn', label: 'Due soon' },
-  soft_deadline_reminder: { icon: 'target', tone: 'warn', label: 'Soft deadline' },
-  task_reassigned: { icon: 'refresh', tone: 'info', label: 'Reassigned' },
-  system: { icon: 'info', tone: 'neutral', label: 'ProjectForge' },
-};
-
-const TONE_BG: Record<Tone, string> = {
-  neutral: 'bg-surface-2 text-muted', brand: 'bg-brand/10 text-brand', ok: 'bg-ok/10 text-ok', warn: 'bg-warn/10 text-warn',
-  danger: 'bg-danger/10 text-danger', info: 'bg-info/10 text-info', accent: 'bg-accent/10 text-accent',
+/** Pill labels and tones from the mockup: Assignment (purple), Mention (blue), Deadline (gold), Update. */
+const KIND: Record<string, { tone: Tone; label: string }> = {
+  mention: { tone: 'info', label: 'Mention' },
+  assignment: { tone: 'accent', label: 'Assignment' },
+  deadline_reminder: { tone: 'warn', label: 'Deadline' },
+  soft_deadline_reminder: { tone: 'warn', label: 'Soft deadline' },
+  role_change: { tone: 'brand', label: 'Role change' },
+  member_added: { tone: 'ok', label: 'Added to project' },
+  member_removed: { tone: 'danger', label: 'Removed' },
+  task_reassigned: { tone: 'brand', label: 'Update' },
+  system: { tone: 'neutral', label: 'ProjectForge' },
 };
 
 export function NotificationsPage() {
@@ -54,16 +51,19 @@ export function NotificationsPage() {
     setUnread((u) => u + 1);
   });
 
-  const open = async (n: Notification) => {
-    if (!n.is_read) {
-      try {
-        await notificationController.markRead(n.id);
-        setItems((list) => (list ?? []).map((x) => (x.id === n.id ? { ...x, is_read: true } : x)));
-        setUnread((u) => Math.max(0, u - 1));
-      } catch (err) {
-        setError(toApiError(err).detail);
-      }
+  const markRead = async (n: Notification) => {
+    if (n.is_read) return;
+    try {
+      await notificationController.markRead(n.id);
+      setItems((list) => (tab === 'unread' ? (list ?? []).filter((x) => x.id !== n.id) : (list ?? []).map((x) => (x.id === n.id ? { ...x, is_read: true } : x))));
+      setUnread((u) => Math.max(0, u - 1));
+    } catch (err) {
+      setError(toApiError(err).detail);
     }
+  };
+
+  const open = async (n: Notification) => {
+    await markRead(n);
     if (n.link) navigate(n.link);
   };
 
@@ -78,35 +78,45 @@ export function NotificationsPage() {
   };
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <div>
       <PageHeader
         title="Notifications"
-        subtitle={`${unread} unread`}
+        subtitle={<><b>{unread}</b> unread</>}
         actions={
           <>
             <Segmented ariaLabel="Notification filter" value={tab} onChange={setTab} options={[{ value: 'all', label: 'All' }, { value: 'unread', label: 'Unread' }]} />
-            <button type="button" className="btn-secondary" onClick={() => void markAll()} disabled={unread === 0}><Icon name="check" /> Mark all as read</button>
+            <button type="button" className="btn-secondary" onClick={() => void markAll()} disabled={unread === 0}>Mark all read</button>
           </>
         }
       />
       {error ? <div className="mb-4"><Alert onClose={() => setError(null)}>{error}</Alert></div> : null}
-      <div className="card divide-y divide-line">
+      <div className="card px-6">
         {items === null ? <Spinner /> : items.length === 0 ? (
           <EmptyState icon="bell" title={tab === 'unread' ? 'No unread notifications' : 'No notifications yet'}>Mentions, assignments and deadline reminders show up here.</EmptyState>
-        ) : items.map((n) => {
-          const meta = KIND[n.kind] ?? KIND.system;
-          return (
-            <button key={n.id} type="button" onClick={() => void open(n)} className={`flex w-full items-start gap-4 px-5 py-4 text-left transition hover:bg-surface-2 ${n.is_read ? '' : 'bg-brand/[0.03]'}`}>
-              <span className={`rounded-full p-2.5 ${TONE_BG[meta.tone]}`}><Icon name={meta.icon} /></span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted">{meta.label}</span>
-                <span className={`mt-0.5 block text-sm ${n.is_read ? 'text-muted' : 'font-semibold text-ink'}`}>{n.message}</span>
-                <span className="mt-1 block text-xs text-muted" title={formatDateTime(n.created_at)}>{relativeTime(n.created_at)}</span>
-              </span>
-              {!n.is_read ? <span className="mt-2 h-2.5 w-2.5 shrink-0 rounded-full bg-brand" aria-label="Unread" /> : null}
-            </button>
-          );
-        })}
+        ) : (
+          <ul>
+            {items.map((n) => {
+              const meta = KIND[n.kind] ?? KIND.system;
+              return (
+                <li key={n.id} className="flex min-h-[88px] items-center gap-4 border-b border-line py-3 last:border-b-0">
+                  <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${n.is_read ? 'border-2 border-line-strong' : 'bg-accent'}`} aria-label={n.is_read ? 'Read' : 'Unread'} />
+                  <button type="button" onClick={() => void open(n)} className="min-w-0 flex-1 text-left">
+                    <span className={`block text-[15px] leading-[22px] ${n.is_read ? 'text-body' : 'font-semibold text-ink'}`}>{n.message}</span>
+                    <span className="mt-1.5 block"><Badge tone={meta.tone}>{meta.label}</Badge></span>
+                  </button>
+                  <span className="flex shrink-0 flex-col items-end gap-1.5">
+                    <span className="text-[13px] text-muted" title={formatDateTime(n.created_at)}>{relativeTime(n.created_at)}</span>
+                    {!n.is_read ? (
+                      <button type="button" className="flex items-center gap-1 text-xs font-semibold text-accent hover:underline" onClick={() => void markRead(n)}>
+                        <Icon name="check" className="h-3 w-3" /> Mark read
+                      </button>
+                    ) : null}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
     </div>
   );

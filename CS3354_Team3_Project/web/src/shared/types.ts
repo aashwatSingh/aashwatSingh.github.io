@@ -15,6 +15,7 @@ export type Theme = 'light' | 'dark';
 export type ColorBlindMode = 'none' | 'protanopia' | 'deuteranopia' | 'tritanopia' | 'high_contrast';
 export type ExpenseCategory = 'labor' | 'materials' | 'software' | 'equipment' | 'travel' | 'services' | 'other';
 export type Efficiency = number | 'N/A';
+export type SoftDeadlinePriority = 'high' | 'medium' | 'low';
 
 // --- Auth & settings (Tyler Gaines) -------------------------------------------------
 export interface User {
@@ -91,6 +92,8 @@ export interface Member {
   role: Role;
   joined_at: string;
   open_task_count: number;
+  task_count: number;
+  done_task_count: number;
 }
 
 export interface Project {
@@ -108,6 +111,7 @@ export interface Project {
   task_count: number;
   done_count: number;
   member_count: number;
+  members_preview: UserBrief[];
 }
 
 export interface ProjectDetail extends Project {
@@ -298,6 +302,7 @@ export interface SoftDeadline {
   task_due_date: string | null;
   title: string;
   due_at: string;
+  priority: SoftDeadlinePriority;
   is_completed: boolean;
   completed_at: string | null;
   state: 'upcoming' | 'due_soon' | 'overdue' | 'completed';
@@ -392,6 +397,8 @@ export interface PerformanceReport {
   totals: Omit<PerformanceRow, 'user_id' | 'username' | 'display_name'>;
   members: PerformanceRow[];
   weekly: { week_start: string; actual_hours: number }[];
+  completion: { done: number; total: number; progress_pct: number };
+  progress_over_time: { week_start: string; completion_pct: number }[];
   tasks: {
     task_id: string;
     title: string;

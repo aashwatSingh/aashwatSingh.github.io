@@ -3,7 +3,7 @@
  * @description Stage costs (Requirements, Design, ...). Each row has a checkbox: un-ticking a stage
  *   recalculates the sum as a "Subtotal" (all ticked = "Total"). Managers can add, rename, re-price and
  *   delete stages inline.
- * @traces SE-FR-02, SE-NFR-01, UC-01
+ * @traces SE-FR-01, SE-NFR-01, UC-01
  */
 import { useState } from 'react';
 import type { CostSummary, StageCost } from '../../shared/types';
@@ -66,9 +66,9 @@ export function StageCostTable({ projectId, summary, selected, onToggle, onToggl
   return (
     <div className="space-y-3">
       {rowError ? <Alert onClose={() => setRowError(null)}>{rowError}</Alert> : null}
-      <div className="overflow-x-auto rounded-lg border border-line">
+      <div className="overflow-x-auto">
         <table className="w-full">
-          <thead className="bg-surface-2">
+          <thead>
             <tr>
               <th className="table-head w-10"><input type="checkbox" checked={allChecked} onChange={(e) => onToggleAll(e.target.checked)} aria-label="Include all stages" /></th>
               <th className="table-head">Stage</th>
@@ -76,7 +76,7 @@ export function StageCostTable({ projectId, summary, selected, onToggle, onToggl
               <th className="table-head w-24" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-line">
+          <tbody className="[&>tr]:border-b [&>tr]:border-line">
             {summary.stage_costs.map((s) => (
               <tr key={s.id} className={selected.has(s.id) ? '' : 'opacity-50'}>
                 <td className="table-cell"><input type="checkbox" checked={selected.has(s.id)} onChange={() => onToggle(s.id)} aria-label={`Include ${s.stage_name}`} /></td>
@@ -91,8 +91,8 @@ export function StageCostTable({ projectId, summary, selected, onToggle, onToggl
                   </>
                 ) : (
                   <>
-                    <td className="table-cell font-medium">{s.stage_name}</td>
-                    <td className="table-cell text-right tabular-nums">{formatMoney(s.amount, summary.currency)}</td>
+                    <td className="table-cell font-semibold text-ink">{s.stage_name}</td>
+                    <td className="table-cell text-right font-bold tabular-nums text-ink">{formatMoney(s.amount, summary.currency)}</td>
                     <td className="table-cell text-right">
                       <button type="button" className="btn-ghost p-1.5" onClick={() => setEditing({ id: s.id, name: s.stage_name, amount: s.amount })} aria-label={`Edit ${s.stage_name}`}><Icon name="edit" /></button>
                       <button type="button" className="btn-ghost p-1.5 hover:text-danger" onClick={() => void remove(s)} aria-label={`Delete ${s.stage_name}`}><Icon name="trash" /></button>
@@ -102,11 +102,11 @@ export function StageCostTable({ projectId, summary, selected, onToggle, onToggl
               </tr>
             ))}
           </tbody>
-          <tfoot className="border-t-2 border-line bg-surface-2/60">
+          <tfoot className="border-t border-line-strong">
             <tr>
               <td />
-              <td className="table-cell font-bold">{summary.sum_label}{summary.sum_label === 'Subtotal' ? ` (${included.length} of ${summary.stage_costs.length} stages)` : ''}</td>
-              <td className="table-cell text-right text-base font-bold tabular-nums" aria-live="polite">{formatMoney(summary.stage_cost_sum, summary.currency)}</td>
+              <td className="table-cell font-bold text-ink">{summary.sum_label}{summary.sum_label === 'Subtotal' ? ` (${included.length} of ${summary.stage_costs.length} stages)` : ''}</td>
+              <td className="table-cell text-right text-[15px] font-bold tabular-nums text-ink" aria-live="polite">{formatMoney(summary.stage_cost_sum, summary.currency)}</td>
               <td className="table-cell text-right text-xs text-muted">{preview.sum !== summary.stage_cost_sum ? 'updating…' : ''}</td>
             </tr>
           </tfoot>

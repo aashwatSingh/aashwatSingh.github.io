@@ -61,6 +61,7 @@ TaskStatus = Literal["todo", "in_progress", "review", "done"]
 TaskPriority = Literal["low", "medium", "high", "urgent"]
 Theme = Literal["light", "dark"]
 ColorBlindMode = Literal["none", "protanopia", "deuteranopia", "tritanopia", "high_contrast"]
+SoftDeadlinePriority = Literal["high", "medium", "low"]
 ExpenseCategory = Literal["labor", "materials", "software", "equipment", "travel", "services", "other"]
 
 HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -301,6 +302,8 @@ class MemberOut(BaseModel):
     role: Role
     joined_at: UTCDateTimeOut
     open_task_count: int = 0
+    task_count: int = 0
+    done_task_count: int = 0
 
 
 class ProjectOut(BaseModel):
@@ -318,6 +321,7 @@ class ProjectOut(BaseModel):
     task_count: int
     done_count: int
     member_count: int
+    members_preview: list[UserBrief] = Field(default_factory=list)
 
 
 class ProjectDetailOut(ProjectOut):
@@ -609,6 +613,7 @@ class NotificationList(BaseModel):
 class SoftDeadlineCreate(BaseModel):
     title: str = Field(max_length=120)
     due_at: UTCDateTimeIn
+    priority: SoftDeadlinePriority = "medium"
 
     _title = field_validator("title")(lambda cls, v: _non_blank(v, "Title"))
 
@@ -616,6 +621,7 @@ class SoftDeadlineCreate(BaseModel):
 class SoftDeadlineUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=120)
     due_at: UTCDateTimeIn | None = None
+    priority: SoftDeadlinePriority | None = None
 
     @field_validator("title")
     @classmethod
@@ -635,6 +641,7 @@ class SoftDeadlineOut(BaseModel):
     task_due_date: UTCDateTimeOut | None
     title: str
     due_at: UTCDateTimeOut
+    priority: SoftDeadlinePriority
     is_completed: bool
     completed_at: UTCDateTimeOut | None
     state: Literal["upcoming", "due_soon", "overdue", "completed"]
@@ -796,6 +803,17 @@ class WeeklyHours(BaseModel):
     actual_hours: float
 
 
+class WeeklyProgress(BaseModel):
+    week_start: date
+    completion_pct: float
+
+
+class CompletionSummary(BaseModel):
+    done: int
+    total: int
+    progress_pct: float
+
+
 class TaskEfficiency(BaseModel):
     task_id: str
     title: str
@@ -813,6 +831,8 @@ class PerformanceReport(BaseModel):
     totals: PerformanceTotals
     members: list[PerformanceRow]
     weekly: list[WeeklyHours]
+    completion: CompletionSummary
+    progress_over_time: list[WeeklyProgress]
     tasks: list[TaskEfficiency]
 
 

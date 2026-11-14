@@ -1,11 +1,14 @@
 /**
  * @author Myoram Langwang - matches dashboard.html
- * @description The personal dashboard: a greeting, then the widget grid. "Edit layout" turns on dragging,
- *   hiding and removing widgets, the "Add widget" menu and "Restore default". Moves are checked for overlap
- *   in the browser first and then by the server; a rejected move snaps back. Widget data refreshes live.
+ * @description The personal dashboard: "Good morning, <name>" with the number of tasks due today, the
+ *   Customize and New task buttons, then the widget grid (Upcoming deadlines, Task progress, Projects, Time
+ *   tracked, Cost summary by default). Customize turns on dragging, hiding and removing widgets, the Add
+ *   widget menu and Restore default. Moves are checked for overlap in the browser first and then by the
+ *   server; a rejected move snaps back with a red outline. Widget data refreshes live.
  * @traces SE-FR-21, SE-FR-22, SE-FR-23, SE-FR-24, SE-FR-25, SE-NFR-07, SE-NFR-08, UC-16, UC-17
  */
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../features/auth/AuthProvider';
 import { dashboardController } from '../features/dashboard/dashboardController';
 import { WidgetGrid } from '../features/dashboard/WidgetGrid';
@@ -18,6 +21,7 @@ import { toApiError } from '../shared/useSave';
 
 export function DashboardPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [payload, setPayload] = useState<DashboardPayload | null>(null);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,12 +79,18 @@ export function DashboardPage() {
   const addable = payload.available_types.filter((t) => !present.has(t.widget_type));
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const dueToday = (payload.data.task_progress as { due_today?: number } | undefined)?.due_today;
 
   return (
     <div>
       <PageHeader
         title={`${greeting}, ${user?.display_name.split(' ')[0] ?? ''}`}
-        subtitle={<>Here's what's happening across your projects.{loadMs != null ? <span className="ml-2 text-xs">Loaded in {loadMs} ms</span> : null}</>}
+        subtitle={
+          <>
+            {dueToday !== undefined ? <><b>{dueToday} task{dueToday === 1 ? '' : 's'}</b> due today</> : 'Here is your overview'}
+            {loadMs != null ? <span className="ml-2 text-xs text-muted">· loaded in {loadMs} ms</span> : null}
+          </>
+        }
         actions={
           editing ? (
             <>
@@ -89,9 +99,9 @@ export function DashboardPage() {
                 {addOpen ? (
                   <div className="card absolute right-0 z-40 mt-2 w-72 p-2 shadow-pop">
                     {addable.length === 0 ? <p className="p-2 text-sm text-muted">Every widget is already on your dashboard.</p> : addable.map((t) => (
-                      <button key={t.widget_type} type="button" className="block w-full rounded-lg px-3 py-2 text-left hover:bg-surface-2"
+                      <button key={t.widget_type} type="button" className="block w-full rounded-btn px-3 py-2 text-left hover:bg-surface-2"
                         onClick={() => { setAddOpen(false); void apply(() => dashboardController.add(t.widget_type), `${t.title} added`); }}>
-                        <span className="block text-sm font-semibold">{t.title}</span>
+                        <span className="block text-sm font-semibold text-ink">{t.title}</span>
                         <span className="block text-xs text-muted">{t.description}</span>
                       </button>
                     ))}
@@ -104,15 +114,18 @@ export function DashboardPage() {
               <button type="button" className="btn-primary" onClick={() => setEditing(false)}><Icon name="check" /> Done</button>
             </>
           ) : (
-            <button type="button" className="btn-secondary" onClick={() => setEditing(true)}><Icon name="layout" /> Edit layout</button>
+            <>
+              <button type="button" className="btn-secondary" onClick={() => setEditing(true)}>Customize</button>
+              <button type="button" className="btn-primary" onClick={() => navigate('/board?new=1')}><Icon name="plus" /> New task</button>
+            </>
           )
         }
       />
-      <div className="mb-4 space-y-3">
+      <div className="mb-6 space-y-3 empty:hidden">
         {error ? <Alert onClose={() => setError(null)}>{error}</Alert> : null}
         {notice ? <Alert tone="ok" onClose={() => setNotice(null)}>{notice}</Alert> : null}
         <RetryBanner error={pendingMove?.error ?? null} onRetry={() => pendingMove && void move(pendingMove.widget, pendingMove.x, pendingMove.y)} onCancel={() => setPendingMove(null)} />
-        {editing ? <Alert tone="info">Drag a widget by its handle (or focus the handle and use the arrow keys). Green outline = free spot, red = overlap.</Alert> : null}
+        {editing ? <Alert tone="accent">Drag a widget by its handle (or focus the handle and use the arrow keys). Green outline = free spot, red = overlap.</Alert> : null}
       </div>
       <WidgetGrid
         widgets={payload.widgets}

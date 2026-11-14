@@ -1,9 +1,10 @@
 """
 @author: Tyler Gaines (security settings), Jon Sorey (database switch) - shared core
-@description: Reads every configurable value (database address, secret keys, demo mode, limits) from
-    environment variables or a .env file. If no PostgreSQL / Supabase address is given, ProjectForge
-    automatically uses a local SQLite file so the class demo runs with zero setup.
-@traces: SE-NFR-05, SE-NFR-06, UC-08, UC-09, UC-10
+@description: Reads every configurable value (database address, secret keys, demo mode, limits, HTTPS
+    enforcement) from environment variables or a .env file. If no PostgreSQL / Supabase address is given,
+    ProjectForge automatically uses a local SQLite file so the class demo runs with zero setup. With
+    DEMO_MODE=false, FORCE_HTTPS defaults to on so account and profile data only travel over TLS.
+@traces: SE-FR-11, SE-NFR-06, UC-08, UC-09, UC-10
 """
 
 from __future__ import annotations
@@ -95,6 +96,7 @@ class Settings:
     demo_mfa_code: str = "123456"
     frontend_url: str = "http://localhost:5173"
     frontend_dist: Path = PROJECT_ROOT / "web" / "dist"
+    force_https: bool = False
 
     @property
     def is_sqlite(self) -> bool:
@@ -139,4 +141,6 @@ def get_settings() -> Settings:
         demo_mfa_code=os.getenv("DEMO_MFA_CODE", "123456"),
         frontend_url=os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/"),
         frontend_dist=Path(os.getenv("FRONTEND_DIST", str(PROJECT_ROOT / "web" / "dist"))),
+        # SE-NFR-06: HTTPS redirect + HSTS. On by default whenever demo mode is off.
+        force_https=_bool("FORCE_HTTPS", not demo_mode),
     )

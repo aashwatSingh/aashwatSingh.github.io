@@ -56,7 +56,7 @@ create table if not exists public.user_profiles (
   locked_until           timestamptz,
   unlock_token_jti       varchar(64),
   reset_token_jti        varchar(64),
-  theme                  varchar(10)  not null default 'light'
+  theme                  varchar(10)  not null default 'dark'
                          check (theme in ('light', 'dark')),
   color_blind_mode       varchar(20)  not null default 'none'
                          check (color_blind_mode in ('none', 'protanopia', 'deuteranopia', 'tritanopia', 'high_contrast')),
@@ -152,7 +152,7 @@ create index if not exists ix_tasks_project_due on public.tasks (project_id, due
 create index if not exists ix_tasks_list on public.tasks (list_id);
 
 -- ---------------------------------------------------------------------------
--- 6. soft_deadlines (Preethi Seereddy: UC-05..UC-07, SE-FR-06..SE-FR-10)
+-- 6. soft_deadlines (Preethi Seereddy: UC-05..UC-07, SE-FR-06..SE-FR-10, SE-NFR-03)
 -- ---------------------------------------------------------------------------
 create table if not exists public.soft_deadlines (
   id            uuid primary key default gen_random_uuid(),
@@ -160,6 +160,8 @@ create table if not exists public.soft_deadlines (
   project_id    uuid not null references public.projects(id) on delete cascade,
   title         varchar(120) not null,
   due_at        timestamptz  not null,
+  priority      varchar(10)  not null default 'medium'
+                check (priority in ('high', 'medium', 'low')),          -- SE-FR-09
   is_completed  boolean      not null default false,
   completed_at  timestamptz,
   created_by    uuid references public.user_profiles(id) on delete set null,

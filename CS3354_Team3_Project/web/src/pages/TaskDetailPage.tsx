@@ -1,10 +1,11 @@
 /**
- * @author Aashwat Singh (task, comments), Preethi Seereddy (soft deadlines), Jon Sorey (hours & timer)
+ * @author Aashwat Singh (task, comments), Preethi Seereddy (soft deadlines), Jon Sorey (hours & timer) -
+ *   styled like the Task details panel in tasks.html
  * @description Everything about one task: status, priority, assignee, list, due date, tags and Markdown
  *   description; its soft deadlines; estimated / assigned / actual hours with a manual log form and the
  *   task timer; and the comment thread with @mentions. Controls appear only for people allowed to use them
  *   (assignee or manager), and the server re-checks every action.
- * @traces SE-FR-26, SE-FR-27, SE-FR-28, SE-FR-29, SE-FR-04, SE-FR-06..SE-FR-10, UC-03, UC-04, UC-05, UC-06, UC-07, UC-18, UC-21
+ * @traces SE-FR-26, SE-FR-27, SE-FR-28, SE-FR-29, SE-FR-04, SE-FR-06..SE-FR-10, SE-NFR-03, SE-NFR-11, UC-03, UC-04, UC-05, UC-06, UC-07, UC-18, UC-21
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -131,19 +132,20 @@ export function TaskDetailPage() {
   const overdue = isOverdue(task);
   return (
     <div>
-      <nav className="mb-3 text-sm text-muted">
+      <nav className="mb-2 text-sm text-muted">
         <Link to={`/projects/${task.project_id}`} className="hover:text-ink">{task.project_name}</Link> <span aria-hidden>/</span>{' '}
-        <Link to={`/board?project=${task.project_id}`} className="hover:text-ink">Board</Link>
+        <Link to={`/board?project=${task.project_id}`} className="hover:text-ink">Tasks</Link>
       </nav>
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">{task.title}</h1>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <p className="eyebrow">Task details</p>
+          <h1 className="page-title mt-1">{task.title}</h1>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <StatusBadge status={task.status} />
             <PriorityBadge priority={task.priority} />
             {list ? <Badge tone="neutral" icon="layout">{list.name}</Badge> : null}
-            {task.tags.map((t) => <Badge key={t} tone="accent">#{t}</Badge>)}
-            <span className="text-xs text-muted">Your role: </span><RoleBadge role={task.my_role} />
+            {task.tags.map((t) => <span key={t} className="rounded-lg bg-line px-2.5 py-1 text-xs font-semibold text-body">{t}</span>)}
+            <span className="ml-1 text-xs text-muted">Your role</span><RoleBadge role={task.my_role} />
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -172,14 +174,24 @@ export function TaskDetailPage() {
         </div>
         <div className="space-y-6">
           <Card title="Details">
-            <dl className="space-y-3 text-sm">
-              <div className="flex items-center justify-between gap-2">
-                <dt className="text-muted">Assignee</dt>
-                <dd className="flex items-center gap-2">{task.assignee ? <><Avatar name={task.assignee.display_name} url={task.assignee.avatar_url} size="h-6 w-6" /> {task.assignee.display_name}</> : <span className="italic text-muted">Unassigned</span>}</dd>
+            <dl className="text-sm">
+              <div className="flex min-h-14 items-center justify-between gap-2 border-b border-line">
+                <dt className="text-muted">Status</dt><dd><StatusBadge status={task.status} /></dd>
               </div>
-              <div className="flex justify-between gap-2"><dt className="text-muted">Final due date</dt><dd className={overdue ? 'font-semibold text-danger' : ''}>{formatDateTime(task.due_date)}{overdue ? ' · overdue' : ''}</dd></div>
-              <div className="flex justify-between gap-2"><dt className="text-muted">Created</dt><dd>{formatDateTime(task.created_at)}</dd></div>
-              {task.completed_at ? <div className="flex justify-between gap-2"><dt className="text-muted">Completed</dt><dd>{formatDateTime(task.completed_at)}</dd></div> : null}
+              <div className="flex min-h-14 items-center justify-between gap-2 border-b border-line">
+                <dt className="text-muted">Due</dt><dd className={`font-semibold ${overdue ? 'text-danger' : 'text-ink'}`}>{formatDateTime(task.due_date)}{overdue ? ' · overdue' : ''}</dd>
+              </div>
+              <div className="flex min-h-14 items-center justify-between gap-2 border-b border-line">
+                <dt className="text-muted">Priority</dt><dd><PriorityBadge priority={task.priority} /></dd>
+              </div>
+              <div className="flex min-h-14 items-center justify-between gap-2 border-b border-line">
+                <dt className="text-muted">Assigned to</dt>
+                <dd className="flex items-center gap-2 font-semibold text-ink">{task.assignee ? <><Avatar name={task.assignee.display_name} url={task.assignee.avatar_url} size="h-7 w-7" text="text-[11px]" /> {task.assignee.display_name}</> : <span className="font-normal italic text-muted">Unassigned</span>}</dd>
+              </div>
+              <div className="flex min-h-14 items-center justify-between gap-2 border-b border-line last:border-b-0">
+                <dt className="text-muted">Created</dt><dd className="font-semibold text-ink">{formatDateTime(task.created_at)}</dd>
+              </div>
+              {task.completed_at ? <div className="flex min-h-14 items-center justify-between gap-2"><dt className="text-muted">Completed</dt><dd className="font-semibold text-ink">{formatDateTime(task.completed_at)}</dd></div> : null}
             </dl>
             {!task.can_assign ? <p className="mt-4 flex items-center gap-1.5 text-xs text-muted"><Icon name="lock" className="h-3 w-3" /> Only owners and managers can assign tasks.</p> : null}
           </Card>

@@ -3,7 +3,7 @@
  * @description The same sign-up rules the backend enforces, checked instantly as the user types: username
  *   3-30 letters / numbers / underscores, a valid email, and a password with at least 8 characters, an
  *   uppercase letter, a lowercase letter, a digit and a special character.
- * @traces UC-08, UC-11, SE-NFR-05
+ * @traces UC-08, UC-11, SE-FR-11
  */
 
 export const USERNAME_RE = /^[A-Za-z0-9_]{3,30}$/;

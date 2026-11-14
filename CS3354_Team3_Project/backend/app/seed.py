@@ -69,7 +69,7 @@ def seed_demo_data(db: Session) -> bool:
             password_hash=password_hash,
             mfa_enabled=mfa,
             mfa_secret=generate_mfa_secret() if mfa else None,
-            theme="light",
+            theme="dark",
             color_blind_mode="none",
             default_project_type="work",
             created_at=now - timedelta(days=60),
@@ -190,7 +190,7 @@ def seed_demo_data(db: Session) -> bool:
     db.flush()
 
     # ------------------------------------------------------------ soft deadlines
-    def soft(t: Task, title: str, days_before_due: float, done: bool = False) -> None:
+    def soft(t: Task, title: str, days_before_due: float, done: bool = False, priority: str = "medium") -> None:
         due = t.due_date - timedelta(days=days_before_due)
         db.add(
             SoftDeadline(
@@ -198,6 +198,7 @@ def seed_demo_data(db: Session) -> bool:
                 project_id=t.project_id,
                 title=title,
                 due_at=due,
+                priority=priority,
                 is_completed=done,
                 completed_at=now - timedelta(days=1) if done else None,
                 created_by=t.assignee_id,
@@ -205,13 +206,13 @@ def seed_demo_data(db: Session) -> bool:
             )
         )
 
-    soft(t_board, "Prototype drag handles", 3, done=True)
-    soft(t_board, "Review with Myoram", 1)
-    soft(t_costs, "Subtotal / Total labels", 4)
-    soft(t_soft, "Edge-case tests", 2)
-    soft(s_design, "Class diagram draft", 3)
+    soft(t_board, "Prototype drag handles", 3, done=True, priority="high")
+    soft(t_board, "Review with Myoram", 1, priority="medium")
+    soft(t_costs, "Subtotal / Total labels", 4, priority="high")
+    soft(t_soft, "Edge-case tests", 2, priority="low")
+    soft(s_design, "Class diagram draft", 3, priority="high")
     soft(s_design, "Sequence diagrams", 1.5)
-    soft(t_tests, "Auth and lockout tests", 8)
+    soft(t_tests, "Auth and lockout tests", 8, priority="high")
     soft(o_wire, "Mobile layout", 3)
 
     # ----------------------------------------------------------------- comments
@@ -328,7 +329,7 @@ def seed_demo_data(db: Session) -> bool:
     notify("staff", "assignment", "Jon Sorey assigned you “Pytest suite for UC-01 to UC-22”", f"/tasks/{t_tests.id}", 1440, platform, t_tests)
     notify("staff", "mention", "Preethi Seereddy mentioned you on “Design document with UML diagrams”", f"/tasks/{s_design.id}", 200, semester, s_design)
     notify("tyler", "mention", "Aashwat Singh mentioned you on “Markdown comments with @mentions”", f"/tasks/{t_comments.id}", 90, platform, t_comments)
-    notify("jon", "system", "Welcome to ProjectForge! Use the role switcher in the top bar to demo each role.", "/dashboard", 2000, read=True)
+    notify("jon", "system", "Welcome to ProjectForge! Use the demo role switcher in the sidebar to try each role.", "/dashboard", 2000, read=True)
     notify("jon", "role_change", "Your role in “CS 3354 Semester Deliverables” changed from member to manager", f"/projects/{semester.id}", 4000, semester)
 
     db.commit()

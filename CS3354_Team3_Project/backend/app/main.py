@@ -2,7 +2,7 @@
 @author: eLeet Coderz (Team 3) - integration: Jon Sorey; security middleware: Tyler Gaines; live updates:
     Saaqib Shaik & Aashwat Singh
 @description: Starts the ProjectForge API. It creates the database tables (and demo data) on first run,
-    turns on the sign-up / log-in rate limiter, lets the React app call the API from another port (CORS),
+    forces HTTPS with HSTS outside demo mode, turns on the sign-up / log-in rate limiter, lets the React app call the API from another port (CORS),
     makes retried saves safe (the same Idempotency-Key never saves twice), formats validation errors as
     {"detail", "errors": {field: message}}, plugs in every feature router, hosts the WebSocket used for
     live progress and notification updates, and - after `npm run build` - also serves the website itself.
@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -28,7 +29,7 @@ from app import __version__
 from app.core.config import get_settings
 from app.core.database import SessionLocal, create_all, database_kind
 from app.core.realtime import hub
-from app.core.security import rate_limit_middleware, user_from_token
+from app.core.security import rate_limit_middleware, transport_security_headers, user_from_token
 from app.routers import (
     auth,
     collaboration,
@@ -154,11 +155,17 @@ app.add_middleware(
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
+    """SE-NFR-06: HSTS when HTTPS is enforced, CSP on the served web app, hardening headers everywhere."""
     response = await call_next(request)
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
-    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    is_html = response.headers.get("content-type", "").startswith("text/html")
+    for name, value in transport_security_headers(settings.force_https, html=is_html).items():
+        response.headers.setdefault(name, value)
     return response
+
+
+if settings.force_https:
+    # Behind a TLS-terminating proxy run uvicorn with --proxy-headers so X-Forwarded-Proto is honoured.
+    app.add_middleware(HTTPSRedirectMiddleware)
 
 
 # ---------------------------------------------------------------------------

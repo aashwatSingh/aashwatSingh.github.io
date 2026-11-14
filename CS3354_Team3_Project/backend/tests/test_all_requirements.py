@@ -31,7 +31,7 @@ from sqlalchemy import event  # noqa: E402
 from app.core.database import SessionLocal, engine  # noqa: E402
 from app.core.permissions import require_project_role  # noqa: E402
 from app.core.sanitizer import sanitize_markdown, sanitize_spreadsheet_cell  # noqa: E402
-from app.core.security import DEV_OUTBOX, auth_rate_limiter, hash_password  # noqa: E402
+from app.core.security import DEV_OUTBOX, HSTS_VALUE, auth_rate_limiter, hash_password, transport_security_headers  # noqa: E402
 from app.main import app, idempotency_store  # noqa: E402
 from app.models.entities import Expense, Task, UserProfile  # noqa: E402
 from app.routers.dashboard import DEFAULT_LAYOUT, WIDGET_TYPES, overlaps  # noqa: E402
@@ -224,8 +224,11 @@ def test_uc02_performance_report_role_scoping_se_fr05_se_nfr02(client):
     assert client.post(hours.format(staff_task["id"]), headers=H(client, "staff"), json={"actual_hours": 5}).status_code == 200
     assert client.post(hours.format(tyler_task["id"]), headers=H(client, "tyler"), json={"actual_hours": 8}).status_code == 200
 
+    assert client.put(f"/api/tasks/{staff_task['id']}", headers=H(client, "staff"), json={"status": "done"}).status_code == 200
     member_view = client.get(f"/api/projects/{pid}/reports/performance", headers=H(client, "staff")).json()
     assert member_view["scope"] == "self"
+    assert member_view["completion"] == {"done": 1, "total": 2, "progress_pct": 50.0}  # only the member's own 2 tasks
+    assert member_view["progress_over_time"][-1]["completion_pct"] == 50.0
     assert [m["username"] for m in member_view["members"]] == ["staff"]
     assert member_view["totals"]["actual_hours"] == 5.0  # Tyler's 8 hours never leak into the member's totals
     assert member_view["totals"]["estimated_hours"] == 7.0
@@ -238,6 +241,7 @@ def test_uc02_performance_report_role_scoping_se_fr05_se_nfr02(client):
     assert team_view["scope"] == "team"
     assert {m["username"] for m in team_view["members"]} == {"jon", "tyler", "staff"}
     assert team_view["totals"]["actual_hours"] == 13.0
+    assert team_view["completion"] == {"done": 1, "total": 3, "progress_pct": 33.33}  # SE-NFR-01: 0.01 % precision
     assert next(m for m in team_view["members"] if m["username"] == "jon")["efficiency_pct"] == "N/A"
     assert next(m for m in team_view["members"] if m["username"] == "tyler")["efficiency_pct"] == 125.0
 
@@ -255,7 +259,7 @@ def test_uc02_performance_report_role_scoping_se_fr05_se_nfr02(client):
 # ---------------------------------------------------------------------------
 # 3. UC-05 / UC-06 / UC-07 soft deadlines (Preethi Seereddy)
 # ---------------------------------------------------------------------------
-def test_uc05_uc06_soft_deadline_validation_se_fr06_se_fr07_se_fr08_se_fr09_se_fr10(client):
+def test_uc05_uc06_soft_deadline_validation_se_fr06_se_fr07_se_fr08_se_fr09_se_fr10_se_nfr03(client):
     project = new_project(client, members=["staff", "aashwat"], name="Soft deadlines")
     pid = project["id"]
     due = future(10)
@@ -268,10 +272,13 @@ def test_uc05_uc06_soft_deadline_validation_se_fr06_se_fr07_se_fr08_se_fr09_se_f
     equal = client.post(url, headers=H(client, "jon"), json={"title": "Same time", "due_at": iso(due)})
     assert equal.status_code == 400
 
-    second = client.post(url, headers=H(client, "staff"), json={"title": "Second draft", "due_at": iso(due - timedelta(days=2))})
+    second = client.post(url, headers=H(client, "staff"), json={"title": "Second draft", "due_at": iso(due - timedelta(days=2)), "priority": "high"})
     assert second.status_code == 201  # assignee (member) may manage their own task's soft deadlines
+    assert second.json()["priority"] == "high"  # SE-FR-09: priority is saved and displayed
+    bad_priority = client.post(url, headers=H(client, "staff"), json={"title": "x", "due_at": iso(due - timedelta(days=3)), "priority": "urgent"})
+    assert bad_priority.status_code == 422 and "priority" in bad_priority.json()["errors"]  # SE-NFR-03: field-level feedback
     first = client.post(url, headers=H(client, "jon"), json={"title": "First draft", "due_at": iso(due - timedelta(days=5))})
-    assert first.status_code == 201
+    assert first.status_code == 201 and first.json()["priority"] == "medium"  # default priority
     # A member who is NOT the assignee may view but not change.
     assert client.post(url, headers=H(client, "aashwat"), json={"title": "x", "due_at": iso(due - timedelta(days=1))}).status_code == 403
 
@@ -290,8 +297,8 @@ def test_uc05_uc06_soft_deadline_validation_se_fr06_se_fr07_se_fr08_se_fr09_se_f
     unchanged = next(s for s in after if s["id"] == first.json()["id"])
     assert unchanged["due_at"] == original_due and unchanged["title"] == "First draft"
 
-    ok_edit = client.put(f"/api/soft-deadlines/{first.json()['id']}", headers=H(client, "jon"), json={"due_at": iso(due - timedelta(days=4))})
-    assert ok_edit.status_code == 200
+    ok_edit = client.put(f"/api/soft-deadlines/{first.json()['id']}", headers=H(client, "jon"), json={"due_at": iso(due - timedelta(days=4)), "priority": "low"})
+    assert ok_edit.status_code == 200 and ok_edit.json()["priority"] == "low"
     done = client.patch(f"/api/soft-deadlines/{second.json()['id']}/complete", headers=H(client, "staff"), json={"is_completed": True})
     assert done.status_code == 200 and done.json()["state"] == "completed"
     assert client.delete(f"/api/soft-deadlines/{second.json()['id']}", headers=H(client, "staff")).status_code == 204
@@ -307,7 +314,7 @@ def test_uc05_uc06_soft_deadline_validation_se_fr06_se_fr07_se_fr08_se_fr09_se_f
 # ---------------------------------------------------------------------------
 # 4. UC-08..UC-11 auth (Tyler Gaines)
 # ---------------------------------------------------------------------------
-def test_uc08_uc09_auth_lockout_and_rate_limit_uc10_uc11_se_fr11_se_nfr05_se_nfr06(client):
+def test_uc08_uc09_auth_lockout_and_rate_limit_uc10_uc11_se_fr11(client):
     bad = client.post("/api/auth/signup", json={"username": "ab", "email": "nope", "password": "short"})
     assert bad.status_code == 422
     assert {"username", "email", "password"} <= set(bad.json()["errors"])
@@ -505,22 +512,24 @@ def test_uc16_uc17_widget_aabb_collision_se_fr21_to_se_fr25_se_nfr07_se_nfr08(cl
     body = dash.json()
     widgets = {w["widget_type"]: w for w in body["widgets"]}
     assert set(widgets) == {t for t, _, _ in DEFAULT_LAYOUT}
-    assert {"project_progress", "my_tasks", "notifications", "time_summary", "budget_overview"} <= set(body["data"])
+    assert {"upcoming_deadlines", "task_progress", "project_progress", "time_summary", "budget_overview"} <= set(body["data"])
+    tp = body["data"]["task_progress"]
+    assert tp["total"] >= tp["done"] >= 0 and 0 <= tp["progress_pct"] <= 100
 
     target = widgets["project_progress"]
-    moving = widgets["my_tasks"]
+    moving = widgets["time_summary"]
     clash = client.put(f"/api/dashboard/widgets/{moving['id']}/position", headers=H(client, "myoram"),
                        json={"grid_x": target["grid_x"] + 1, "grid_y": target["grid_y"] + 1})
     assert clash.status_code == 409 and clash.json()["detail"] == "Widget overlaps with an existing widget"
     still = {w["widget_type"]: w for w in client.get("/api/dashboard/widgets", headers=H(client, "myoram")).json()["widgets"]}
-    assert (still["my_tasks"]["grid_x"], still["my_tasks"]["grid_y"]) == (moving["grid_x"], moving["grid_y"])  # snapped back
+    assert (still["time_summary"]["grid_x"], still["time_summary"]["grid_y"]) == (moving["grid_x"], moving["grid_y"])  # snapped back
     moved = client.put(f"/api/dashboard/widgets/{moving['id']}/position", headers=H(client, "myoram"), json={"grid_x": 0, "grid_y": 20})
     assert moved.status_code == 200 and (moved.json()["grid_x"], moved.json()["grid_y"]) == (0, 20)
     outside = client.put(f"/api/dashboard/widgets/{moving['id']}/position", headers=H(client, "myoram"), json={"grid_x": 10, "grid_y": 20})
     assert outside.status_code == 400
 
     assert client.post("/api/dashboard/widgets", headers=H(client, "myoram"), json={"widget_type": "crypto_ticker"}).json()["detail"] == "Widget unavailable"
-    assert client.post("/api/dashboard/widgets", headers=H(client, "myoram"), json={"widget_type": "my_tasks"}).json()["detail"] == "Invalid action"
+    assert client.post("/api/dashboard/widgets", headers=H(client, "myoram"), json={"widget_type": "task_progress"}).json()["detail"] == "Invalid action"
     added = client.post("/api/dashboard/widgets", headers=H(client, "myoram"), json={"widget_type": "calendar_week"})
     assert added.status_code == 201 and "calendar_week" in added.json()["data"]
     placed = [w for w in added.json()["widgets"] if not w["is_hidden"]]
@@ -529,9 +538,9 @@ def test_uc16_uc17_widget_aabb_collision_se_fr21_to_se_fr25_se_nfr07_se_nfr08(cl
         for i, a in enumerate(placed) for b in placed[i + 1:]
     )
     assert client.delete("/api/dashboard/widgets/00000000-0000-0000-0000-000000000000", headers=H(client, "myoram")).json()["detail"] == "Invalid action"
-    hidden = client.patch(f"/api/dashboard/widgets/{widgets['notifications']['id']}/hide", headers=H(client, "myoram")).json()
-    assert next(w for w in hidden["widgets"] if w["widget_type"] == "notifications")["is_hidden"] is True
-    assert "notifications" not in hidden["data"]
+    hidden = client.patch(f"/api/dashboard/widgets/{widgets['task_progress']['id']}/hide", headers=H(client, "myoram")).json()
+    assert next(w for w in hidden["widgets"] if w["widget_type"] == "task_progress")["is_hidden"] is True
+    assert "task_progress" not in hidden["data"]
     # Another user's widget cannot be touched.
     assert client.put(f"/api/dashboard/widgets/{moving['id']}/position", headers=H(client, "staff"), json={"grid_x": 0, "grid_y": 30}).status_code == 400
 
@@ -786,3 +795,28 @@ def test_se_nfr10_progress_broadcast_over_websocket_se_fr18(client):
     assert elapsed < 2.0
     with SessionLocal() as db:
         assert db.get(Task, task["id"]).completed_at is not None
+
+
+def test_se_nfr06_https_transport_and_bearer_only_sessions_se_fr11(client):
+    """SE-NFR-06: HSTS + CSP when HTTPS is enforced; credentials never travel in cookies or URLs."""
+    secure = transport_security_headers(True, html=True)
+    assert secure["Strict-Transport-Security"] == HSTS_VALUE
+    assert "default-src 'self'" in secure["Content-Security-Policy"] and "frame-ancestors 'none'" in secure["Content-Security-Policy"]
+    assert "Strict-Transport-Security" not in transport_security_headers(False)  # demo mode runs on plain http://localhost
+    auth_rate_limiter.reset()
+    r = client.post("/api/auth/login", json={"email": "jon@example.com", "password": DEMO_PASSWORD})
+    assert r.status_code == 200 and "set-cookie" not in {k.lower() for k in r.headers}
+    assert r.headers["x-content-type-options"] == "nosniff" and r.headers["x-frame-options"] == "DENY"
+    token_value = r.json()["access_token"]
+    assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {token_value}"}).status_code == 200
+    assert client.get("/api/auth/me", params={"token": token_value}).status_code == 401  # never accepted from the URL
+    # The FastAPI config turns HTTPS enforcement on automatically once demo mode is off.
+    from app.core import config as cfg
+
+    os.environ["DEMO_MODE"] = "false"
+    cfg.get_settings.cache_clear()
+    try:
+        assert cfg.get_settings().force_https is True
+    finally:
+        os.environ["DEMO_MODE"] = "true"
+        cfg.get_settings.cache_clear()

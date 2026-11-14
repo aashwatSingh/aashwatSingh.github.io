@@ -1,10 +1,11 @@
 """
 @author: Tyler Gaines
 @description: Everything that keeps accounts safe: bcrypt password hashing, password-strength rules,
-    signed JWT session / 2FA / reset / unlock tokens, 6-digit TOTP two-factor codes, the per-IP rate
-    limiter that blocks brute-force signups and logins, and a development "outbox" that stands in for
-    real email so the reset and unlock links can be demonstrated without an email server.
-@traces: SE-FR-11, SE-NFR-05, SE-NFR-06, UC-08, UC-09, UC-10, UC-11
+    signed JWT session / 2FA / reset / unlock tokens carried only in the Authorization: Bearer header,
+    6-digit TOTP two-factor codes, the per-IP rate limiter that blocks brute-force signups and logins,
+    the HTTPS transport headers (HSTS, CSP), and a development "outbox" that stands in for real email so
+    the reset and unlock links can be demonstrated without an email server.
+@traces: SE-FR-11, SE-NFR-06, UC-08, UC-09, UC-10, UC-11
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ logger = logging.getLogger("projectforge.security")
 settings = get_settings()
 
 # ---------------------------------------------------------------------------
-# Password hashing (bcrypt via passlib) - SE-NFR-05
+# Password hashing (bcrypt via passlib) - SE-FR-11, UC-08
 # ---------------------------------------------------------------------------
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=settings.bcrypt_rounds)
 # Used to spend the same time verifying when the user does not exist (prevents timing enumeration).
@@ -292,6 +293,31 @@ def send_email(to: str, subject: str, body: str, link: str = "") -> None:
             DEV_OUTBOX.appendleft(
                 OutboxMessage(to=to, subject=subject, body=body, link=link, sent_at=utcnow().isoformat() + "Z")
             )
+
+
+# ---------------------------------------------------------------------------
+# Transport security headers - SE-NFR-06
+# ---------------------------------------------------------------------------
+HSTS_VALUE = "max-age=63072000; includeSubDomains"
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
+    "connect-src 'self' ws: wss:; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+)
+
+
+def transport_security_headers(secure: bool, html: bool = False) -> dict[str, str]:
+    """Headers added to every response. HSTS is only sent when the deployment enforces HTTPS."""
+    headers = {
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    }
+    if secure:
+        headers["Strict-Transport-Security"] = HSTS_VALUE
+    if html:
+        headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
+    return headers
 
 
 def lockout_expiry():

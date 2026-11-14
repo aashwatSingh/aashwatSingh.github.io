@@ -1,7 +1,7 @@
 /**
  * @author Tyler Gaines
  * @description Unit tests for the sign-up rules shared with the server.
- * @traces UC-08, SE-NFR-05
+ * @traces UC-08, SE-FR-11
  */
 import { describe, expect, it } from 'vitest';
 import { isValidMfaCode, passwordStrength, validateSignup } from './validation';

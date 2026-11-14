@@ -37,6 +37,7 @@ from app.schemas.dto import (
     ProjectOut,
     ProjectUpdate,
     TaskListOut,
+    UserBrief,
 )
 
 router = APIRouter(tags=["projects"])
@@ -77,6 +78,24 @@ def member_counts(db: Session, project_ids: list[str]) -> dict[str, int]:
         .group_by(ProjectMember.project_id)
     ).all()
     return {pid: int(n) for pid, n in rows}
+
+
+def member_previews(db: Session, project_ids: list[str], limit: int = 5) -> dict[str, list[UserBrief]]:
+    """One query for the avatar stacks on project cards (no N+1, fine for 50+ member projects)."""
+    if not project_ids:
+        return {}
+    rows = db.execute(
+        select(ProjectMember.project_id, UserProfile)
+        .join(UserProfile, UserProfile.id == ProjectMember.user_id)
+        .where(ProjectMember.project_id.in_(project_ids))
+        .order_by(case((ProjectMember.role == "owner", 0), (ProjectMember.role == "manager", 1), else_=2), ProjectMember.joined_at)
+    ).all()
+    out: dict[str, list[UserBrief]] = {}
+    for pid, user in rows:
+        bucket = out.setdefault(pid, [])
+        if len(bucket) < limit:
+            bucket.append(UserBrief.model_validate(user))
+    return out
 
 
 def project_member_ids(db: Session, project_id: str) -> list[str]:
@@ -128,7 +147,7 @@ def broadcast_progress(db: Session, project_id: str) -> ProgressOut:
     return progress
 
 
-def _project_out(project: Project, membership: ProjectMember, counts: dict, members: dict) -> ProjectOut:
+def _project_out(project: Project, membership: ProjectMember, counts: dict, members: dict, previews: dict | None = None) -> ProjectOut:
     total, done = counts.get(project.id, (0, 0))
     return ProjectOut(
         id=project.id,
@@ -145,6 +164,7 @@ def _project_out(project: Project, membership: ProjectMember, counts: dict, memb
         task_count=total,
         done_count=done,
         member_count=members.get(project.id, 0),
+        members_preview=(previews or {}).get(project.id, []),
     )
 
 
@@ -155,13 +175,16 @@ def list_members(db: Session, project_id: str) -> list[MemberOut]:
         .where(ProjectMember.project_id == project_id)
         .order_by(case((ProjectMember.role == "owner", 0), (ProjectMember.role == "manager", 1), else_=2), UserProfile.username)
     ).all()
-    open_counts = dict(
-        db.execute(
-            select(Task.assignee_id, func.count(Task.id))
-            .where(Task.project_id == project_id, Task.status != "done", Task.assignee_id.is_not(None))
-            .group_by(Task.assignee_id)
-        ).all()
-    )
+    task_rows = db.execute(
+        select(
+            Task.assignee_id,
+            func.count(Task.id),
+            func.coalesce(func.sum(case((Task.status == "done", 1), else_=0)), 0),
+        )
+        .where(Task.project_id == project_id, Task.assignee_id.is_not(None))
+        .group_by(Task.assignee_id)
+    ).all()
+    totals = {uid: (int(total), int(done)) for uid, total, done in task_rows}
     return [
         MemberOut(
             user_id=u.id,
@@ -171,14 +194,16 @@ def list_members(db: Session, project_id: str) -> list[MemberOut]:
             avatar_url=u.avatar_url,
             role=m.role,
             joined_at=m.joined_at,
-            open_task_count=int(open_counts.get(u.id, 0)),
+            open_task_count=totals.get(u.id, (0, 0))[0] - totals.get(u.id, (0, 0))[1],
+            task_count=totals.get(u.id, (0, 0))[0],
+            done_task_count=totals.get(u.id, (0, 0))[1],
         )
         for m, u in rows
     ]
 
 
 def project_detail(db: Session, project: Project, membership: ProjectMember) -> ProjectDetailOut:
-    base = _project_out(project, membership, task_counts(db, [project.id]), member_counts(db, [project.id]))
+    base = _project_out(project, membership, task_counts(db, [project.id]), member_counts(db, [project.id]), member_previews(db, [project.id]))
     lists = db.execute(
         select(TaskList).where(TaskList.project_id == project.id).order_by(TaskList.position, TaskList.created_at)
     ).scalars().all()
@@ -207,7 +232,8 @@ def list_projects(user: UserProfile = Depends(get_current_user), db: Session = D
     ids = [p.id for p, _ in rows]
     counts = task_counts(db, ids)
     members = member_counts(db, ids)
-    return [_project_out(p, m, counts, members) for p, m in rows]
+    previews = member_previews(db, ids)
+    return [_project_out(p, m, counts, members, previews) for p, m in rows]
 
 
 @router.post("/api/projects", response_model=ProjectDetailOut, status_code=status.HTTP_201_CREATED)

@@ -6,7 +6,7 @@
  *   (the server enforces the same rule). Shows "Nothing to export" and success counts from the server.
  * @traces SE-FR-19, SE-FR-20, UC-14, UC-15
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { CalendarExportResult, Role, SheetsExportResult, SpreadsheetSection } from '../../shared/types';
 import { isManager } from '../../shared/permissions';
 import { formatDateTime } from '../../shared/format';
@@ -15,7 +15,7 @@ import { toApiError } from '../../shared/useSave';
 import { exportController, type CalendarIncludes } from './exportController';
 
 type Tab = 'calendar' | 'spreadsheet';
-type CalTarget = 'ical' | 'google' | 'outlook';
+export type CalTarget = 'ical' | 'google' | 'outlook';
 
 const SECTIONS: { value: SpreadsheetSection; label: string; financial?: boolean }[] = [
   { value: 'tasks', label: 'Tasks' },
@@ -26,10 +26,10 @@ const SECTIONS: { value: SpreadsheetSection; label: string; financial?: boolean 
   { value: 'expenses', label: 'Expenses', financial: true },
 ];
 
-export function ExportModal({ open, onClose, projectId, projectName, role }: { open: boolean; onClose: () => void; projectId: string; projectName: string; role: Role }) {
+export function ExportModal({ open, onClose, projectId, projectName, role, initialTab = 'calendar', initialTarget = 'ical' }: { open: boolean; onClose: () => void; projectId: string; projectName: string; role: Role; initialTab?: Tab; initialTarget?: CalTarget }) {
   const manager = isManager(role);
-  const [tab, setTab] = useState<Tab>('calendar');
-  const [target, setTarget] = useState<CalTarget>('ical');
+  const [tab, setTab] = useState<Tab>(initialTab);
+  const [target, setTarget] = useState<CalTarget>(initialTarget);
   const [includes, setIncludes] = useState<CalendarIncludes>({ include_project_deadline: true, include_task_due_dates: true, include_soft_deadlines: true });
   const [sections, setSections] = useState<SpreadsheetSection[]>(manager ? SECTIONS.map((s) => s.value) : ['tasks', 'soft_deadlines', 'time_entries']);
   const [consentOpen, setConsentOpen] = useState(false);
@@ -37,6 +37,13 @@ export function ExportModal({ open, onClose, projectId, projectName, role }: { o
   const [message, setMessage] = useState<{ tone: 'ok' | 'danger' | 'warn'; text: string } | null>(null);
   const [links, setLinks] = useState<CalendarExportResult['provider_links']>([]);
   const [sheets, setSheets] = useState<SheetsExportResult | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setTab(initialTab);
+      setTarget(initialTarget);
+    }
+  }, [open, initialTab, initialTarget]);
 
   const reset = () => {
     setMessage(null);

@@ -1,22 +1,23 @@
 /**
  * @author Jon Sorey - matches charts.html
- * @description Performance and efficiency for a chosen date range. Owners and managers see the whole team;
- *   members see a "Only your hours" report built from their own records alone. Shows totals, a per-person
- *   estimated / assigned / actual chart, a weekly trend and per-task efficiency ("N/A" when no hours).
- * @traces SE-FR-05, SE-NFR-02, UC-02
+ * @description Charts for the current project and date range in the mockup's 2 x 2 grid: completion donut,
+ *   progress over time, time spent per person, and estimated vs assigned vs actual hours, followed by the
+ *   per-task efficiency table. Owners and managers see the whole team; members get an "Only your hours"
+ *   report built from their own records alone. Undefined metrics show "N/A".
+ * @traces SE-FR-04, SE-FR-05, SE-NFR-01, SE-NFR-02, UC-02
  */
 import { useCallback, useEffect, useState } from 'react';
 import { ProjectPicker, useProjectScope } from '../features/projects/ProjectScope';
-import { MemberHoursChart, TaskEfficiencyTable, WeeklyTrendChart } from '../features/reports/EfficiencyCharts';
+import { CompletionDonut, EstimatedVsActual, ProgressOverTime, TaskEfficiencyTable, TimeSpent } from '../features/reports/EfficiencyCharts';
 import { formatEfficiency, reportController, validateRange } from '../features/reports/reportController';
 import type { PerformanceReport } from '../shared/types';
 import { todayIso } from '../shared/format';
-import { Alert, Badge, Card, EmptyState, PageHeader, Spinner, StatCard } from '../shared/ui';
+import { Alert, Badge, Card, EmptyState, PageHeader, Spinner } from '../shared/ui';
 import { toApiError } from '../shared/useSave';
 
 export function PerformancePage() {
   const { currentProject, loading } = useProjectScope();
-  const [start, setStart] = useState(todayIso(-29));
+  const [start, setStart] = useState(todayIso(-41));
   const [end, setEnd] = useState(todayIso());
   const [report, setReport] = useState<PerformanceReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,31 +50,47 @@ export function PerformancePage() {
     <div>
       <PageHeader
         title="Charts"
-        subtitle={report ? (report.scope === 'team' ? 'Team-wide view of estimated, assigned and actual hours' : 'Only your own hours are included') : 'Performance and efficiency'}
+        subtitle={report ? (report.scope === 'team' ? <>Team view · <b>{currentProject.name}</b></> : <>Only your own hours · <b>{currentProject.name}</b></>) : currentProject.name}
         actions={<ProjectPicker />}
       />
-      <div className="card mb-6 flex flex-wrap items-end gap-3 p-4">
-        <label><span className="label">From</span><input type="date" className="input" value={start} max={end} onChange={(e) => setStart(e.target.value)} /></label>
-        <label><span className="label">To</span><input type="date" className="input" value={end} min={start} onChange={(e) => setEnd(e.target.value)} /></label>
+      <div className="-mt-2 mb-6 flex flex-wrap items-end gap-3">
+        <label><span className="label">From</span><input type="date" className="input w-auto" value={start} max={end} onChange={(e) => setStart(e.target.value)} /></label>
+        <label><span className="label">To</span><input type="date" className="input w-auto" value={end} min={start} onChange={(e) => setEnd(e.target.value)} /></label>
         <button type="button" className="btn-primary" onClick={() => void load()} disabled={busy}>{busy ? 'Loading…' : 'Update'}</button>
-        {report ? <Badge tone={report.scope === 'team' ? 'brand' : 'warn'} icon={report.scope === 'team' ? 'users' : 'lock'} className="ml-auto">{report.scope === 'team' ? 'Team view' : 'Only your hours'}</Badge> : null}
+        {report ? <span className="ml-auto"><Badge tone={report.scope === 'team' ? 'accent' : 'warn'} icon={report.scope === 'team' ? 'users' : 'lock'}>{report.scope === 'team' ? 'Team view' : 'Only your hours'}</Badge></span> : null}
       </div>
       {error ? <div className="mb-4"><Alert onClose={() => setError(null)}>{error}</Alert></div> : null}
       {!report ? <Spinner label="Building report…" /> : (
         <div className="space-y-6">
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="Estimated" value={`${report.totals.estimated_hours.toFixed(2)} h`} icon="target" tone="brand" />
-            <StatCard label="Assigned" value={`${report.totals.assigned_hours.toFixed(2)} h`} icon="users" tone="accent" />
-            <StatCard label="Actual" value={`${report.totals.actual_hours.toFixed(2)} h`} icon="clock" tone="ok" hint={`${report.totals.tasks_done}/${report.totals.tasks_total} tasks done`} />
-            <StatCard label="Efficiency" value={formatEfficiency(report.totals.efficiency_pct)} icon="chart" tone={report.totals.efficiency_pct === 'N/A' ? 'neutral' : report.totals.efficiency_pct >= 100 ? 'ok' : 'warn'} hint="Estimated ÷ actual × 100" />
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card title="Progress" actions={<span>{report.completion.done}/{report.completion.total} tasks</span>}>
+              <CompletionDonut report={report} />
+            </Card>
+            <Card title="Progress over time" actions={<span>Weekly, {report.scope === 'team' ? 'whole project' : 'your tasks'}</span>}>
+              <ProgressOverTime report={report} />
+            </Card>
+            <Card title="Time spent" actions={<span>Hours logged</span>}>
+              <TimeSpent report={report} />
+            </Card>
+            <Card
+              title="Estimated vs actual hours"
+              actions={
+                <span className="flex items-center gap-3">
+                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] bg-line-strong" />Estimated</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] bg-brand" />Assigned</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] bg-accent" />Actual</span>
+                </span>
+              }
+            >
+              <p className="text-sm text-body">
+                Totals: est <b className="text-ink">{report.totals.estimated_hours.toFixed(2)}h</b> · assigned <b className="text-ink">{report.totals.assigned_hours.toFixed(2)}h</b> · actual <b className="text-ink">{report.totals.actual_hours.toFixed(2)}h</b> · efficiency <b className="text-ink">{formatEfficiency(report.totals.efficiency_pct)}</b>
+              </p>
+              <EstimatedVsActual report={report} />
+            </Card>
           </div>
-          <Card title={report.scope === 'team' ? 'Hours per person' : 'Your hours'}>
-            {report.members.length ? <MemberHoursChart report={report} /> : <EmptyState title="No data in this range" icon="chart" />}
+          <Card title="Task efficiency" actions={<span>Estimated ÷ actual × 100</span>}>
+            <TaskEfficiencyTable report={report} />
           </Card>
-          <div className="grid gap-6 xl:grid-cols-2">
-            <Card title="Actual hours per week"><WeeklyTrendChart report={report} /></Card>
-            <Card title="Task efficiency" bodyClass="p-0"><TaskEfficiencyTable report={report} /></Card>
-          </div>
         </div>
       )}
     </div>

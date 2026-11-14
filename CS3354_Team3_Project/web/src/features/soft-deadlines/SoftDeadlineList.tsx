@@ -1,21 +1,23 @@
 /**
  * @author Preethi Seereddy
- * @description Soft deadlines on the task screen. Lists checkpoints in date order; the assignee or a manager
- *   can add, edit, tick off and delete them. Dates are validated before saving; if the server still rejects
- *   an edit, the field snaps back to the original saved value the server returns, and a timed-out save offers
- *   Retry / Cancel while keeping the typed value.
- * @traces SE-FR-06, SE-FR-07, SE-FR-08, SE-FR-09, SE-FR-10, SE-NFR-04, UC-05, UC-06, UC-07
+ * @description Soft deadlines on the task screen - the "simple interface" of SE-NFR-03. Checkpoints are
+ *   listed in date order with their High / Medium / Low priority. The assignee or a manager adds and edits
+ *   them inline with separate date, time and priority controls, ticks them off and deletes them. Problems are
+ *   explained right under the controls before anything is sent (date must be earlier than the final due
+ *   date); if the server still rejects an edit, the controls snap back to the original saved value it
+ *   returns, and a timed-out save offers Retry / Cancel while keeping what was typed (SE-NFR-04).
+ * @traces SE-FR-06, SE-FR-07, SE-FR-08, SE-FR-09, SE-FR-10, SE-NFR-03, SE-NFR-04, UC-05, UC-06, UC-07
  */
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError } from '../../services/apiClient';
 import { useRealtime } from '../../services/realtimeClient';
-import type { SoftDeadline } from '../../shared/types';
-import { formatDateTime, fromLocalInput, toLocalInput } from '../../shared/format';
-import { Alert, EmptyState, Icon, RetryBanner, Spinner } from '../../shared/ui';
+import type { SoftDeadline, SoftDeadlinePriority } from '../../shared/types';
+import { formatDateTime } from '../../shared/format';
+import { Alert, Badge, EmptyState, Icon, RetryBanner, Spinner, type Tone } from '../../shared/ui';
 import { toApiError, useSave } from '../../shared/useSave';
 import { SoftDeadlineStateBadge } from './SoftDeadlineBadge';
 import { softDeadlineController } from './softDeadlineController';
-import { NEEDS_DUE_DATE, softDeadlineError } from './validation';
+import { NEEDS_DUE_DATE, SOFT_DEADLINE_PRIORITIES, softDeadlineError } from './validation';
 
 interface Props {
   taskId: string;
@@ -23,42 +25,84 @@ interface Props {
   canManage: boolean;
 }
 
+const PRIORITY_TONE: Record<SoftDeadlinePriority, Tone> = { high: 'danger', medium: 'warn', low: 'info' };
+
+/** Local date ("2026-11-20") and time ("17:00") parts of an ISO instant, for the inline inputs. */
+function splitLocal(iso: string | null | undefined): { date: string; time: string } {
+  if (!iso) return { date: '', time: '' };
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return { date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, time: `${pad(d.getHours())}:${pad(d.getMinutes())}` };
+}
+
+function joinLocal(date: string, time: string): string | null {
+  if (!date) return null;
+  const d = new Date(`${date}T${time || '17:00'}`);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function PriorityBadge({ priority }: { priority: SoftDeadlinePriority }) {
+  return <Badge tone={PRIORITY_TONE[priority]} icon="flag">{priority.charAt(0).toUpperCase() + priority.slice(1)}</Badge>;
+}
+
+/** Inline date / time / priority controls shared by the add row and the edit row. */
+function DeadlineControls({ title, date, time, priority, onTitle, onDate, onTime, onPriority, maxDate, idPrefix }: {
+  title: string; date: string; time: string; priority: SoftDeadlinePriority;
+  onTitle: (v: string) => void; onDate: (v: string) => void; onTime: (v: string) => void; onPriority: (v: SoftDeadlinePriority) => void;
+  maxDate?: string; idPrefix: string;
+}) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_9.5rem_8.5rem_7.5rem]">
+      <input className="input" placeholder="Checkpoint, e.g. First draft" value={title} onChange={(e) => onTitle(e.target.value)} aria-label={`${idPrefix} soft deadline title`} maxLength={120} />
+      <input className="input" type="date" value={date} max={maxDate} onChange={(e) => onDate(e.target.value)} aria-label={`${idPrefix} soft deadline date`} />
+      <input className="input" type="time" value={time} onChange={(e) => onTime(e.target.value)} aria-label={`${idPrefix} soft deadline time`} />
+      <select className="input" value={priority} onChange={(e) => onPriority(e.target.value as SoftDeadlinePriority)} aria-label={`${idPrefix} soft deadline priority`}>
+        {SOFT_DEADLINE_PRIORITIES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function EditRow({ item, taskDueDate, onSaved, onCancel }: { item: SoftDeadline; taskDueDate: string | null; onSaved: (sd: SoftDeadline) => void; onCancel: () => void }) {
+  const original = splitLocal(item.due_at);
   const [title, setTitle] = useState(item.title);
-  const [due, setDue] = useState(toLocalInput(item.due_at));
+  const [date, setDate] = useState(original.date);
+  const [time, setTime] = useState(original.time);
+  const [priority, setPriority] = useState<SoftDeadlinePriority>(item.priority);
   const [clientError, setClientError] = useState<string | null>(null);
-  const save = useSave(() => softDeadlineController.update(item.id, { title, due_at: fromLocalInput(due) ?? undefined }), onSaved);
+  const save = useSave(() => softDeadlineController.update(item.id, { title, due_at: joinLocal(date, time) ?? undefined, priority }), onSaved);
 
   useEffect(() => {
     // UC-06: the server rejected the date and sent back the record it kept - restore that value.
-    const original = (save.error?.body as { original?: SoftDeadline } | undefined)?.original;
-    if (original) {
-      setDue(toLocalInput(original.due_at));
-      setTitle(original.title);
+    const kept = (save.error?.body as { original?: SoftDeadline } | undefined)?.original;
+    if (kept) {
+      const parts = splitLocal(kept.due_at);
+      setDate(parts.date);
+      setTime(parts.time);
+      setTitle(kept.title);
+      setPriority(kept.priority);
     }
   }, [save.error]);
 
   const submit = () => {
-    const err = softDeadlineError(fromLocalInput(due), taskDueDate);
+    const err = !title.trim() ? 'Give the checkpoint a title' : softDeadlineError(joinLocal(date, time), taskDueDate);
     setClientError(err);
     if (err) {
-      setDue(toLocalInput(item.due_at)); // keep the original value on an invalid edit
+      setDate(original.date); // keep the original value on an invalid edit
+      setTime(original.time);
       return;
     }
     void save.run();
   };
 
   return (
-    <div className="space-y-2 rounded-lg border border-brand/40 bg-brand/5 p-3">
+    <div className="space-y-2 rounded-btn border border-accent bg-accent-deep/40 p-3">
       <RetryBanner error={save.networkError} onRetry={save.retry} onCancel={save.cancel} busy={save.saving} />
-      {clientError || save.error ? <Alert>{clientError ?? save.error?.detail}</Alert> : null}
-      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-        <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Soft deadline title" maxLength={120} />
-        <input className="input" type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} aria-label="Soft deadline date" />
-      </div>
+      <DeadlineControls title={title} date={date} time={time} priority={priority} onTitle={setTitle} onDate={setDate} onTime={setTime} onPriority={setPriority} idPrefix="Edit" />
+      {clientError || save.error ? <p className="flex items-center gap-1 text-xs font-medium text-danger" role="alert"><Icon name="alert" className="h-3 w-3" /> {clientError ?? save.error?.detail}</p> : null}
       <div className="flex justify-end gap-2">
-        <button type="button" className="btn-secondary py-1.5" onClick={onCancel}>Cancel</button>
-        <button type="button" className="btn-primary py-1.5" onClick={submit} disabled={save.saving}>{save.saving ? 'Saving…' : 'Save'}</button>
+        <button type="button" className="btn-secondary btn-sm" onClick={onCancel}>Cancel</button>
+        <button type="button" className="btn-primary btn-sm" onClick={submit} disabled={save.saving}>{save.saving ? 'Saving…' : 'Save'}</button>
       </div>
     </div>
   );
@@ -67,7 +111,9 @@ function EditRow({ item, taskDueDate, onSaved, onCancel }: { item: SoftDeadline;
 export function SoftDeadlineList({ taskId, taskDueDate, canManage }: Props) {
   const [items, setItems] = useState<SoftDeadline[] | null>(null);
   const [title, setTitle] = useState('');
-  const [due, setDue] = useState('');
+  const [date, setDate] = useState('');
+  const [time, setTime] = useState('17:00');
+  const [priority, setPriority] = useState<SoftDeadlinePriority>('medium');
   const [clientError, setClientError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
@@ -78,14 +124,15 @@ export function SoftDeadlineList({ taskId, taskDueDate, canManage }: Props) {
 
   const sortAndSet = (next: SoftDeadline[]) => setItems([...next].sort((a, b) => a.due_at.localeCompare(b.due_at)));
 
-  const create = useSave(() => softDeadlineController.create(taskId, title.trim(), fromLocalInput(due) ?? ''), (sd) => {
+  const create = useSave(() => softDeadlineController.create(taskId, title.trim(), joinLocal(date, time) ?? '', priority), (sd) => {
     sortAndSet([...(items ?? []), sd]);
     setTitle('');
-    setDue('');
+    setDate('');
+    setPriority('medium');
   });
 
   const add = () => {
-    const err = !title.trim() ? 'Give the checkpoint a title' : softDeadlineError(fromLocalInput(due), taskDueDate);
+    const err = !title.trim() ? 'Give the checkpoint a title' : softDeadlineError(joinLocal(date, time), taskDueDate);
     setClientError(err);
     if (!err) void create.run();
   };
@@ -112,7 +159,7 @@ export function SoftDeadlineList({ taskId, taskDueDate, canManage }: Props) {
   return (
     <div className="space-y-3">
       {taskDueDate ? (
-        <p className="text-xs text-muted">Final due date: <span className="font-semibold text-ink">{formatDateTime(taskDueDate)}</span>. Checkpoints must come before it.</p>
+        <p className="text-[13px] text-muted">Final due date: <span className="font-semibold text-ink">{formatDateTime(taskDueDate)}</span>. Checkpoints must come before it.</p>
       ) : (
         <Alert tone="info">{NEEDS_DUE_DATE}</Alert>
       )}
@@ -120,19 +167,20 @@ export function SoftDeadlineList({ taskId, taskDueDate, canManage }: Props) {
       {items.length === 0 ? (
         <EmptyState icon="target" title="No soft deadlines">Break the work into checkpoints before the final due date.</EmptyState>
       ) : (
-        <ul className="space-y-2">
+        <ul>
           {items.map((sd) =>
             editing === sd.id ? (
-              <li key={sd.id}>
+              <li key={sd.id} className="py-2">
                 <EditRow item={sd} taskDueDate={taskDueDate} onCancel={() => setEditing(null)} onSaved={(u) => { sortAndSet(items.map((x) => (x.id === u.id ? u : x))); setEditing(null); }} />
               </li>
             ) : (
-              <li key={sd.id} className="flex items-center gap-3 rounded-lg border border-line px-3 py-2">
-                <input type="checkbox" checked={sd.is_completed} disabled={!canManage} onChange={() => void toggle(sd)} aria-label={`Mark ${sd.title} complete`} />
+              <li key={sd.id} className="flex min-h-14 items-center gap-3 border-b border-line py-2 last:border-b-0">
+                <input type="checkbox" className="h-5 w-5" checked={sd.is_completed} disabled={!canManage} onChange={() => void toggle(sd)} aria-label={`Mark ${sd.title} complete`} />
                 <div className="min-w-0 flex-1">
-                  <p className={`truncate text-sm font-medium ${sd.is_completed ? 'text-muted line-through' : ''}`}>{sd.title}</p>
-                  <p className="text-xs text-muted">{formatDateTime(sd.due_at)}</p>
+                  <p className={`truncate text-[15px] font-semibold ${sd.is_completed ? 'text-muted line-through' : 'text-ink'}`}>{sd.title}</p>
+                  <p className="text-[13px] text-muted">{formatDateTime(sd.due_at)}</p>
                 </div>
+                <PriorityBadge priority={sd.priority} />
                 <SoftDeadlineStateBadge state={sd.state} />
                 {canManage ? (
                   <>
@@ -146,14 +194,17 @@ export function SoftDeadlineList({ taskId, taskDueDate, canManage }: Props) {
         </ul>
       )}
       {canManage && taskDueDate ? (
-        <div className="space-y-2 rounded-lg border border-dashed border-line p-3">
+        <div className="space-y-2 rounded-btn border border-dashed border-line-strong p-3">
           <RetryBanner error={create.networkError} onRetry={create.retry} onCancel={create.cancel} busy={create.saving} />
-          {clientError || create.error ? <Alert>{clientError ?? create.error?.detail}</Alert> : null}
-          <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
-            <input className="input" placeholder="Checkpoint, e.g. First draft" value={title} onChange={(e) => setTitle(e.target.value)} aria-label="New soft deadline title" maxLength={120} />
-            <input className="input" type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} aria-label="New soft deadline date"
-              max={toLocalInput(taskDueDate)} />
-            <button type="button" className="btn-primary" onClick={add} disabled={create.saving}><Icon name="plus" /> Add</button>
+          <DeadlineControls title={title} date={date} time={time} priority={priority} onTitle={setTitle} onDate={setDate} onTime={setTime} onPriority={setPriority}
+            maxDate={splitLocal(taskDueDate).date} idPrefix="New" />
+          <div className="flex items-center justify-between gap-3">
+            {clientError || create.error ? (
+              <p className="flex items-center gap-1 text-xs font-medium text-danger" role="alert"><Icon name="alert" className="h-3 w-3" /> {clientError ?? create.error?.detail}</p>
+            ) : (
+              <p className="text-xs text-muted">Pick a date and time before the final due date, then a priority.</p>
+            )}
+            <button type="button" className="btn-primary btn-sm" onClick={add} disabled={create.saving}><Icon name="plus" /> Add</button>
           </div>
         </div>
       ) : null}

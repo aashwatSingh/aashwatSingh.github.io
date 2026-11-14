@@ -5,7 +5,7 @@
     after 5 wrong passwords and emails a single-use unlock link. Every failure message is generic so an
     attacker cannot tell which emails have accounts. Sign-up and log-in are also limited to 5 requests
     per minute per IP address by the middleware in core/security.py.
-@traces: SE-FR-11, SE-NFR-05, SE-NFR-06, UC-08, UC-09, UC-10, UC-11
+@traces: SE-FR-11, SE-NFR-06, UC-08, UC-09, UC-10, UC-11
 """
 
 from __future__ import annotations
@@ -118,7 +118,7 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)) -> LoginResponse:
         email=body.email,
         display_name=(body.display_name or body.username).strip() or body.username,
         password_hash=hash_password(body.password),
-        theme="light",
+        theme="dark",
         color_blind_mode="none",
         default_project_type="work",
     )

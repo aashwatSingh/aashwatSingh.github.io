@@ -1,8 +1,9 @@
 """
 @author: Jon Sorey
 @description: Performance and efficiency charts for a date range. Owners and managers get team-wide and
-    per-person estimated, assigned and actual hours; a member's report is built ONLY from their own rows
-    (every query is filtered by their user id), so no one else's hours can leak into a total or a chart.
+    per-person estimated, assigned and actual hours plus completion progress over time; a member's report is
+    built ONLY from their own rows (every query is filtered by their user id), so no one else's hours or
+    tasks can leak into a total or a chart.
     Efficiency = estimated / actual x 100, rounded to 2 decimals, or "N/A" when there are no actual hours
     or no estimate to compare against.
 @traces: SE-FR-05, SE-NFR-02, UC-02
@@ -22,7 +23,16 @@ from app.core.database import get_db, utcnow
 from app.core.permissions import ALL_ROLES, MANAGERS, require_project_role
 from app.core.security import get_current_user
 from app.models.entities import ProjectMember, Task, TimeEntry, UserProfile
-from app.schemas.dto import PerformanceReport, PerformanceRow, PerformanceTotals, TaskEfficiency, WeeklyHours
+from app.schemas.dto import (
+    CompletionSummary,
+    PerformanceReport,
+    PerformanceRow,
+    PerformanceTotals,
+    TaskEfficiency,
+    WeeklyHours,
+    WeeklyProgress,
+)
+from app.routers.projects import percent
 
 router = APIRouter(tags=["reports"])
 CENT = Decimal("0.01")
@@ -153,6 +163,19 @@ def performance_report(
         weeks.append(WeeklyHours(week_start=cursor, actual_hours=_h(weekly.get(cursor, Decimal("0")))))
         cursor += timedelta(days=7)
 
+    # Completion over time (SE-FR-05): share of in-scope tasks completed by the end of each week.
+    scope_stmt = select(Task.status, Task.completed_at).where(Task.project_id == project_id)
+    if scope_user:
+        scope_stmt = scope_stmt.where(Task.assignee_id == scope_user)
+    scope_tasks = db.execute(scope_stmt).all()
+    total_scope = len(scope_tasks)
+    done_scope = sum(1 for status_value, _ in scope_tasks if status_value == "done")
+    progress_points = []
+    for wk in weeks:
+        week_end = datetime.combine(min(wk.week_start + timedelta(days=7), end + timedelta(days=1)), time.min)
+        finished = sum(1 for status_value, completed in scope_tasks if status_value == "done" and completed is not None and completed < week_end)
+        progress_points.append(WeeklyProgress(week_start=wk.week_start, completion_pct=percent(finished, total_scope)))
+
     usernames = {p.id: p.username for p in people}
     task_rows = [
         TaskEfficiency(
@@ -174,5 +197,7 @@ def performance_report(
         totals=totals,
         members=rows,
         weekly=weeks,
+        completion=CompletionSummary(done=done_scope, total=total_scope, progress_pct=percent(done_scope, total_scope)),
+        progress_over_time=progress_points,
         tasks=task_rows,
     )

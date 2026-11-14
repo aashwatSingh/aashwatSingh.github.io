@@ -1,7 +1,9 @@
 """
 @author: Preethi Seereddy
 @description: Soft deadlines are personal checkpoints placed before a task's real (final) due date, like
-    "first draft by Tuesday". They can be listed, added, edited, marked complete and deleted. The rule
+    "first draft by Tuesday", each with a high / medium / low priority. They can be listed, added, edited,
+    re-prioritised, marked complete and deleted, and every rejection carries a plain-English message the
+    inline task-level controls show next to the field (SE-NFR-03). The rule
     "a soft deadline must be earlier than the task's final due date" is checked in constant time on every
     create and edit; a rejected edit leaves the saved value untouched and sends the original record back
     so the screen can restore it. Owners / managers manage any soft deadline; members manage only those on
@@ -62,6 +64,7 @@ def soft_deadline_out(sd: SoftDeadline, task: Task, can_edit: bool) -> SoftDeadl
         task_due_date=task.due_date,
         title=sd.title,
         due_at=sd.due_at,
+        priority=sd.priority,
         is_completed=sd.is_completed,
         completed_at=sd.completed_at,
         state=_state(sd),
@@ -140,6 +143,7 @@ def create_soft_deadline(
         project_id=task.project_id,
         title=body.title,
         due_at=body.due_at,
+        priority=body.priority,
         created_by=user.id,
         created_at=now,
         updated_at=now,
@@ -170,6 +174,8 @@ def update_soft_deadline(
         sd.title = body.title
     if body.due_at is not None:
         sd.due_at = body.due_at
+    if body.priority is not None:
+        sd.priority = body.priority
     sd.updated_at = utcnow()
     db.commit()
     db.refresh(sd)

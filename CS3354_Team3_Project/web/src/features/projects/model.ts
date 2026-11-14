@@ -6,10 +6,11 @@
  */
 import type { Project, ProjectStatus, ProjectType } from '../../shared/types';
 
+/** Order of the mode tabs in projects.html: School, Personal, Work. */
 export const PROJECT_TYPES: { value: ProjectType; label: string; icon: string }[] = [
-  { value: 'work', label: 'Work', icon: 'folder' },
   { value: 'school', label: 'School', icon: 'flag' },
   { value: 'personal', label: 'Personal', icon: 'target' },
+  { value: 'work', label: 'Work', icon: 'folder' },
 ];
 
 export const PROJECT_STATUSES: { value: ProjectStatus; label: string }[] = [

@@ -3,7 +3,7 @@
  * @description Applies the user's light / dark theme and color-blindness palette to the whole page (the
  *   "dark" class and a data-cb attribute that swap the CSS color variables). Signed-in users' choices are
  *   saved to their profile; visitors' choices are remembered in this browser.
- * @traces SE-FR-14, SE-FR-15
+ * @traces SE-FR-14, SE-FR-15, SE-NFR-05
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAuth } from '../features/auth/AuthProvider';
@@ -25,7 +25,7 @@ const CB_KEY = 'pf_cb_mode';
 function initialTheme(): Theme {
   const saved = localStorage.getItem(THEME_KEY);
   if (saved === 'light' || saved === 'dark') return saved;
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  return 'dark'; // the mockups' reference theme
 }
 
 export function applyAppearance(theme: Theme, mode: ColorBlindMode, root: HTMLElement = document.documentElement): void {

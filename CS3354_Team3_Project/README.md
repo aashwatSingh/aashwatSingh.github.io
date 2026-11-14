@@ -34,7 +34,7 @@ All demo accounts use the password `ProjectForge!1`.
 | `staff` | Member | Owner of "Personal Portfolio Site" |
 | `preethi`, `saaqib`, `myoram`, `aashwat` | Member | |
 
-When demo mode is on, the top bar has a **Quick Demo Role Switcher** (Jon · Owner / Tyler · Manager / Staff · Member). The reset-password page also has a **demo inbox** that shows the reset and unlock emails the server would send.
+When demo mode is on, the sidebar footer has a **Quick Demo Role Switcher** (Jon · Owner / Tyler · Manager / Staff · Member). The reset-password page also has a **demo inbox** that shows the reset and unlock emails the server would send.
 
 ### Suggested live demo
 
@@ -43,7 +43,7 @@ When demo mode is on, the top bar has a **Quick Demo Role Switcher** (Jon · Own
 3. Switch to **Staff · Member** and open **Cost** again to show the server's 403 "Access denied" with no figures. Open **Charts** to show "Only your hours". (UC-01, UC-02)
 4. On **Tasks** as Staff, show that there is no "New task" button and that other people's cards are locked. Switch to Tyler to create and assign a task. (UC-18)
 5. Open a task and post `**hi** <script>alert(1)</script> @staff @nobody`. The script is stripped, a warning appears for `@nobody`, and Staff gets a live toast. (UC-21, UC-22)
-6. On **Dashboard**, choose **Edit layout** and drag a widget onto another one. It snaps back. Then use **Restore default**. (UC-16, UC-17)
+6. On **Home** (dashboard), choose **Customize** and drag a widget onto another one. A red outline shows the overlap and the widget snaps back. Then use **Restore default**. (UC-16, UC-17)
 7. On **People**, try to demote the only owner. You get "Project must have at least one owner". (UC-20)
 
 ## Configuration
@@ -51,16 +51,16 @@ When demo mode is on, the top bar has a **Quick Demo Role Switcher** (Jon · Own
 Copy `backend/.env.example` to `backend/.env`. With nothing set you get SQLite in demo mode. For Supabase:
 
 1. In the Supabase SQL editor, run `supabase/migrations/0001_initial_schema.sql`. It creates the tables, indexes, the soft-deadline trigger, and the RLS policies. You can then optionally run `supabase/seed.sql`.
-2. Set `DATABASE_URL` to the Supabase connection string, then set `JWT_SECRET` (32+ characters), `DEMO_MODE=false` and `ENVIRONMENT=production` for a real deployment.
+2. Set `DATABASE_URL` to the Supabase connection string, then set `JWT_SECRET` (32+ characters), `DEMO_MODE=false` and `ENVIRONMENT=production` for a real deployment. With demo mode off, `FORCE_HTTPS` defaults to on: plain-HTTP requests are redirected to HTTPS and every response carries HSTS (SE-NFR-06). Behind a TLS-terminating proxy, start uvicorn with `--proxy-headers`.
 
 If Postgres is unreachable and `DB_FALLBACK_TO_SQLITE=true`, the backend logs a warning and falls back to SQLite.
 
 ## Tests
 
 ```bash
-cd backend && python -m pytest                     # 15 tests, UC-01..UC-22 and SE-NFR-01..12
+cd backend && python -m pytest                     # 16 tests, UC-01..UC-22 and SE-NFR-01..12
 TEST_DATABASE_URL=postgresql://user@host/db python -m pytest   # same suite on PostgreSQL
-cd web && npm test                                 # 30 Vitest unit tests
+cd web && npm test                                 # 31 Vitest unit tests
 cd web && npm run build                            # type-check + production build
 ```
 
@@ -89,29 +89,60 @@ The project can never be left without an owner: demoting or removing the last ow
 
 | Area (owner) | Backend | Frontend | Requirements |
 |---|---|---|---|
-| Auth & settings (Tyler) | `routers/auth.py`, `routers/settings.py`, `core/security.py` | `features/auth`, `features/settings`, Login / SignUp / ResetPassword / Settings pages, `ThemeProvider` | UC-08..UC-11, SE-FR-11..15, SE-NFR-05/06 |
+| Auth & settings (Tyler) | `routers/auth.py`, `routers/settings.py`, `core/security.py` (hashing, lockout, rate limit, HSTS / CSP) | `features/auth`, `features/settings`, Login / SignUp / ResetPassword / Settings pages, `ThemeProvider`, `index.css` / Tailwind tokens, build targets | UC-08..UC-11, SE-FR-11..15, SE-NFR-05/06 |
 | Costs, time, reports (Jon) | `routers/costs.py`, `routers/time_tracking.py`, `routers/reports.py` | `features/costs`, `features/time-tracking`, `features/reports`, Costs / TimeTracking / Performance pages | UC-01..UC-04, SE-FR-01..05, SE-NFR-01/02 |
-| Soft deadlines (Preethi) | `routers/soft_deadlines.py`, DB trigger | `features/soft-deadlines`, `services/apiClient.ts` (5 s timeout + retry) | UC-05..UC-07, SE-FR-06..10, SE-NFR-03/04 |
+| Soft deadlines (Preethi) | `routers/soft_deadlines.py` (date, time, high / medium / low priority), DB trigger | `features/soft-deadlines` (inline date / time / priority controls), `services/apiClient.ts` (5 s timeout + retry) | UC-05..UC-07, SE-FR-06..10, SE-NFR-03/04 |
 | Projects & exports (Saaqib) | `routers/projects.py`, `routers/exports.py`, `core/realtime.py` | `features/projects`, `features/export`, Projects / ProjectDetails / Calendar pages | UC-12..UC-15, SE-FR-16..20, SE-NFR-09/10 |
 | Dashboard (Myoram) | `routers/dashboard.py` | `features/dashboard` (AABB `Widget.overlaps` / `moveTo`), Dashboard page | UC-16, UC-17, SE-FR-21..25, SE-NFR-07/08 |
 | Tasks, members, collaboration (Aashwat) | `routers/tasks.py`, `routers/members.py`, `routers/collaboration.py`, `core/sanitizer.py` | `features/tasks`, `features/members`, `features/collaboration`, Board / TaskDetail / People / Notifications pages | UC-18..UC-22, SE-FR-26..30, SE-NFR-11/12 |
 
-The requirement docs did not spell out SE-NFR-03, SE-NFR-05 and SE-NFR-06. This project traces them as follows (adjust if your SRS differs):
+### Nonfunctional requirements
 
-- SE-NFR-03: soft-deadline responsiveness
-- SE-NFR-05: credential storage and hashing
-- SE-NFR-06: brute-force protection
+The 12 NFRs below use the definitions in the team README (`Jsorey4/CS3354_Team3_Project`). Password hashing, lockout and rate limiting are not NFRs; they are traced to SE-FR-11 and UC-08..UC-11.
+
+| ID | Requirement | How it is met | Verified by |
+|---|---|---|---|
+| SE-NFR-01 | Accurate financial and percentage calculations | `Decimal` with `ROUND_HALF_UP` to $0.01 on the server, BigInt cents in the browser, percentages to 0.01 % | `test_uc01_…`, `test_uc02_…` (33.33 %), `costs/model.test.ts` |
+| SE-NFR-02 | Reports contain authorized data only | Every report, dashboard and export query for a member is filtered by their user id; financial routes return 403 | `test_uc01_…`, `test_uc02_…`, `test_uc16_…`, Playwright member checks |
+| SE-NFR-03 | A simple interface for managing soft deadlines | Inline date, time and priority controls on the task screen; problems are explained under the controls before saving; failed edits snap back to the saved value | `test_uc05_uc06_…_se_nfr03`, `soft-deadlines/validation.test.ts`, Playwright soft-deadline flow |
+| SE-NFR-04 | Save deadline changes within 5 seconds | 5 s request timeout, one automatic retry with the same `Idempotency-Key`, then a Retry / Cancel banner that keeps the input | `test_se_nfr04_…`, `services/apiClient.test.ts` |
+| SE-NFR-05 | Chrome, Edge, Firefox and Safari compatibility | Only standard CSS custom properties, Flexbox and Grid; `browserslist` + autoprefixer; Vite build targets Chrome / Edge / Firefox 111+ and Safari 16.4+; no single-engine browser APIs | Production build. Only Chromium is installed in this environment, so Firefox, Safari and Edge still need a manual pass |
+| SE-NFR-06 | Encrypt transmitted account and profile data using HTTPS | TLS enforced with `FORCE_HTTPS` (redirect + HSTS) whenever demo mode is off, CSP on the web app, JWT only in the `Authorization: Bearer` header (no cookies, never in URLs), TOTP MFA | `test_se_nfr06_https_transport_and_bearer_only_sessions_se_fr11` |
+| SE-NFR-07 | Responsive widgets without overlap | AABB overlap check in the browser and on the server (409), snap back with a red outline, single-column layout on small screens | `test_uc16_uc17_…`, `dashboard/model.test.ts`, Playwright drag |
+| SE-NFR-08 | Load dashboard widgets within 3 seconds | One consolidated `/api/dashboard/widgets` call; load time shown in the page subtitle | `test_uc16_uc17_…` |
+| SE-NFR-09 | Projects with 50+ members | Single bulk username query on create; grouped queries for member lists and avatar stacks | `test_uc12_uc14_uc15_…` (55 members, one query) |
+| SE-NFR-10 | Progress updates within 2 seconds | WebSocket `progress` event after every task change | `test_se_nfr10_…` |
+| SE-NFR-11 | Every task, comment and notification request checked against current membership and role | `require_project_role()` on every route, re-read from the database on each request | `test_uc18_uc20_uc21_…`, `test_se_nfr02_rbac_…` |
+| SE-NFR-12 | Mention and project-event notifications within 2 seconds | WebSocket `notification` event plus toast | `test_uc18_uc20_uc21_…` (< 2 s), Playwright (≈120 ms) |
 
 ## Security notes
 
-- Passwords are hashed with bcrypt and TOTP secrets are stored only on `user_profiles`. There are no UI-named tables (CWE-256). The migration also revokes client roles' read access to credential columns.
+- Passwords are hashed with bcrypt (SE-FR-11, UC-08) and TOTP secrets are stored only on `user_profiles`. There are no UI-named tables (CWE-256). The migration also revokes client roles' read access to credential columns.
 - `/api/auth/signup` and `/api/auth/login` are limited to 5 requests per 60 s per IP, with HTTP 429 `{"detail": "Try again later"}` (CWE-307). Login checks the lockout before checking the password. After 5 failures the account locks for 30 minutes and a signed, single-use unlock link is sent.
 - Comments pass through an `nh3` sanitizer (no tags, no `on*=` handlers, no `javascript:` or `data:` links). The browser renders Markdown with a parser that never inserts raw HTML (CWE-79).
 - Before `.xlsx` and Google Sheets export, every cell starting with `= + - @ \t \r` is prefixed with `'` (CWE-1236).
 - Saves retried by the browser carry the same `Idempotency-Key`, so a timed-out request cannot be stored twice.
+- Outside demo mode, HTTP is redirected to HTTPS with HSTS; the served web app carries a strict Content-Security-Policy (SE-NFR-06).
 
 ## Deviations from the requested file tree
 
 - `backend/app/core/realtime.py` holds the WebSocket hub. Routers need to broadcast, and importing from `main.py` would be circular. `main.py` mounts the `/ws` endpoint.
-- Extra shared modules: `web/src/shared/ui.tsx` (UI kit), `shared/format.ts`, `shared/useSave.ts` (Retry/Cancel state), feature sub-components, Vitest `*.test.ts` files, `web/public/logo.svg`, and `backend/pytest.ini`.
-- **Visual reference:** the 15 HTML mockups and `assets/logo.png` were not available to the generator. The layout follows the names and descriptions of those screens: sidebar + top bar shell, cards, badges, tables and modals. `web/public/logo.svg` is a stand-in logo. Compare each page in `web/src/pages/` against its mockup and adjust Tailwind classes as needed.
+- Extra shared modules: `web/src/shared/ui.tsx` (UI kit), `shared/format.ts`, `shared/useSave.ts` (Retry/Cancel state), feature sub-components, Vitest `*.test.ts` files and `backend/pytest.ini`.
+
+## Visual design
+
+Every screen follows the ProjectForge Design System in the 15 HTML mockups: Midnight `#0F1424` background, `#1C2340` cards with 16 px corners, periwinkle `#8FA8FF` primary buttons, purple `#A78BFA` accents, the gold wordmark `#F5B942`, Inter, and the gold-hammer logo (`web/public/logo.png`). The tokens live in `web/tailwind.config.js` and `web/src/index.css`. Dark is the default theme; light is its daylight counterpart (SE-FR-14).
+
+Intentional differences from the mockups:
+
+- **Landing:** the "AI assistant" feature card and copy are replaced by Time tracking, because no requirement defines an AI assistant.
+- **Tasks:** there are four columns (To Do, In Progress, Review, Done) because the task model has a Review status. On screens narrower than 1536 px the Task details panel slides in when a card is selected, so the columns keep the mockup's card width.
+- **Calendar:** there is no "+ Event" button or Day view; no requirement defines stored calendar events. "Connect Google", "Outlook" and "Export iCal" open the one-way export dialog.
+- **Profile:** the mockup's notification-preference toggles and calendar "Connections" are not shown; nothing in the schema stores them yet (the team README lists notification preferences and OAuth connection state as "required but not modeled"). The page shows Account, Appearance (theme and project mode), Color vision and Security (2FA) instead.
+- **Shell:** the mockups have no top bar, so the demo role switcher, live indicator and theme toggle sit in the sidebar footer.
+
+## Open items against the team README
+
+- **Backend technology:** the team README says "Supabase only" with no second backend. This build has a FastAPI backend (as requested) on top of the Supabase-compatible schema and RLS policies. The team should decide whether to keep FastAPI or move the routers into Edge Functions / RLS.
+- **UC-18:** the team README makes a task's due date required; this build keeps it optional.
+- **UC-10:** who unlocks an account is an open decision; this build unlocks with an emailed, signed, single-use token.

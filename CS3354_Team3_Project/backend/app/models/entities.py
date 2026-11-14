@@ -6,8 +6,8 @@
     lists, tasks, soft deadlines, comments, notifications, dashboard widgets, bids/budgets, stage costs,
     expenses, time entries) as Python classes. Passwords and 2FA secrets live ONLY on UserProfile - there
     are no "Login Page", "Sidebar", "templates" or "pages" tables (CWE-256 fix).
-@traces: SE-FR-01, SE-FR-02, SE-FR-03, SE-FR-04, SE-FR-06, SE-FR-11, SE-FR-12, SE-FR-13, SE-FR-14, SE-FR-15,
-    SE-FR-16, SE-FR-17, SE-FR-21, SE-FR-26, SE-FR-27, SE-FR-28, SE-FR-29, SE-FR-30, SE-NFR-01, SE-NFR-05,
+@traces: SE-FR-01, SE-FR-02, SE-FR-03, SE-FR-04, SE-FR-06, SE-FR-09, SE-FR-11, SE-FR-12, SE-FR-13, SE-FR-14, SE-FR-15,
+    SE-FR-16, SE-FR-17, SE-FR-21, SE-FR-26, SE-FR-27, SE-FR-28, SE-FR-29, SE-FR-30, SE-NFR-01,
     UC-01..UC-22
 """
 
@@ -42,6 +42,7 @@ TASK_STATUSES = ("todo", "in_progress", "review", "done")
 TASK_PRIORITIES = ("low", "medium", "high", "urgent")
 THEMES = ("light", "dark")
 COLOR_BLIND_MODES = ("none", "protanopia", "deuteranopia", "tritanopia", "high_contrast")
+SOFT_DEADLINE_PRIORITIES = ("high", "medium", "low")
 EXPENSE_CATEGORIES = ("labor", "materials", "software", "equipment", "travel", "services", "other")
 NOTIFICATION_KINDS = (
     "mention",
@@ -87,7 +88,7 @@ class UserProfile(Base):
     locked_until: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     unlock_token_jti: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reset_token_jti: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    theme: Mapped[str] = mapped_column(String(10), nullable=False, default="light")
+    theme: Mapped[str] = mapped_column(String(10), nullable=False, default="dark")
     color_blind_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="none")
     default_project_type: Mapped[str] = mapped_column(String(10), nullable=False, default="work")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=utcnow)
@@ -209,6 +210,7 @@ class Task(Base):
 class SoftDeadline(Base):
     __tablename__ = "soft_deadlines"
     __table_args__ = (
+        CheckConstraint(_in("priority", SOFT_DEADLINE_PRIORITIES), name="ck_soft_deadlines_priority"),
         Index("ix_soft_deadlines_project_due", "project_id", "due_at"),
         Index("ix_soft_deadlines_task_due", "task_id", "due_at"),
     )
@@ -218,6 +220,7 @@ class SoftDeadline(Base):
     project_id: Mapped[str] = mapped_column(GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     title: Mapped[str] = mapped_column(String(120), nullable=False)
     due_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    priority: Mapped[str] = mapped_column(String(10), nullable=False, default="medium")
     is_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     created_by: Mapped[str | None] = mapped_column(GUID(), ForeignKey("user_profiles.id", ondelete="SET NULL"))

@@ -1,17 +1,18 @@
 /**
  * @author Myoram Langwang
- * @description The 12-column dashboard grid from dashboard.html. In "Edit layout" mode each widget can be
+ * @description The 12-column dashboard grid from dashboard.html. In "Customize" mode each widget can be
  *   dragged by its handle; a green outline previews a free spot and a red one an overlap. Dropping on an
  *   overlap, or a server 409, snaps the widget back to where it was with a short shake.
- * @traces SE-FR-21, SE-FR-23, SE-FR-24, SE-NFR-07, UC-16, UC-17
+ * @traces SE-FR-21, SE-FR-23, SE-FR-24, SE-NFR-05, SE-NFR-07, UC-16, UC-17
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Widget as WidgetModel } from '../../shared/types';
 import { Icon } from '../../shared/ui';
 import { collidesWithAny, gridRows, moveTo, targetCell } from './model';
 
-const ROW_HEIGHT = 84;
-const GAP = 16;
+// Mockup cards: 24px gaps, ~256px rows (3 x 72px + 2 x 24px gaps = 264px).
+const ROW_HEIGHT = 72;
+const GAP = 24;
 
 interface Props {
   widgets: WidgetModel[];
@@ -110,12 +111,12 @@ export function WidgetGrid({ widgets, columns, editing, onMove, onHide, onRemove
     >
       {editing && wide
         ? Array.from({ length: rows * columns }, (_, i) => (
-            <div key={`cell-${i}`} className="rounded-lg border border-dashed border-line/70" style={{ gridColumn: (i % columns) + 1, gridRow: Math.floor(i / columns) + 1 }} aria-hidden />
+            <div key={`cell-${i}`} className="rounded-btn border border-dashed border-line" style={{ gridColumn: (i % columns) + 1, gridRow: Math.floor(i / columns) + 1 }} aria-hidden />
           ))
         : null}
       {ghost && wide ? (
         <div
-          className={`pointer-events-none z-20 rounded-xl border-2 border-dashed ${ghostBlocked ? 'border-danger bg-danger/10' : 'border-ok bg-ok/10'}`}
+          className={`pointer-events-none z-20 rounded-card border-2 ${ghostBlocked ? 'border-dashed border-danger bg-danger/10' : 'border-dashed border-ok bg-ok/10'}`}
           style={{ gridColumn: `${ghost.grid_x + 1} / span ${ghost.width}`, gridRow: `${ghost.grid_y + 1} / span ${ghost.height}` }}
           aria-hidden
         />
@@ -123,15 +124,15 @@ export function WidgetGrid({ widgets, columns, editing, onMove, onHide, onRemove
       {visible.map((w) => (
         <section
           key={w.id}
-          className={`card z-10 flex min-h-0 flex-col overflow-hidden ${drag?.id === w.id ? 'opacity-60' : ''} ${shaking === w.id ? 'animate-shake ring-2 ring-danger' : ''}`}
+          className={`card z-10 flex min-h-0 flex-col overflow-hidden p-6 ${drag?.id === w.id ? 'opacity-60' : ''} ${shaking === w.id ? 'animate-shake border-danger ring-2 ring-danger' : ''}`}
           style={wide ? { gridColumn: `${w.grid_x + 1} / span ${w.width}`, gridRow: `${w.grid_y + 1} / span ${w.height}` } : { minHeight: w.height * ROW_HEIGHT }}
           aria-label={w.title}
         >
-          <header className="flex items-center gap-2 border-b border-line px-4 py-2.5">
+          <header className="flex items-center gap-2">
             {editing ? (
               <button
                 type="button"
-                className="cursor-grab touch-none rounded p-1 text-muted hover:bg-surface-2 active:cursor-grabbing"
+                className="-ml-1 cursor-grab touch-none rounded p-1 text-muted hover:bg-surface-2 active:cursor-grabbing"
                 aria-label={`Move ${w.title} (drag, or use arrow keys)`}
                 onPointerDown={(e) => {
                   e.preventDefault();
@@ -148,7 +149,7 @@ export function WidgetGrid({ widgets, columns, editing, onMove, onHide, onRemove
                 <Icon name="grip" />
               </button>
             ) : null}
-            <h2 className="flex-1 truncate text-sm font-semibold">{w.title}</h2>
+            <h2 className="card-title flex-1 truncate">{w.title}</h2>
             {editing ? (
               <>
                 <button type="button" className="btn-ghost p-1" onClick={() => onHide(w)} aria-label={`Hide ${w.title}`} title="Hide">
@@ -160,7 +161,7 @@ export function WidgetGrid({ widgets, columns, editing, onMove, onHide, onRemove
               </>
             ) : null}
           </header>
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">{renderBody(w)}</div>
+          <div className="mt-3 min-h-0 flex-1 overflow-y-auto">{renderBody(w)}</div>
         </section>
       ))}
     </div>

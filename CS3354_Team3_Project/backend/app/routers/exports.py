@@ -103,7 +103,7 @@ def collect_deadlines(db: Session, project: Project, body: CalendarExportRequest
                     uid=f"soft-{sd.id}@projectforge",
                     title=f"{sd.title} (soft deadline: {title})",
                     starts_at=sd.due_at,
-                    description=f"Soft deadline for \u201c{title}\u201d in {project.name}.",
+                    description=f"Soft deadline ({sd.priority} priority) for \u201c{title}\u201d in {project.name}.",
                     category="Soft deadline",
                 )
             )
@@ -301,14 +301,14 @@ class ExportJob:
         return sheet
 
     def _soft_deadlines(self) -> Sheet:
-        sheet = Sheet("Soft deadlines", ["Task", "Soft deadline", "Due (UTC)", "Completed"])
+        sheet = Sheet("Soft deadlines", ["Task", "Soft deadline", "Due (UTC)", "Priority", "Completed"])
         for sd, title in self.db.execute(
             select(SoftDeadline, Task.title)
             .join(Task, Task.id == SoftDeadline.task_id)
             .where(SoftDeadline.project_id == self.project.id)
             .order_by(SoftDeadline.due_at)
         ).all():
-            sheet.rows.append([title, sd.title, sd.due_at, "yes" if sd.is_completed else "no"])
+            sheet.rows.append([title, sd.title, sd.due_at, sd.priority, "yes" if sd.is_completed else "no"])
         return sheet
 
     def _time_entries(self) -> Sheet:

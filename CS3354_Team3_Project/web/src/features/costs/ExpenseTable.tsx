@@ -3,7 +3,7 @@
  * @description Expense list for cost.html: search box, category filter, sortable Date / Amount / Category
  *   headers, an add-expense row with validation, and inline edit / delete. Its total is shown separately
  *   and is never combined with bids, budgets or stage costs.
- * @traces SE-FR-03, SE-NFR-01, SE-NFR-04, UC-01
+ * @traces SE-FR-02, SE-FR-03, SE-NFR-01, SE-NFR-04, UC-01
  */
 import { useState } from 'react';
 import type { CostQuery, CostSummary, Expense, ExpenseCategory } from '../../shared/types';
@@ -91,8 +91,8 @@ export function ExpenseTable({ projectId, summary, query, onQuery, onChanged }: 
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[12rem] flex-1">
-          <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-          <input className="input pl-9" placeholder="Search expenses" value={query.search ?? ''} onChange={(e) => onQuery({ ...query, search: e.target.value })} aria-label="Search expenses" />
+          <Icon name="search" className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+          <input className="input pl-10" placeholder="Search expenses" value={query.search ?? ''} onChange={(e) => onQuery({ ...query, search: e.target.value })} aria-label="Search expenses" />
         </div>
         <select className="input w-auto" value={query.category ?? ''} onChange={(e) => onQuery({ ...query, category: e.target.value || undefined })} aria-label="Filter by category">
           <option value="">All categories</option>
@@ -100,9 +100,9 @@ export function ExpenseTable({ projectId, summary, query, onQuery, onChanged }: 
         </select>
       </div>
       {rowError ? <Alert onClose={() => setRowError(null)}>{rowError}</Alert> : null}
-      <div className="overflow-x-auto rounded-lg border border-line">
+      <div className="overflow-x-auto">
         <table className="w-full">
-          <thead className="bg-surface-2">
+          <thead>
             <tr>
               <SortHeader label="Date" field="expense_date" query={query} onQuery={onQuery} />
               <SortHeader label="Category" field="category" query={query} onQuery={onQuery} />
@@ -112,7 +112,7 @@ export function ExpenseTable({ projectId, summary, query, onQuery, onChanged }: 
               <th className="table-head w-24" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-line">
+          <tbody className="[&>tr]:border-b [&>tr]:border-line">
             {summary.expenses.length === 0 ? (
               <tr><td className="table-cell py-8 text-center text-muted" colSpan={6}>No expenses match.</td></tr>
             ) : null}
@@ -144,7 +144,7 @@ export function ExpenseTable({ projectId, summary, query, onQuery, onChanged }: 
                   <td className="table-cell"><Badge tone="neutral">{titleCase(e.category)}</Badge></td>
                   <td className="table-cell">{e.description}</td>
                   <td className="table-cell text-muted">{stageName(e.stage_cost_id) ?? '—'}</td>
-                  <td className="table-cell text-right tabular-nums font-medium">{formatMoney(e.amount, summary.currency)}</td>
+                  <td className="table-cell text-right font-bold tabular-nums text-ink">{formatMoney(e.amount, summary.currency)}</td>
                   <td className="table-cell text-right">
                     <button type="button" className="btn-ghost p-1.5" onClick={() => startEdit(e)} aria-label={`Edit ${e.description}`}><Icon name="edit" /></button>
                     <button type="button" className="btn-ghost p-1.5 hover:text-danger" onClick={() => void remove(e)} aria-label={`Delete ${e.description}`}><Icon name="trash" /></button>
@@ -153,16 +153,16 @@ export function ExpenseTable({ projectId, summary, query, onQuery, onChanged }: 
               ),
             )}
           </tbody>
-          <tfoot className="border-t-2 border-line bg-surface-2/60">
+          <tfoot className="border-t border-line-strong">
             <tr>
               <td className="table-cell font-bold" colSpan={4}>Expenses total ({summary.expense_count})</td>
-              <td className="table-cell text-right text-base font-bold tabular-nums">{formatMoney(summary.expense_total, summary.currency)}</td>
+              <td className="table-cell text-right text-[15px] font-bold tabular-nums text-ink">{formatMoney(summary.expense_total, summary.currency)}</td>
               <td />
             </tr>
           </tfoot>
         </table>
       </div>
-      <div className="rounded-lg border border-dashed border-line p-3">
+      <div className="rounded-btn border border-dashed border-line-strong p-4">
         <p className="label">Add expense</p>
         <RetryBanner error={add.networkError} onRetry={add.retry} onCancel={add.cancel} busy={add.saving} />
         {add.error && !Object.keys(add.fieldErrors).length ? <Alert onClose={add.reset}>{add.error.detail}</Alert> : null}

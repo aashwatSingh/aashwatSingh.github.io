@@ -1,16 +1,16 @@
 /**
  * @author Tyler Gaines - matches login.html (+ 2FA step)
  * @description Sign-in screen. Step 1: email/username and password, with clear messages for wrong details,
- *   a locked account (with how to unlock) and too many attempts. Step 2 (when 2FA is on): the 6-digit code.
- *   Opening an unlock link from the lockout email unlocks the account right here. Demo mode lists the
- *   seeded accounts and the demo code.
- * @traces SE-FR-11, UC-09, UC-10
+ *   a locked account (with how to unlock) and too many attempts. Step 2 (when 2FA is on): the 6-digit code,
+ *   shown inline in the same card. Opening an unlock link from the lockout email unlocks the account right
+ *   here. Demo mode lists the seeded accounts and the demo code below the card.
+ * @traces SE-FR-11, SE-NFR-06, UC-09, UC-10
  */
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { ApiError } from '../services/apiClient';
 import { useAuth } from '../features/auth/AuthProvider';
-import { AuthLayout } from '../features/auth/AuthLayout';
+import { AUTH_BUTTON, AUTH_INPUT, AuthLayout } from '../features/auth/AuthLayout';
 import { authController } from '../features/auth/authController';
 import { MfaCodeInput } from '../features/auth/MfaCodeInput';
 import { isValidMfaCode } from '../features/auth/validation';
@@ -52,8 +52,12 @@ export function LoginPage() {
 
   const submitPassword = async (e: FormEvent) => {
     e.preventDefault();
-    setError(null);
     setNotice(null);
+    if (!email.trim() || !password) {
+      setError({ tone: 'danger', title: 'Enter your email (or username) and password' });
+      return;
+    }
+    setError(null);
     setBusy(true);
     try {
       const response = await login(email.trim(), password);
@@ -86,18 +90,31 @@ export function LoginPage() {
     }
   };
 
+  const demoPanel = demoMode ? (
+    <div className="rounded-card border border-dashed border-warn/50 bg-surface-2 p-4 text-sm">
+      <p className="font-semibold text-ink">Demo accounts</p>
+      <p className="mt-1 text-body">Password for all: <span className="font-mono text-ink">ProjectForge!1</span> · 2FA demo code <span className="font-mono text-ink">123456</span></p>
+      {!pendingMfa ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {[['jon', 'Jon · Owner'], ['tyler', 'Tyler · Manager (2FA)'], ['staff', 'Staff · Member']].map(([u, label]) => (
+            <button key={u} type="button" className="btn-secondary btn-sm" onClick={() => { setEmail(u); setPassword('ProjectForge!1'); }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  ) : null;
+
   if (pendingMfa) {
     return (
-      <AuthLayout title="Two-factor verification" subtitle="Enter the 6-digit code from your authenticator app.">
-        <form className="space-y-5" onSubmit={submitCode}>
+      <AuthLayout title="Two-factor verification" subtitle="Enter the 6-digit code from your authenticator app." below={demoPanel}
+        footer={<button type="button" className="font-semibold text-accent" onClick={() => { cancelMfa(); setError(null); }}>Use a different account</button>}>
+        <form className="flex flex-col gap-5" onSubmit={submitCode}>
           {error ? <Alert tone={error.tone} title={error.title}>{error.text}</Alert> : null}
           <MfaCodeInput value={code} onChange={setCode} disabled={busy} />
-          {demoMode ? <Alert tone="info">Demo mode: the code <span className="font-mono font-bold">123456</span> is accepted.</Alert> : null}
-          <button type="submit" className="btn-primary w-full py-2.5" disabled={busy || code.length !== 6}>
-            <Icon name="shield" /> {busy ? 'Verifying…' : 'Verify and sign in'}
-          </button>
-          <button type="button" className="btn-ghost w-full" onClick={() => { cancelMfa(); setError(null); }}>
-            Use a different account
+          <button type="submit" className={AUTH_BUTTON} disabled={busy || code.length !== 6}>
+            <Icon name="shield" /> {busy ? 'Verifying…' : 'Verify and log in'}
           </button>
         </form>
       </AuthLayout>
@@ -106,44 +123,32 @@ export function LoginPage() {
 
   return (
     <AuthLayout
-      title="Welcome back"
-      subtitle="Sign in to your ProjectForge account."
-      footer={<>New here? <Link to="/signup" className="font-semibold text-brand">Create an account</Link></>}
+      title="Log in"
+      subtitle="Welcome back. Enter your details to continue."
+      footer={<>Don't have an account? <Link to="/signup" className="font-semibold text-accent">Sign up</Link></>}
+      below={demoPanel}
     >
-      <form className="space-y-4" onSubmit={submitPassword} noValidate>
+      <form className="flex flex-col gap-5" onSubmit={submitPassword} noValidate>
         {notice ? <Alert tone="ok">{notice}</Alert> : null}
         {error ? <Alert tone={error.tone} title={error.title}>{error.text}</Alert> : null}
         <Field label="Email or username" htmlFor="login-email">
-          <input id="login-email" className="input" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <input id="login-email" className={AUTH_INPUT} placeholder="you@example.com" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
         </Field>
         <Field label="Password" htmlFor="login-password">
           <div className="relative">
-            <input id="login-password" className="input pr-10" type={show ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-            <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-ink" onClick={() => setShow((s) => !s)} aria-label={show ? 'Hide password' : 'Show password'}>
+            <input id="login-password" className={`${AUTH_INPUT} pr-11`} placeholder="Enter your password" type={show ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-ink" onClick={() => setShow((s) => !s)} aria-label={show ? 'Hide password' : 'Show password'}>
               <Icon name={show ? 'eye-off' : 'eye'} />
             </button>
           </div>
         </Field>
-        <div className="flex justify-end">
-          <Link to="/reset-password" className="text-sm font-semibold text-brand">Forgot password?</Link>
+        <div className="-mt-1 flex justify-end">
+          <Link to="/reset-password" className="text-sm font-semibold text-accent">Forgot password?</Link>
         </div>
-        <button type="submit" className="btn-primary w-full py-2.5" disabled={busy || !email || !password}>
-          {busy ? 'Signing in…' : 'Sign in'}
+        <button type="submit" className={AUTH_BUTTON} disabled={busy}>
+          {busy ? 'Logging in…' : 'Log in'}
         </button>
       </form>
-      {demoMode ? (
-        <div className="mt-6 rounded-xl border border-dashed border-warn/60 bg-warn/5 p-4 text-sm">
-          <p className="font-semibold">Demo accounts</p>
-          <p className="mt-1 text-muted">Password for all: <span className="font-mono text-ink">ProjectForge!1</span></p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {[['jon', 'Jon · Owner'], ['tyler', 'Tyler · Manager (2FA)'], ['staff', 'Staff · Member']].map(([u, label]) => (
-              <button key={u} type="button" className="btn-secondary py-1 text-xs" onClick={() => { setEmail(u); setPassword('ProjectForge!1'); }}>
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
     </AuthLayout>
   );
 }

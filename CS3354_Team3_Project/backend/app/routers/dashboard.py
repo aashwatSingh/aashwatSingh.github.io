@@ -55,24 +55,25 @@ class WidgetType:
     height: int
 
 
+# Titles and the default arrangement follow dashboard.html.
 WIDGET_TYPES: dict[str, WidgetType] = {
-    "project_progress": WidgetType("Project Progress", "Progress bars for each of your projects", 8, 3),
-    "my_tasks": WidgetType("My Tasks", "Open tasks assigned to you, soonest first", 4, 3),
-    "upcoming_deadlines": WidgetType("Upcoming Deadlines", "Project, task and soft deadlines in the next 14 days", 4, 3),
+    "upcoming_deadlines": WidgetType("Upcoming deadlines", "Project, task and soft deadlines in the next 14 days", 8, 3),
+    "task_progress": WidgetType("Task progress", "Share of tasks done across your projects", 4, 3),
+    "project_progress": WidgetType("Projects", "Completion bar for each of your projects", 4, 3),
+    "time_summary": WidgetType("Time tracked", "Hours you logged this week and your running timer", 4, 3),
+    "budget_overview": WidgetType("Cost summary", "Spend against budget for projects you manage", 4, 3),
+    "my_tasks": WidgetType("My tasks", "Open tasks assigned to you, soonest first", 4, 3),
     "notifications": WidgetType("Notifications", "Your latest unread notifications", 4, 3),
-    "time_summary": WidgetType("Time This Week", "Hours you logged this week and your running timer", 4, 3),
-    "budget_overview": WidgetType("Budget Overview", "Bid, budget and spend for projects you manage", 8, 2),
-    "calendar_week": WidgetType("This Week", "A seven-day strip of everything due this week", 4, 2),
+    "calendar_week": WidgetType("This week", "A seven-day strip of everything due this week", 8, 2),
 }
 
 # (type, x, y) - sizes come from WIDGET_TYPES. Non-overlapping by construction (checked in tests).
 DEFAULT_LAYOUT: list[tuple[str, int, int]] = [
-    ("project_progress", 0, 0),
-    ("my_tasks", 8, 0),
-    ("upcoming_deadlines", 0, 3),
-    ("notifications", 4, 3),
-    ("time_summary", 8, 3),
-    ("budget_overview", 0, 6),
+    ("upcoming_deadlines", 0, 0),
+    ("task_progress", 8, 0),
+    ("project_progress", 0, 3),
+    ("time_summary", 4, 3),
+    ("budget_overview", 8, 3),
 ]
 
 Rect = tuple[int, int, int, int]
@@ -178,6 +179,21 @@ def build_widget_data(db: Session, user: UserProfile, visible_types: set[str]) -
             }
             for m, p in memberships
         ]
+
+    if "task_progress" in visible_types:
+        counts = task_counts(db, project_ids)
+        total = sum(t for t, _ in counts.values())
+        done = sum(d for _, d in counts.values())
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        due_today = db.execute(
+            select(func.count(Task.id)).where(
+                Task.assignee_id == user.id,
+                Task.status != "done",
+                Task.due_date >= day_start,
+                Task.due_date < day_start + timedelta(days=1),
+            )
+        ).scalar_one()
+        data["task_progress"] = {"total": total, "done": done, "progress_pct": percent(done, total), "due_today": int(due_today)}
 
     if "my_tasks" in visible_types:
         names = {p.id: p.name for _, p in memberships}
