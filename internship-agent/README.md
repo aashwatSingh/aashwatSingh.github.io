@@ -223,10 +223,31 @@ python answer_blockers.py
 `report.py` prints the auto-fill share per portal and what would unlock the rest (`--rescore`
 re-answers the logged questions with your current profile and answers, without a browser).
 `answer_blockers.py` then asks you, once, for the profile values and the individual questions
-that still stop forms. In `--local-blitz`, whatever you type into an unanswered field before
-submitting is also remembered in `custom_answers.json` for the next form. Questions that ask you
-to attest to authorship or AI use are never auto-answered, never remembered, and stop essay
-drafting on that form.
+that still stop forms. Questions that ask you to attest to authorship or AI use are never
+auto-answered, never remembered, and stop essay drafting on that form.
+
+**Questions the profile cannot answer** (all four adapters, `ats/assist.py`):
+
+* *Optional ones never stop a form.* A question is required only when the page marks it: the
+  `required` attribute, `aria-required="true"`, a required class or `data-required="true"`, or an
+  asterisk on its label / legend. One whose label, placeholder or helper text says "optional" is
+  optional whatever else is marked ("Optional Practical Training" does not count as saying so).
+  An optional question with no known answer is left blank and logged as `SKIPPED_OPTIONAL`.
+* *Required ones are handed to you without the terminal* (`--local-blitz` / `--assist`). The bell
+  rings, the first such field is scrolled to the middle of the window and outlined in purple with
+  a "Fill & click outside to auto-continue" label. Type the answer and click or tab away (a radio,
+  single checkbox, dropdown or upload counts as soon as the choice has settled for 0.8 s). The
+  outline moves to the next one, and after the last the runner presses Submit (Save and Continue
+  on a Workday page) and carries on with the e-mail code, the confirmation e-mail and the tracker
+  as usual. Mission Control shows which question it is waiting on. If nothing is entered for
+  `--assist` seconds (minimum 180), the posting goes to manual review.
+* *Required but unmarked.* When Submit / Next is refused with a validation error, only the fields
+  carrying the error are treated as required: answered from the profile if it can, otherwise
+  highlighted for you, then the click is repeated (up to three times).
+* *Learned.* Each answer you give this way is saved to `custom_answers.json` the moment you leave
+  the field, so the same question is filled automatically on later forms. Uploads are not learned.
+
+Workday's final Submit on its Review page is still yours to press.
 
 ## Where answers live
 

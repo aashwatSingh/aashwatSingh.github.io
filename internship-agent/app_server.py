@@ -222,6 +222,9 @@ def build_state() -> dict:
         "updated": state.get("updated") or "",
         "timed_out": bool(state.get("timed_out")),
         "unconfirmed": step == run_state.UNCONFIRMED,
+        # A required question the profile cannot answer is highlighted in the browser; the runner
+        # continues by itself once it is filled and focus has left it.
+        "waiting": (state.get("waiting") or {}) if step == run_state.WAITING_FOR_ANSWER else None,
         "steps": steps,
         "choices": [{"key": k, "label": v} for k, v in run_state.CHOICES.items()],
         "tracker": tracker.get(),
@@ -329,6 +332,8 @@ PAGE = r"""<!doctype html>
   ol.steps li.active { color: var(--ink); font-weight: 600; }
   ol.steps li.active .dot { border-color: var(--accent); background: var(--accent); }
   .msg { margin-top: 14px; color: var(--dim); }
+  .msg.waiting { border-left: 3px solid #a855f7; padding: 8px 12px; color: inherit; }
+  .msg.waiting .hint { color: var(--dim); margin-top: 4px; }
   .idle { color: var(--dim); }
   h3 { font-size: 13px; font-weight: 600; color: var(--dim); margin: 26px 0 8px; }
   pre { margin: 0; padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px;
@@ -480,12 +485,21 @@ function renderAll(s) {
       ol.append(li);
     }
     card.append(ol);
-    if (s.unconfirmed) card.append(el("div", "msg", "Logged as unconfirmed. Not counted toward the total."));
+    if (s.waiting) {
+      const w = el("div", "msg waiting");
+      w.append(el("strong", "", "Needs your answer in the browser"),
+               el("div", "", s.waiting.field || ""),
+               el("div", "hint", "Fill the highlighted field and click outside it. The form continues by itself" +
+                  (s.waiting.remaining > 1 ? " (" + s.waiting.remaining + " questions left)." : ".")));
+      card.append(w);
+    }
+    else if (s.unconfirmed) card.append(el("div", "msg", "Logged as unconfirmed. Not counted toward the total."));
     else if (s.message && !s.timed_out) card.append(el("div", "msg", s.message));
   }
   $("log").textContent = (s.log || []).join("\n");
 
-  const alert = s.timed_out ? "timeout:" + (s.job && s.job.id) : s.attention;
+  const alert = s.timed_out ? "timeout:" + (s.job && s.job.id)
+    : s.waiting ? "answer:" + (s.job && s.job.id) + ":" + s.waiting.field : s.attention;
   if (alert && alert !== lastAlert) ring();
   lastAlert = alert;
 }

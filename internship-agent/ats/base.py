@@ -18,7 +18,14 @@ from playwright.async_api import Page, TimeoutError as PWTimeout
 
 import config
 import essays
-from answers import AI_POLICY, AnswerEngine, Context, Decision, Question
+import run_state
+from answers import (AI_POLICY, AnswerEngine, Context, Decision, Question, load_custom_answers, pattern_for,
+                     remember_answers)
+from ats import assist
+
+SKIPPED_OPTIONAL = "SKIPPED_OPTIONAL"     # an optional question the profile does not answer: left blank
+FILLED, SUBMITTED_BY_CANDIDATE = "filled", "submitted_by_candidate"     # wait_for_answers outcomes
+ASSIST_TOTAL_S = 1500                     # most time one form may spend waiting on the candidate's answers
 
 SUBMITTED = "submitted"
 DRY_RUN_OK = "dry_run_ok"
@@ -60,6 +67,13 @@ class FormState:
     unknown_fields: list[FormField] = field(default_factory=list)
     handled: set[str] = field(default_factory=set)
     own_words_only: bool = False      # the form carries an AI-use / authorship attestation
+    resolved: set[str] = field(default_factory=set)       # unknown fields the candidate has since filled in
+    forced: set[str] = field(default_factory=set)         # fields a validation error showed to be required
+    learned: list[dict] = field(default_factory=list)     # what the candidate entered, for ApplyResult.learned
+
+    def pending(self) -> list[FormField]:
+        """Required questions nobody has answered yet."""
+        return [f for f in self.unknown_fields if f.key not in self.resolved]
 
 
 class FillError(RuntimeError):
@@ -171,35 +185,222 @@ class BaseAdapter:
         """Evidence that the application went through (a URL or phrase), else None."""
         return None
 
-    async def wait_for_human_finish(self, page: Page, unknown_fields: list[FormField]
-                                    ) -> tuple[tuple[str, str, str] | None, list[dict]]:
-        """Blitz mode: the candidate answers what the profile could not, then submits in the browser.
+    # ---- required vs optional ------------------------------------------------
+    async def refine_required(self, page: Page, fields: list[FormField], state: FormState | None = None) -> None:
+        """Settle each field's `required` from the DOM, the same way for every portal.
 
-        While waiting, the values typed into those fields are noted so the same question can be
-        answered automatically next time (see answers.remember_answers).
+        Required: the `required` attribute, aria-required="true", a required class or
+        data-required="true", or an asterisk on its label / legend. A field whose own label,
+        placeholder or helper text says "optional" is optional whatever else is marked, and one
+        that a validation error has flagged after Submit / Next is required whatever is marked.
         """
-        wait = max(self.human_wait_s, 180)
-        print("\a[ACTION REQUIRED] Answer these in the browser window, then click Submit "
-              f"(waiting up to {wait}s; everything else is filled):", flush=True)
-        for f in unknown_fields[:8]:
-            print(f"      - {f.question.label[:110]}", flush=True)
-        seen: dict[str, dict] = {}
-        deadline = time.monotonic() + wait
-        while time.monotonic() < deadline:
-            await page.wait_for_timeout(700)
-            for f in unknown_fields:
-                if f.widget == "file":
-                    continue
-                value = await self.read_value(page, f)
-                if value:
-                    seen[f.key] = {"label": f.question.label, "kind": f.question.kind, "value": value}
-            try:
-                proof = await self.confirmed(page)
-            except Exception:                              # noqa: BLE001 - page navigating
+        if not fields:
+            return
+        try:
+            probes = await page.evaluate(assist.PROBE_JS, [f.sel for f in fields])
+        except Exception:                                  # noqa: BLE001 - page navigating: keep the adapter's view
+            probes = [None] * len(fields)
+        for f, probe in zip(fields, probes):
+            q = f.question
+            if state is not None and f.key in state.forced:
+                q.required = True
+            elif f.extra.get("required_locked"):
                 continue
-            if proof:
-                return (SUBMITTED, "completed by the candidate in the browser", proof), list(seen.values())
-        return None, []
+            elif (probe and probe.get("optional")) or assist.says_optional(q.label, q.placeholder, q.description):
+                q.required = False
+            elif probe and probe.get("required"):
+                q.required = True
+
+    # ---- the candidate answers what the profile cannot --------------------------
+    def _show_step(self, step: str, message: str, **extra) -> None:
+        if self.receipt_gate is not None:
+            try:
+                self.receipt_gate.step(step, message, **extra)
+            except Exception:                              # noqa: BLE001 - the dashboard never stops a form
+                pass
+
+    def learn(self, job: dict, engine: AnswerEngine | None, f: FormField, value) -> bool:
+        """Remember an answer the candidate gave so the same question is filled automatically next time."""
+        item = {"label": f.question.label, "kind": f.question.kind, "value": value}
+        try:
+            if not remember_answers([item], job.get("company", "")):
+                return False
+            if engine is not None:                         # usable for the rest of this run, ahead of older entries
+                pattern = pattern_for(f.question.label)
+                fresh = [e for e in load_custom_answers() if e.get("pattern") == pattern]
+                engine.custom = fresh + [e for e in engine.custom if e.get("pattern") != pattern]
+        except Exception as exc:                           # noqa: BLE001 - a locked file must not stop the form
+            print(f"      could not save the answer ({type(exc).__name__}: {str(exc)[:80]})", flush=True)
+            return False
+        print(f"      learned: {f.question.label[:70]} -> {str(value)[:50]}", flush=True)
+        return True
+
+    async def wait_for_answers(self, page: Page, fields: list[FormField], job: dict,
+                               engine: AnswerEngine | None = None, state: FormState | None = None) -> str:
+        """Hands-free hand-over: highlight each unanswered field in turn and return as soon as the
+        last one has a value and focus has left it. No terminal input is involved.
+
+        Returns FILLED, SUBMITTED_BY_CANDIDATE (they pressed Submit themselves and the confirmation
+        is showing) or "" when the answers did not come in time.
+        """
+        per_field = max(self.human_wait_s, 180)
+        started = time.monotonic()
+        deadline = started + per_field
+        print(f"\a[ACTION REQUIRED] {len(fields)} required question(s) need your answer in the browser. "
+              "Fill the highlighted field and click outside it; the form continues by itself:", flush=True)
+        for f in fields[:8]:
+            print(f"      - {f.question.label[:110]}", flush=True)
+
+        initial = [await self._entered(page, f, {}) for f in fields]    # a flagged field may hold a bad value
+        stable: list[tuple[object, float]] = [(None, 0.0)] * len(fields)
+        saved: dict[str, object] = {}
+        current = -2
+
+        async def install() -> None:
+            await page.evaluate(assist.ASSIST_JS)
+            if not await page.evaluate("n => window.__iaAssist.items.length === n", len(fields)):
+                await page.evaluate("sels => window.__iaAssist.start(sels)", [f.sel for f in fields])
+
+        while time.monotonic() < min(deadline, started + ASSIST_TOTAL_S):
+            try:
+                await install()
+                states = await page.evaluate("() => window.__iaAssist.state()")
+            except Exception:                              # noqa: BLE001 - page navigating
+                states, current = None, -2
+            if states is None or len(states) != len(fields):
+                await page.wait_for_timeout(300)
+                try:
+                    if await self.confirmed(page):
+                        return SUBMITTED_BY_CANDIDATE
+                except Exception:                          # noqa: BLE001
+                    pass
+                continue
+            now = time.monotonic()
+            done = []
+            for i, (f, st) in enumerate(zip(fields, states)):
+                value = await self._entered(page, f, st)
+                changed = bool(value) and value != initial[i]
+                if stable[i][0] != value:
+                    stable[i] = (value, now)
+                    if value:
+                        deadline = now + per_field            # still at it: keep waiting
+                settled = (now - stable[i][1]) * 1000 >= assist.BLUR_SETTLE_MS
+                if assist.needs_blur(f.question.kind, f.widget):
+                    ok = changed and not st["open"] and st["awayMs"] >= assist.BLUR_SETTLE_MS
+                else:
+                    ok = changed and not st["open"] and settled
+                done.append(ok)
+                if ok and f.widget != "file" and saved.get(f.key) != value:
+                    saved[f.key] = value
+                    self.learn(job, engine, f, value)
+                    if state is not None:
+                        state.learned = [x for x in state.learned if x["label"] != f.question.label] + [
+                            {"label": f.question.label, "kind": f.question.kind, "value": value}]
+            target = next((i for i, ok in enumerate(done) if not ok), -1)
+            if target == -1:
+                await self._clear_highlight(page)
+                return FILLED
+            if target != current:
+                current = target
+                deadline = max(deadline, now + per_field)
+                label = fields[target].question.label
+                try:
+                    await page.evaluate("([i, text, color]) => window.__iaAssist.highlight(i, text, color)",
+                                        [target, assist.BADGE_TEXT, assist.HIGHLIGHT_COLOR])
+                except Exception:                          # noqa: BLE001
+                    current = -2
+                self._show_step(run_state.WAITING_FOR_ANSWER, f"Waiting for your answer: {label[:120]}",
+                                waiting={"field": label, "remaining": done.count(False), "of": len(fields)})
+            try:
+                if await self.confirmed(page):
+                    await self._clear_highlight(page)
+                    return SUBMITTED_BY_CANDIDATE
+            except Exception:                              # noqa: BLE001
+                pass
+            await page.wait_for_timeout(250)
+        await self._clear_highlight(page)
+        return ""
+
+    async def _entered(self, page: Page, f: FormField, st: dict):
+        """What the field holds right now (None when empty)."""
+        if f.widget == "file":
+            return "file" if st.get("files") else (await self.read_value(page, f) or None)
+        return await self.read_value(page, f) or None
+
+    @staticmethod
+    async def _clear_highlight(page: Page) -> None:
+        try:
+            await page.evaluate("() => window.__iaAssist && window.__iaAssist.clear()")
+        except Exception:                                  # noqa: BLE001
+            pass
+
+    async def flagged_fields(self, page: Page, detail: str = "") -> list[FormField]:
+        """Fields showing a validation error after a Submit / Next click, each marked required.
+
+        Falls back to the fields a form-level error names ("Missing entry for required field: X").
+        """
+        fields = await self.extract(page, include_filled=True)
+        if not fields:
+            return []
+        try:
+            errors = await page.evaluate(assist.FLAGGED_JS, [f.sel for f in fields])
+        except Exception:                                  # noqa: BLE001
+            return []
+        flagged = [f for f, err in zip(fields, errors) if err]
+        if not flagged and detail:
+            squash = lambda t: re.sub(r"[^a-z0-9]+", " ", t.lower()).strip()
+            said = squash(detail)
+            flagged = [f for f in fields if len(squash(f.question.label)) > 3 and squash(f.question.label) in said]
+        for f in flagged:
+            f.question.required = True
+            f.extra["had_value"] = bool(await self.read_value(page, f))
+        return flagged
+
+    async def complete_form(self, page: Page, job: dict, engine: AnswerEngine, ctx: Context, text: str,
+                            state: FormState, attended: bool) -> str:
+        """Fill the page; hand each unanswerable required question to the candidate; repeat while
+        answers reveal further questions. Returns "" (ready), "blocked" or SUBMITTED_BY_CANDIDATE."""
+        for _ in range(8):
+            await self.answer_form(page, job, engine, ctx, text, state)
+            pending = state.pending()
+            if not pending:
+                return ""
+            if not attended:
+                return "blocked"
+            outcome = await self.wait_for_answers(page, pending, job, engine, state)
+            if outcome == SUBMITTED_BY_CANDIDATE:
+                return outcome
+            if outcome != FILLED:
+                return "blocked"
+            state.resolved.update(f.key for f in pending)
+        return "blocked" if state.pending() else ""
+
+    async def recover_from_validation(self, page: Page, job: dict, engine: AnswerEngine, ctx: Context, text: str,
+                                      state: FormState, attended: bool, detail: str = "") -> bool:
+        """Submit / Next was refused. Treat exactly the flagged fields as required: answer them from the
+        profile where it can, hand the rest to the candidate. True when the click is worth repeating."""
+        flagged = await self.flagged_fields(page, detail)
+        if not flagged:
+            return False
+        keys = {f.key for f in flagged}
+        state.forced |= keys
+        state.handled -= keys
+        state.resolved -= keys
+        state.unknown_fields = [f for f in state.unknown_fields if f.key not in keys]
+        filled_before = sum(a["action"] == "fill" for a in state.answers)
+        await self.answer_form(page, job, engine, ctx, text, state)
+        progress = sum(a["action"] == "fill" for a in state.answers) - filled_before
+        todo = {f.key: f for f in flagged if f.extra.get("had_value")}       # holds a value the site rejected
+        todo.update({f.key: f for f in state.pending()})
+        if not todo:
+            return progress > 0
+        if not attended:
+            return False
+        outcome = await self.wait_for_answers(page, list(todo.values()), job, engine, state)
+        if outcome != FILLED:
+            return False
+        state.resolved.update(todo)
+        return True
 
     async def page_text(self, page: Page) -> str:
         try:
@@ -233,6 +434,7 @@ class BaseAdapter:
         """Answer and fill every field currently on the page, re-reading it as answers reveal new fields."""
         for _ in range(4):
             fields = await self.extract(page)
+            await self.refine_required(page, fields, state)
             fresh = [f for f in fields if f.key not in state.handled]
             if not fresh:
                 break
@@ -266,7 +468,9 @@ class BaseAdapter:
                 state.answers.append({"label": q.label, "kind": q.kind, "required": q.required,
                                       "options": [o[:80] for o in q.options[:250]],
                                       "action": decision.action, "value": _loggable(decision.value),
-                                      "rule": decision.rule, "note": decision.note})
+                                      "rule": decision.rule, "note": decision.note,
+                                      "status": SKIPPED_OPTIONAL if decision.action == "skip" and not q.required
+                                      else ""})
                 if decision.action == "unknown":
                     state.unknowns.append(q.label)
                     state.unknown_fields.append(f)
@@ -296,29 +500,37 @@ class BaseAdapter:
 
         ctx.job_text = text
         state = FormState()
-        await self.answer_form(page, job, engine, ctx, text, state)
-        answers, unknowns, unknown_fields = state.answers, state.unknowns, state.unknown_fields
+        attended = bool(self.human_wait_s) and not dry_run
+        blocked = await self.complete_form(page, job, engine, ctx, text, state, attended)
+        answers, unknowns = state.answers, state.unknowns
 
         if not answers:
             return ApplyResult(MANUAL_REVIEW, "FORM_NOT_FOUND", "no form fields detected")
+        skipped = [a["label"] for a in answers if a.get("status") == SKIPPED_OPTIONAL]
+        if skipped:
+            print(f"      {SKIPPED_OPTIONAL}: {len(skipped)} optional question(s) left blank", flush=True)
         await _screenshot(page, shot_path)
-        if unknowns:
-            if self.human_wait_s and not dry_run:
-                await self.before_submit(page)             # the candidate presses Submit during this wait
-                done, learned = await self.wait_for_human_finish(page, unknown_fields)
-                if done:
-                    return ApplyResult(*done, answers, unknowns, shot_path, learned)
+        if blocked == SUBMITTED_BY_CANDIDATE:
+            return ApplyResult(SUBMITTED, "completed by the candidate in the browser",
+                               str(await self.confirmed(page) or ""), answers, unknowns, shot_path, state.learned)
+        if blocked:
             return ApplyResult(MANUAL_REVIEW, "UNANSWERED_REQUIRED",
-                               " | ".join(u[:90] for u in unknowns[:8]), answers, unknowns, shot_path)
+                               " | ".join(f.question.label[:90] for f in state.pending()[:8]),
+                               answers, unknowns, shot_path, state.learned)
         if dry_run:
             return ApplyResult(DRY_RUN_OK, "all required questions answered (not submitted)",
                                answers=answers, screenshot=shot_path)
 
-        await self.before_submit(page)
-        status, reason, detail = await self.submit(page)
+        for attempt in range(4):
+            await self.before_submit(page)
+            status, reason, detail = await self.submit(page)
+            # A form that hides its required markers only says so now: fix just the flagged fields, resubmit.
+            if reason != "VALIDATION_ERROR" or attempt == 3 or not await self.recover_from_validation(
+                    page, job, engine, ctx, text, state, attended, detail):
+                break
         if status != SUBMITTED:
             await _screenshot(page, shot_path)
-        return ApplyResult(status, reason, detail, answers, unknowns, shot_path)
+        return ApplyResult(status, reason, detail, state.answers, state.unknowns, shot_path, state.learned)
 
 
 class SubmitWatch:

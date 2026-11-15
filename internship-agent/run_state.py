@@ -15,6 +15,7 @@ from pathlib import Path
 
 import config
 
+WAITING_FOR_ANSWER = "WAITING_FOR_ANSWER"      # a required question the profile cannot answer is highlighted
 SUBMITTING = "SUBMITTING_FORM"
 ENTERING_OTP = "ENTERING_OTP"
 AWAITING_EMAIL = "AWAITING_EMAIL_CONFIRMATION"

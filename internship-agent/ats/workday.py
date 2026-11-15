@@ -32,8 +32,8 @@ from playwright.async_api import Page, TimeoutError as PWTimeout
 import config
 from answers import Decision, Question
 from urls import host_matches
-from ats.base import (CLOSED, DRY_RUN_OK, MANUAL_REVIEW, SUBMITTED, ApplyResult, BaseAdapter, FormField, FormState,
-                      _screenshot)
+from ats.base import (CLOSED, DRY_RUN_OK, FILLED, MANUAL_REVIEW, SUBMITTED, SUBMITTED_BY_CANDIDATE, ApplyResult,
+                      BaseAdapter, FormField, FormState, _screenshot)
 
 AID = '[data-automation-id="{}"]'
 AUTH_STEP = re.compile(r"sign in|create account|log ?in", re.I)
@@ -269,7 +269,8 @@ class WorkdayAdapter(BaseAdapter):
             fields.append(FormField(q, r["sel"], r["widget"], {"lazy_options": r.get("lazy", False),
                                                                "parts": r.get("parts") or [],
                                                                "group": r.get("group") or "",
-                                                               "current": r.get("shown") or ""}))
+                                                               "current": r.get("shown") or "",
+                                                               "required_locked": recheck}))
         return fields
 
     def special(self, f: FormField, profile: dict) -> Decision | None:
@@ -673,8 +674,9 @@ class WorkdayAdapter(BaseAdapter):
             return stopped
 
         # ---------------- experimental from here: pages behind the login ----------------
-        state, learned, restarts = FormState(), [], 0
-        for _ in range(18):
+        state, learned, restarts, last_step, rescues = FormState(), [], 0, "", 0
+        attended = bool(self.human_wait_s) and not dry_run
+        for _ in range(30):
             step = await self.current_step(page)
             for _ in range(25):                                # the step bar is empty while a page loads
                 if step and not AUTH_STEP.search(step):
@@ -695,6 +697,8 @@ class WorkdayAdapter(BaseAdapter):
                 await page.reload(wait_until="domcontentloaded")
                 await page.wait_for_timeout(3000)
                 continue
+            if step != last_step:
+                last_step, rescues = step, 0
             state.handled.clear()
             before = len(state.unknown_fields)
             try:
@@ -703,9 +707,19 @@ class WorkdayAdapter(BaseAdapter):
                 await self.answer_form(page, job, engine, ctx, text, state)
                 if not any(a["kind"] == "file" and a["action"] == "fill" for a in state.answers[answered_before:]):
                     await self._upload_resume(page, engine.p, step)
-                page_unknowns = state.unknown_fields[before:]
+                page_unknowns = [f for f in state.unknown_fields[before:] if f.key not in state.resolved]
                 problem = "; ".join(f.question.label[:70] for f in page_unknowns[:6])
                 moved = None
+                if page_unknowns and attended:
+                    # Highlight each one; once the last is filled and focus has left it, the loop comes
+                    # round again, finds the page complete and clicks Save and Continue itself.
+                    outcome = await self.wait_for_answers(page, page_unknowns, job, engine, state)
+                    if outcome == SUBMITTED_BY_CANDIDATE:
+                        break
+                    if outcome == FILLED:
+                        state.resolved.update(f.key for f in page_unknowns)
+                        del state.unknown_fields[before:]
+                        continue
                 if not page_unknowns:
                     await _screenshot(page, shot_path)         # what was filled on this page, for the audit trail
                     signature = await self._signature(page)
@@ -718,6 +732,11 @@ class WorkdayAdapter(BaseAdapter):
                         await self._wait_new_page(page, signature)
                     if not moved:
                         problem = await self._errors(page) or "the page did not advance"
+                        # Required markers Workday only shows after the click: fix the flagged fields, go again.
+                        if rescues < 3 and await self.recover_from_validation(page, job, engine, ctx, text, state,
+                                                                              attended, problem):
+                            rescues += 1
+                            continue
             except Exception as exc:                           # noqa: BLE001 - untested territory: hand over
                 page_unknowns, moved = [], None
                 problem = f"{type(exc).__name__}: {str(exc)[:120]}"
@@ -751,7 +770,7 @@ class WorkdayAdapter(BaseAdapter):
         proof = await self.confirmed(page)
         if proof:
             return ApplyResult(SUBMITTED, "completed in the browser", proof, state.answers, state.unknowns,
-                               shot_path, learned)
+                               shot_path, learned + state.learned)
         if not REVIEW_STEP.search(await self.current_step(page)):
             return ApplyResult(MANUAL_REVIEW, "WORKDAY_PAGE", "the wizard ended somewhere unexpected",
                                state.answers, state.unknowns, shot_path)
@@ -771,6 +790,6 @@ class WorkdayAdapter(BaseAdapter):
             proof = await self.confirmed(page)
             if proof:
                 return ApplyResult(SUBMITTED, "submitted by the candidate after review", proof, state.answers,
-                                   state.unknowns, shot_path, learned)
+                                   state.unknowns, shot_path, learned + state.learned)
         return ApplyResult(MANUAL_REVIEW, "WORKDAY_READY_FOR_REVIEW", "left at the Review step (not submitted in time)",
                            state.answers, state.unknowns, shot_path)

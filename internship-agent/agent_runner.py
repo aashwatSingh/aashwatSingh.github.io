@@ -37,7 +37,7 @@ import run_state
 import scraper
 from answers import AnswerEngine, Context, load_custom_answers, remember_answers
 from ats import ADAPTERS, DEFAULT_ATS, adapter_for
-from ats.base import (CLOSED, DRY_RUN_OK, ERROR, MANUAL_REVIEW, SKIPPED_INELIGIBLE, SUBMITTED, ApplyResult)
+from ats.base import (ASSIST_TOTAL_S, CLOSED, DRY_RUN_OK, ERROR, MANUAL_REVIEW, SKIPPED_INELIGIBLE, SUBMITTED, ApplyResult)
 from receipt_gate import ReceiptGate
 
 APPLICATION_TIMEOUT_S = 240       # whole form, including uploads and option lookups (+ --assist wait)
@@ -96,7 +96,8 @@ async def apply_one(context, job: dict, engine: AnswerEngine, ledger: dedup.Ledg
         result = await asyncio.wait_for(
             adapter.apply(page, job, engine, ctx, dry_run=dry_run, shot_path=shot),
             timeout=getattr(adapter, "timeout_s", APPLICATION_TIMEOUT_S)
-            + ((8 if adapter.name == "Workday" else 2) * max(adapter.human_wait_s, 180) if adapter.human_wait_s else 0))
+            + ((8 if adapter.name == "Workday" else 2) * max(adapter.human_wait_s, 180) + ASSIST_TOTAL_S
+               if adapter.human_wait_s else 0))
         if keep_open and result.status == SUBMITTED:
             result.page, kept = page, True
         return result
@@ -425,7 +426,9 @@ async def run(args) -> int:
                     job["status"] = "applied"
                     if result.learned:
                         kept = remember_answers(result.learned, job["company"])
-                        engine.custom = load_custom_answers()
+                        fresh = load_custom_answers()        # ahead of, not instead of, profile and shared answers
+                        patterns = {e["pattern"] for e in fresh}
+                        engine.custom = fresh + [e for e in engine.custom if e.get("pattern") not in patterns]
                         log(f"  remembered {kept} answer(s) you gave in the browser (custom_answers.json)")
                 elif result.status == DRY_RUN_OK:
                     pass                                   # stays pending for the live run
