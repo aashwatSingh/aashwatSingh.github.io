@@ -247,7 +247,15 @@ auto-answered, never remembered, and stop essay drafting on that form.
 * *Learned.* Each answer you give this way is saved to `custom_answers.json` the moment you leave
   the field, so the same question is filled automatically on later forms. Uploads are not learned.
 
-Workday's final Submit on its Review page is still yours to press.
+On a live run Workday's Review page is submitted for you too: the adapter checks that the page
+shows no error banner and that its button says Submit, notes the inbox position, clicks, and
+waits for Workday's confirmation before the e-mail gate. If Review shows an error, the posting
+is handed to you (blitz) or goes to manual review with the draft saved. `--dry-run` always
+stops at Review.
+
+Answers you teach it live in `custom_answers.json`, with an identical copy in
+`custom_answers.backup.json` that is used if the main file is lost or damaged. Both are
+git-ignored and have never been tracked, so `git pull` cannot overwrite or conflict with them.
 
 ## Where answers live
 
@@ -294,8 +302,9 @@ Workday is opt-in. Walked end to end on one live tenant in dry-run: account crea
 (`--workday-create-accounts`, then you click the verification e-mail), sign-in, Autofill with Resume, My
 Information, My Experience (adds your two most recent jobs when the parser finds none), both Application
 Questions pages, Voluntary Disclosures, Self Identify, and stop at Review. Other tenants use the same page
-types with their own questions, so expect some to stop for an answer. It never clicks the final Submit (you
-review and submit), tries at most two of `portal.passwords` per site per run, and creates accounts only with
+types with their own questions, so expect some to stop for an answer. On a live run it clicks the final Submit
+on Review once that page shows no error (the click itself has only been exercised on a mock wizard, not a
+live tenant); in `--dry-run` it stops at Review. It tries at most two of `portal.passwords` per site per run, and creates accounts only with
 the flag. Stepping through pages saves a draft in your Workday account even in `--dry-run`; pre-filled
 dropdowns in a saved draft are re-checked against your profile. Workday sometimes answers back-to-back
 sessions with a "Something went wrong" page: the posting goes to manual review with that note and works on a

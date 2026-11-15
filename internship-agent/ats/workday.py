@@ -8,9 +8,11 @@ What has NOT been exercised (no test login was available): everything after sign
 My Information / My Experience / Application Questions / Voluntary Disclosures / Self Identify
 pages. That code follows the same field convention and is written to fail safe:
 
-* It never clicks the final Submit. At the Review step it stops; in blitz mode it rings and waits
-  for you to review and submit, otherwise the posting goes to manual review with the draft saved
-  in your Workday candidate account.
+* On a live run it clicks the final Submit on the Review page itself, but only when that page shows
+  no error or validation banner and the button really says Submit. If Review shows an error, or
+  no confirmation follows the click, blitz mode rings and waits for you; otherwise the posting goes
+  to manual review with the draft saved in your Workday candidate account. --dry-run always
+  stops at Review.
 * It never creates an account unless you pass --workday-create-accounts.
 * It tries your portal password at most once per Workday site per run, so a wrong password
   cannot lock an account through repetition.
@@ -217,9 +219,14 @@ class WorkdayAdapter(BaseAdapter):
             if stable >= 2:
                 break
 
-    async def _wait_step_change(self, page: Page, previous: str, seconds: float) -> str | None:
-        """The new step name once the wizard leaves `previous`, 'DONE' on a confirmation, else None."""
-        deadline = time.monotonic() + seconds
+    async def _wait_step_change(self, page: Page, previous: str, seconds: float,
+                                stop_on_errors: bool = False) -> str | None:
+        """The new step name once the wizard leaves `previous`, 'DONE' on a confirmation, else None.
+
+        With stop_on_errors, a validation message that is still showing a moment after the click
+        ends the wait early: the page has answered, and it said no."""
+        started = time.monotonic()
+        deadline = started + seconds
         while time.monotonic() < deadline:
             await page.wait_for_timeout(600)
             if await self.confirmed(page):
@@ -227,7 +234,46 @@ class WorkdayAdapter(BaseAdapter):
             now = await self.current_step(page)
             if now and now != previous:
                 return now
+            if stop_on_errors and time.monotonic() - started > 2.5 and await self._errors(page):
+                return None
         return None
+
+    async def _submit_review(self, page: Page) -> tuple[str, str, str]:
+        """The Review page: check it is clean, note the inbox position, click Submit, wait for the confirmation."""
+        submit = None
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and submit is None:
+            for aid in ("bottom-navigation-next-button", "pageFooterNextButton"):
+                if await self._visible(page, aid):
+                    submit = aid
+                    break
+            else:
+                await page.wait_for_timeout(500)
+        if submit is None:
+            return MANUAL_REVIEW, "WORKDAY_READY_FOR_REVIEW", "no Submit button on the Review page"
+        try:
+            await page.wait_for_load_state("networkidle", timeout=6000)
+        except PWTimeout:
+            pass
+        label = " ".join((await page.locator(AID.format(submit)).first.inner_text()).split())
+        if not re.search(r"\bsubmit\b", label, re.I):
+            return MANUAL_REVIEW, "WORKDAY_READY_FOR_REVIEW", f"the Review page's button says {label[:40]!r}, not Submit"
+        errors = await self._errors(page)
+        if errors:
+            return MANUAL_REVIEW, "WORKDAY_REVIEW_ERRORS", f"Review shows: {errors[:200]}"
+        await self.before_submit(page)                         # inbox position, for the confirmation e-mail
+        await self._click(page, submit)
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            await page.wait_for_timeout(700)
+            proof = await self.confirmed(page)
+            if proof:
+                return SUBMITTED, "submitted from the Review page", proof
+            if time.monotonic() - (deadline - 45) > 4:
+                errors = await self._errors(page)
+                if errors:
+                    return MANUAL_REVIEW, "VALIDATION_ERROR", f"after Submit: {errors[:200]}"
+        return MANUAL_REVIEW, "NO_CONFIRMATION", "no confirmation after clicking Submit on the Review page"
 
     async def _errors(self, page: Page) -> str:
         try:
@@ -727,7 +773,7 @@ class WorkdayAdapter(BaseAdapter):
                         if await self._visible(page, aid):
                             await self._click(page, aid)
                             break
-                    moved = await self._wait_step_change(page, step, 20)
+                    moved = await self._wait_step_change(page, step, 20, stop_on_errors=True)
                     if moved and moved != "DONE":
                         await self._wait_new_page(page, signature)
                     if not moved:
@@ -777,13 +823,17 @@ class WorkdayAdapter(BaseAdapter):
         if dry_run:
             return ApplyResult(DRY_RUN_OK, "reached the Review step (not submitted; a draft is saved in Workday)",
                                answers=state.answers, screenshot=shot_path)
+        status, reason, detail = await self._submit_review(page)
+        if status == SUBMITTED:
+            return ApplyResult(SUBMITTED, reason, detail, state.answers, state.unknowns, shot_path,
+                               learned + state.learned)
+        await _screenshot(page, shot_path)
         if not self.human_wait_s:
-            return ApplyResult(MANUAL_REVIEW, "WORKDAY_READY_FOR_REVIEW",
-                               "filled through to Review and saved as a draft; open the posting and submit it",
+            return ApplyResult(status, reason, detail + " (the draft is saved in Workday)",
                                state.answers, state.unknowns, shot_path)
         wait = max(self.human_wait_s, 240)
-        print(f"\a[ACTION REQUIRED] Review the Workday application in the browser and click Submit "
-              f"(waiting up to {wait}s)", flush=True)
+        print(f"\a[ACTION REQUIRED] Workday was not submitted automatically ({detail[:140]}). Check the "
+              f"application in the browser and click Submit (waiting up to {wait}s)", flush=True)
         deadline = time.monotonic() + wait
         while time.monotonic() < deadline:
             await page.wait_for_timeout(800)

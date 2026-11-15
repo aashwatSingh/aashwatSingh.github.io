@@ -255,11 +255,14 @@ class BaseAdapter:
         stable: list[tuple[object, float]] = [(None, 0.0)] * len(fields)
         saved: dict[str, object] = {}
         current = -2
+        session = f"{id(fields)}-{started}"
 
         async def install() -> None:
             await page.evaluate(assist.ASSIST_JS)
-            if not await page.evaluate("n => window.__iaAssist.items.length === n", len(fields)):
-                await page.evaluate("sels => window.__iaAssist.start(sels)", [f.sel for f in fields])
+            # (re)register when this hand-over is new to the document: a fresh wait, or a reloaded page
+            await page.evaluate("([id, sels]) => { const A = window.__iaAssist;"
+                                " if (A.session !== id) { A.start(sels); A.session = id; } }",
+                                [session, [f.sel for f in fields]])
 
         while time.monotonic() < min(deadline, started + ASSIST_TOTAL_S):
             try:

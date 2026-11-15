@@ -1890,8 +1890,39 @@ def remember_answers(items: list[dict], company: str, path: Path | None = None) 
         custom.append(entry)
         added += 1
     if added:
-        path.write_text(json.dumps(custom, indent=1, ensure_ascii=False), encoding="utf-8")
+        save_custom_answers(custom, path)
     return added
+
+
+def backup_path(path: Path) -> Path:
+    return path.with_name(path.stem + ".backup" + path.suffix)
+
+
+def save_custom_answers(entries: list[dict], path: Path | None = None) -> None:
+    """Write the learned answers, and the same again to custom_answers.backup.json.
+
+    Both files are git-ignored and never tracked, so `git pull` cannot touch them. Each write goes
+    through a temporary file, so a crash mid-write leaves the old answers in place, and the backup
+    is what load_custom_answers falls back to if the main file is lost or damaged.
+    """
+    path = Path(path or config.CUSTOM_ANSWERS_JSON)
+    text = json.dumps(entries, indent=1, ensure_ascii=False)
+    for target in (path, backup_path(path)):
+        tmp = target.with_name(target.name + ".tmp")
+        try:
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, target)
+        except OSError:
+            if target == path:
+                raise                                          # the backup is best effort; the answers are not
+
+
+def _read_entries(path: Path) -> list[dict] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return [e for e in data if isinstance(e, dict) and e.get("pattern")] if isinstance(data, list) else None
 
 
 def existing_file(path: str | None) -> str | None:
@@ -1916,11 +1947,15 @@ def load_shared_answers() -> list[dict]:
 
 
 def load_custom_answers(path: Path | None = None) -> list[dict]:
+    """Answers learned from the candidate. Falls back to the backup copy when the file is missing or damaged."""
     path = Path(path or config.CUSTOM_ANSWERS_JSON)
-    if not path.exists():
-        return []
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return [e for e in data if isinstance(e, dict) and e.get("pattern")]
+    for candidate in (path, backup_path(path)):
+        entries = _read_entries(candidate)
+        if entries is not None:
+            if candidate != path:
+                print(f"! {path.name} is missing or unreadable; using {candidate.name}", flush=True)
+            return entries
+    return []
 
 
 def today_iso() -> str:

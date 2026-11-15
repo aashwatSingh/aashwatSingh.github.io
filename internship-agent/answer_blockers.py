@@ -23,7 +23,7 @@ from typing import Callable, Iterable
 
 import config
 import report
-from answers import AI_POLICY, CHOICE_KINDS, AnswerEngine, Context, Question, load_custom_answers, pattern_for
+from answers import AI_POLICY, CHOICE_KINDS, AnswerEngine, Context, Question, load_custom_answers, pattern_for, save_custom_answers
 
 # (profile path, type, question) - asked only while the value is still null
 PROFILE_FIELDS = [
@@ -188,7 +188,7 @@ def ask_blockers(blockers: Iterable[dict], engine: AnswerEngine, custom: list[di
 
 def save(profile: dict, custom: list[dict], profile_path: Path, custom_path: Path) -> None:
     profile_path.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
-    custom_path.write_text(json.dumps(custom, indent=1, ensure_ascii=False), encoding="utf-8")
+    save_custom_answers(custom, custom_path)
 
 
 def main(ask: Callable[[str], str] = input, say=print) -> int:
