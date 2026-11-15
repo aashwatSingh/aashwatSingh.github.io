@@ -528,7 +528,7 @@ class AnswerEngine:
             if re.search(r"other.{0,30}(school|college|university|education)|other,? please specify which one", label) \
                     and not re.search(r"referral|event|fair|organization", label) \
                     and any(re.search(r"school|college|university", norm(l)) for l in ctx.labels):
-                return Text(edu["school"])
+                return Text(school_names(edu)[0])
             if q.required and q.kind in ("text", "textarea"):
                 return Text("N/A")                           # conditional that does not apply
             return Skip()
@@ -800,9 +800,10 @@ class AnswerEngine:
             if q.kind == "textarea" or re.search(r"accomplish|achiev|project|experience|internship|describe|tell|"
                                                  r"grading|\bscale\b|\bgpa\b|e-?mail|address", label):
                 return None                                  # a prompt that merely mentions school
-            pats = [rf"^{re.escape(a)}$" for a in [edu["school"], *edu["school_aliases"]]]
+            names = school_names(edu)                        # the form name first, then the other spellings
+            pats = [rf"^{re.escape(a)}$" for a in names]
             pats += [r"university of texas.{0,6}dallas|ut dallas", r"^other\b"]
-            return Text(edu["school"], pats)
+            return Text(names[0], pats)
 
         def race(q, label, ctx):
             pats = [rf"^{re.escape(v)}\b" for v in (eeo.get("race_subcategory"), eeo["race"]) if v]
@@ -989,7 +990,7 @@ class AnswerEngine:
             if not re.search(r"University of [A-Z]\w+|[A-Z]\w+ (University|College|Institute)|\b[A-Z]{2,5}\b student",
                              q.label):
                 return None                                  # no particular school named
-            names = [edu["school"], *edu["school_aliases"]]
+            names = school_names(edu)
             mine = any(_simple(n) in _simple(label) for n in names)
             return YesNo(mine and _within_window(label, log) is not False)
 
@@ -1923,6 +1924,31 @@ def _read_entries(path: Path) -> list[dict] | None:
     except (OSError, ValueError):
         return None
     return [e for e in data if isinstance(e, dict) and e.get("pattern")] if isinstance(data, list) else None
+
+
+def school_names(edu: dict) -> list[str]:
+    """Every way to write the school on a form, best first.
+
+    education.school_on_forms (the name most forms list) leads, then education.school and
+    school_aliases, then the same names with the other usual separators ("X at Y", "X - Y",
+    "X, Y", "X Y") and with / without a leading "The", for lists that spell it differently.
+    """
+    given = [n.strip() for n in [edu.get("school_on_forms") or "", edu.get("school") or "",
+                                 *(edu.get("school_aliases") or [])] if n and n.strip()]
+    variants = []
+    for name in given:
+        bare = re.sub(r"^the\s+", "", name, flags=re.I)
+        m = re.match(r"(.+?)(?:\s+at\s+|\s*[-–—]\s*|,\s*)(.+)$", bare)
+        if m:
+            forms = [f"{m.group(1)}{sep}{m.group(2)}" for sep in (" - ", " at ", ", ", " ")]
+            variants += forms + [f"The {x}" for x in forms]
+    seen, out = set(), []
+    for name in given + variants:
+        key = name.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(name)
+    return out
 
 
 def existing_file(path: str | None) -> str | None:

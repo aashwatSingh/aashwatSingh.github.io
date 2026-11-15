@@ -35,6 +35,7 @@
   },
   "education": {
     "school": "",
+    "school_on_forms": "",
     "school_aliases": [],
     "school_location": "",
     "degree": "",

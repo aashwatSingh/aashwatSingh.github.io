@@ -691,3 +691,48 @@ def test_uploads_never_come_from_stored_answers():
     engine = AnswerEngine(ENGINE.p, custom_answers=[{"pattern": "portfolio", "answer": "candidate_profile.json"}])
     d = engine.resolve(Question(label="Portfolio", kind="file", required=True), Context(company="Acme"))
     assert d.action != "fill"
+
+
+# ---- school name: the form spelling first, then the others --------------------------------- #
+
+def _utd_engine():
+    profile = json.loads(json.dumps(PROFILE))
+    profile["education"].update(school="The University of Texas at Dallas", school_on_forms="University of Texas - Dallas",
+                                school_aliases=["UT Dallas", "UTD"])
+    return AnswerEngine(profile, custom_answers=[]), profile["education"]
+
+
+def test_school_names_lead_with_the_form_spelling_then_every_other_format():
+    from answers import school_names
+    _, edu = _utd_engine()
+    names = school_names(edu)
+    assert names[:4] == ["University of Texas - Dallas", "The University of Texas at Dallas", "UT Dallas", "UTD"]
+    for other in ("University of Texas at Dallas", "University of Texas, Dallas", "University of Texas Dallas",
+                  "The University of Texas - Dallas"):
+        assert other in names
+    assert "The UTD" not in names and len(names) == len({n.lower() for n in names})
+    assert school_names(PROFILE["education"])[0] == PROFILE["education"]["school"]      # no form name set
+
+
+def test_school_field_uses_the_form_spelling_and_falls_back_through_the_formats():
+    eng, _ = _utd_engine()
+
+    def pick(options, kind="select"):
+        d = eng.resolve(Question(label="School", kind=kind, required=True, options=options), Context(company="Acme"))
+        assert d.action == "fill", d
+        return d.value
+    assert pick([], kind="text") == "University of Texas - Dallas"
+    both = ["Texas A&M University", "The University of Texas at Dallas", "University of Texas - Dallas"]
+    assert pick(both) == "University of Texas - Dallas"                      # offered: always the form spelling
+    assert pick(["University of Texas - Austin", "The University of Texas at Dallas"]) == "The University of Texas at Dallas"
+    assert pick(["University of Texas, Dallas", "University of Texas at Austin"]) == "University of Texas, Dallas"
+    assert pick(["UT Austin", "UT Dallas"]) == "UT Dallas"
+    assert pick(["Rice University", "Other"]) == "Other"
+
+
+def test_greenhouse_school_picker_prefers_the_form_spelling():
+    from ats.greenhouse import _pick_school
+    _, edu = _utd_engine()
+    assert _pick_school(["The University of Texas at Dallas", "University of Texas - Dallas"], edu) == "University of Texas - Dallas"
+    assert _pick_school(["University of Texas at Austin", "University of Texas at Dallas"], edu) == "University of Texas at Dallas"
+    assert _pick_school(["University of Texas - Austin"], edu) is None

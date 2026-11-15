@@ -32,7 +32,7 @@ from urllib.parse import urlparse
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
 import config
-from answers import Decision, Question
+from answers import Decision, Question, school_names
 from urls import host_matches
 from ats.base import (CLOSED, DRY_RUN_OK, FILLED, MANUAL_REVIEW, SUBMITTED, SUBMITTED_BY_CANDIDATE, ApplyResult,
                       BaseAdapter, FormField, FormState, _screenshot)
@@ -468,6 +468,17 @@ class WorkdayAdapter(BaseAdapter):
                     await page.keyboard.type(part, delay=40)
             return
         if f.widget == "search":
+            names = school_names(profile["education"])
+            if str(value) in names:                            # a school picker: try each spelling in turn
+                for i, name in enumerate(names):
+                    try:
+                        await self._pick_prompt(page, f, name)
+                        return
+                    except LookupError:
+                        if i == len(names) - 1:
+                            raise
+                        await page.locator(f"{f.sel} input").first.fill("")
+                return
             await self._pick_prompt(page, f, str(value))
             return
         raise NotImplementedError(f.widget)

@@ -13,7 +13,7 @@ import gmail_tab_otp
 import imap_otp
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
-from answers import MONTHS, Decision, Question
+from answers import MONTHS, Decision, Question, school_names
 from urls import host_matches
 from ats.base import (MANUAL_REVIEW, SUBMITTED, BaseAdapter, form_still_showing, FormField, SubmitWatch, fetch_json,
                       strip_html, visible_captcha)
@@ -235,7 +235,7 @@ class GreenhouseAdapter(BaseAdapter):
         if fid == "phone":
             return Decision("fill", profile["identity"]["phone_digits"], "gh-phone")
         if fid.startswith("school--"):
-            return Decision("fill", edu["school"], "gh-school")
+            return Decision("fill", school_names(edu)[0], "gh-school")
         if fid.startswith("degree--"):
             return Decision("fill", edu["degree"], "gh-degree")
         if fid.startswith("discipline--"):
@@ -310,7 +310,7 @@ class GreenhouseAdapter(BaseAdapter):
             return
         if fid.startswith("school--"):
             hit = None
-            for term in [edu["school"], *edu["school_aliases"]]:
+            for term in school_names(edu):                # the form name first, then each other spelling
                 options = await self._open_menu(page, f, typed=term)
                 hit = _pick_school(options, edu)
                 if hit:
@@ -432,12 +432,12 @@ class GreenhouseAdapter(BaseAdapter):
 
 
 def _pick_school(options: list[str], edu: dict) -> str | None:
-    names = [edu["school"], *edu["school_aliases"]]
-    simple = lambda s: re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
-    wanted = {simple(n) for n in names} | {simple(n).removeprefix("the ") for n in names}
-    for o in options:
-        if simple(o) in wanted or simple(o).removeprefix("the ") in wanted:
-            return o
+    """The offered option that is this school, preferring the spellings in school_names order."""
+    simple = lambda s: re.sub(r"[^a-z0-9]+", " ", s.lower()).strip().removeprefix("the ")
+    for name in school_names(edu):
+        for o in options:
+            if simple(o) == simple(name):
+                return o
     return None
 
 

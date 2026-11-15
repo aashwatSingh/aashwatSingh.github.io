@@ -167,6 +167,7 @@ What still stops a form, because the profile does not say and a template cannot 
 | `logistics.pursuing_further_education_after_degree` | "Are you considering further education after this degree?" |
 | `logistics.accept_arbitration_agreements` | mandatory arbitration acknowledgements |
 | `education.sat_score`, `act_score`, `school_email`, `transcript_path` | test scores, .edu address, transcript uploads |
+| `education.school_on_forms` | the school name as most forms list it (e.g. `University of Texas - Dallas`). Used first for every school / university field; if a list does not offer it, `school`, `school_aliases` and their other spellings ("X at Y", "X, Y", with / without "The") are tried in turn. `school` stays the name used in essays and the cover letter |
 
 Citizenship status, visa category (F-1 / OPT / CPT), clearance, behavioural stories ("describe a
 time when...") and skill self-ratings have no profile field; answer the recurring ones once in
