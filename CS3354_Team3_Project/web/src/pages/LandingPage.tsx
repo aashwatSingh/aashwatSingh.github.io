@@ -1,10 +1,10 @@
 /**
- * @author eLeet Coderz (Team 3) - matches landing.html (the wireframe's AI-assistant copy is replaced: no
- *   requirement defines an AI assistant, so it is out of scope per the team README)
+ * @author eLeet Coderz (Team 3) - matches landing.html, including its AI assistant card (now the
+ *   "Nemotron AI Copilot"; see docs/decisions/005-nemotron-ai-assistant.md)
  * @description The public home page: header with Features / Mission links, the "Forge great projects,
  *   together." hero with a preview of the app, the mission statement, the six-feature grid, the sign-up
  *   call to action and the footer.
- * @traces SE-FR-16, SE-FR-21, SE-FR-26, SE-FR-01, SE-FR-04, SE-FR-19, SE-NFR-05
+ * @traces SE-FR-16, SE-FR-21, SE-FR-26, SE-FR-01, SE-FR-04, SE-FR-19, SE-NFR-02, SE-NFR-05
  */
 import { Link } from 'react-router-dom';
 import { useAuth } from '../features/auth/AuthProvider';
@@ -15,8 +15,8 @@ const FEATURES = [
   { icon: 'calendar', tone: 'bg-warn/15 text-warn', title: 'Deadlines', text: 'See what is due and when, with calendar views, soft deadlines and timely reminders.' },
   { icon: 'users', tone: 'bg-info/15 text-info', title: 'Team', text: 'Assign tasks, mention teammates and see who is working on what.' },
   { icon: 'dollar', tone: 'bg-ok/15 text-ok', title: 'Costs', text: 'Track bids, budgets, stage costs and expenses to the cent and stay within budget.' },
-  { icon: 'chart', tone: 'bg-danger/15 text-danger', title: 'Charts', text: 'Understand progress and time spent at a glance with clear visual reports.' },
-  { icon: 'clock', tone: 'bg-brand/15 text-brand', title: 'Time tracking', text: 'Start, pause and stop a timer on your tasks and compare estimated with actual hours.' },
+  { icon: 'chart', tone: 'bg-danger/15 text-danger', title: 'Charts', text: 'Understand progress and time tracked at a glance, and compare estimated with actual hours.' },
+  { icon: 'sparkle', tone: 'bg-brand/15 text-brand', title: 'Nemotron AI Copilot', text: 'Ask ForgeAI for a project summary that only ever includes what your role may see, and let it plan soft deadlines before each due date.' },
 ];
 
 const MOCK_NAV = ['Home', 'Projects', 'Tasks', 'Charts', 'Cost', 'People', 'Calendar'];
@@ -121,7 +121,7 @@ export function LandingPage() {
             Forge great projects, <span className="text-gold">together.</span>
           </h1>
           <p className="mt-6 text-lg leading-[1.65] text-body">
-            ProjectForge brings project details, deadlines, team members, costs, hours and charts into one clear workspace, so your team always knows what's next.
+            ProjectForge brings project details, deadlines, team members, costs, charts and an AI copilot into one clear workspace, so your team always knows what's next.
           </p>
           <div className="mt-9 flex flex-wrap gap-3">
             <Link to={primaryTo} className="btn-primary h-[52px] rounded-xl px-7 text-base">{user ? 'Go to your dashboard' : 'Sign up free'}</Link>

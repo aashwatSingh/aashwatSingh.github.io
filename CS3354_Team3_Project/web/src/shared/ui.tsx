@@ -6,7 +6,7 @@
  *   error states, and the "couldn't save - Retry / Cancel" banner.
  * @traces SE-FR-15, SE-NFR-04, SE-NFR-05, UC-01, UC-06, UC-17
  */
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { initials } from './format';
 import type { ApiError } from '../services/apiClient';
 
@@ -59,6 +59,7 @@ const PATHS: Record<string, string> = {
   external: 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6m4-3h6v6m-11 5L21 3',
   palette: 'M12 22a10 10 0 1 1 10-10c0 2.5-2 3-3.5 3H16a2 2 0 0 0-1.5 3.3A2 2 0 0 1 12 22zM7.5 11a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm3-4a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm5 0a1 1 0 1 0 0-2 1 1 0 0 0 0 2z',
   layout: 'M3 3h18v18H3zM3 9h18M9 21V9',
+  sparkle: 'M12 3l1.8 4.9L18.7 9.7l-4.9 1.8L12 16.4l-1.8-4.9-4.9-1.8 4.9-1.8zM18.5 14.5l.9 2.3 2.3.9-2.3.9-.9 2.3-.9-2.3-2.3-.9 2.3-.9zM5 15.5l.6 1.5 1.5.6-1.5.6-.6 1.5-.6-1.5-1.5-.6 1.5-.6z',
 };
 
 export function Icon({ name, className = 'h-4 w-4', title }: { name: keyof typeof PATHS | string; className?: string; title?: string }) {
@@ -387,9 +388,14 @@ export function Toggle({ checked, onChange, label, disabled }: { checked: boolea
   );
 }
 
-export function Modal({ open, title, onClose, children, footer, wide }: { open: boolean; title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
-  const panel = useRef<HTMLDivElement>(null);
-  const body = useRef<HTMLDivElement>(null);
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Keyboard behaviour shared by every dialog and slide-over panel: Escape closes it, Tab stays inside it,
+ * the first form field (inside `fieldRoot`, when given) gets focus on open, and focus returns to whatever
+ * opened it on close.
+ */
+export function useDialogFocus(open: boolean, panel: RefObject<HTMLElement | null>, onClose: () => void, fieldRoot?: RefObject<HTMLElement | null>): void {
   // Kept in a ref so the effect below runs once per open, not on every parent render (which would pull
   // focus back to the first field while the user is typing in another one).
   const close = useRef(onClose);
@@ -397,8 +403,7 @@ export function Modal({ open, title, onClose, children, footer, wide }: { open: 
   useEffect(() => {
     if (!open) return;
     const opener = document.activeElement as HTMLElement | null;
-    const focusable = () =>
-      Array.from(panel.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? []);
+    const focusable = () => Array.from(panel.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
@@ -422,12 +427,18 @@ export function Modal({ open, title, onClose, children, footer, wide }: { open: 
     };
     document.addEventListener('keydown', onKey);
     // First form field of the dialog, or its first button when it has none.
-    (body.current?.querySelector<HTMLElement>('input:not([disabled]), select:not([disabled]), textarea:not([disabled])') ?? focusable()[0])?.focus();
+    ((fieldRoot ?? panel).current?.querySelector<HTMLElement>('input:not([disabled]), select:not([disabled]), textarea:not([disabled])') ?? focusable()[0])?.focus();
     return () => {
       document.removeEventListener('keydown', onKey);
       opener?.focus?.(); // hand focus back to whatever opened the dialog
     };
-  }, [open]);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+export function Modal({ open, title, onClose, children, footer, wide }: { open: boolean; title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+  const panel = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  useDialogFocus(open, panel, onClose, body);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 pt-[8vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>

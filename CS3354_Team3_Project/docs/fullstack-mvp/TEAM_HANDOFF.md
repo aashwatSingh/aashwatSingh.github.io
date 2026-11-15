@@ -2,7 +2,7 @@
 
 For Team 3 (eLeet Coderz), CS 3354.001. This page tells each of us which files are ours, how to test our area, and what to click in a 60-second demo.
 
-- **Decisions that need sign-off** are in [`docs/decisions/`](../decisions/): [001 backend](../decisions/001-hybrid-fastapi-supabase-architecture.md), [002 roles](../decisions/002-rbac-permission-matrix.md), [003 lockout](../decisions/003-account-lockout-and-unlock.md), [004 money](../decisions/004-financial-precision-and-stage-costs.md).
+- **Decisions that need sign-off** are in [`docs/decisions/`](../decisions/): [001 backend](../decisions/001-hybrid-fastapi-supabase-architecture.md), [002 roles](../decisions/002-rbac-permission-matrix.md), [003 lockout](../decisions/003-account-lockout-and-unlock.md), [004 money](../decisions/004-financial-precision-and-stage-costs.md), [005 ForgeAI](../decisions/005-nemotron-ai-assistant.md).
 - **Backend layout:** the Python backend is organised as one router file per area, `backend/app/routers/<area>.py`, not `backend/app/features/<area>/`. Request / response shapes for every area are in `backend/app/schemas/dto.py`, tables in `backend/app/models/entities.py`.
 - **Shared code** (tell the team in your pull request if you change it): `backend/app/core/`, `backend/app/main.py`, `backend/app/schemas/dto.py`, `backend/app/models/entities.py`, `supabase/migrations/`, `web/src/app/`, `web/src/shared/`, `web/src/services/`.
 
@@ -42,7 +42,7 @@ cd web
 npm run build
 ```
 
-Results on this branch: backend 34 passed on SQLite (9 database-only tests skipped) and 43 passed on PostgreSQL 16; web 43 Vitest tests passed; the production build has no TypeScript errors.
+Results on this branch: backend 43 passed on SQLite (9 database-only tests skipped) and 52 passed on PostgreSQL 16; web 47 Vitest tests passed; the production build has no TypeScript errors.
 
 To include the PostgreSQL-only tests (race conditions and the database's own access rules), point both variables at a PostgreSQL server you can create databases on:
 
@@ -56,6 +56,7 @@ TEST_DATABASE_URL=postgresql+psycopg://postgres@127.0.0.1:5432/projectforge_test
 | `backend/tests/test_all_requirements.py` | Every use case and requirement, through the real HTTP API and WebSocket |
 | `backend/tests/test_security_audit.py` | The security review: other projects' ids, forged tokens, injection through titles, races, slow-pattern attacks, query counts |
 | `backend/tests/test_supabase_rls.py` | The database's own rules, with the API bypassed (PostgreSQL only) |
+| `backend/tests/test_forgeai.py` | ForgeAI: members only, no financial data for members, exact totals for managers, valid soft-deadline suggestions, safe handling of the NVIDIA model |
 
 ---
 
@@ -263,6 +264,47 @@ npx vitest run src/features/tasks src/features/collaboration
 
 ---
 
+## ForgeAI (Nemotron copilot): how to demo it
+
+ForgeAI is the assistant from the landing-page wireframe. It is proposed in [ADR 005](../decisions/005-nemotron-ai-assistant.md) and is not yet an accepted requirement.
+
+| Where | Files |
+| --- | --- |
+| Frontend | `web/src/components/ForgeAICopilot.tsx` (slide-over panel and sidebar button), `web/src/features/ai/` (`aiController.ts`, `model.ts`, `EnginePills.tsx`, `SoftDeadlineSuggestions.tsx`, `model.test.ts`) |
+| Backend | `backend/app/routers/ai.py` (role-scoped snapshot, local engine, endpoints), `backend/app/core/nemotron.py` (NVIDIA client) |
+
+Test it:
+
+```bash
+cd backend
+python -m pytest tests/test_forgeai.py
+```
+
+```bash
+cd web
+npx vitest run src/features/ai
+```
+
+**Offline demo (no key, nothing leaves your machine).** Start the app as usual. Every answer is labelled "Nemotron offline · Local Engine".
+
+1. As **Jon (owner)** press **ForgeAI (Nemotron)** in the sidebar. Press **Summarize stage costs & expenses**: the answer gives the exact stage cost total, bid, budget and expenses, "never added together".
+2. Press **List at-risk deadlines**, then type your own question and press Enter.
+3. Switch to **Staff (member)** and open ForgeAI again: the cost chip has a lock. Press it: "Owner or Manager only", with no numbers. "For a member the server does not even read the cost tables."
+4. Press **Analyze hour efficiency**: Staff sees only their own hours.
+5. Open a task (Tasks → a card → **Open task**). In **Soft deadlines** press **Suggest with Nemotron**: three checkpoints (Low, Medium, High), all before the final due date. Press **Add** on one: it is saved through the normal soft-deadline rule.
+6. Press Escape: the panel closes and focus returns to the button.
+
+**Live demo (NVIDIA Nemotron answers).** Get a key at https://build.nvidia.com, then put it in `backend/.env` (this file is ignored by Git; never commit a key):
+
+```bash
+cd backend
+cp .env.example .env
+```
+
+Set `NVIDIA_API_KEY=` to your key in that file, restart `uvicorn`, and repeat the steps above. Answers are now labelled "Nemotron Super 49B · Live NIM" and the panel says the project facts are sent to NVIDIA. If NVIDIA is slow (15 seconds) or returns an error, the same question is answered by the local engine and labelled as such, so the demo never stalls. The member refusal and the "before the final due date" rule are enforced by the server in both modes.
+
+The live path has been tested against a stand-in for NVIDIA's API, not against the real service: try it once with your own key before presenting.
+
 ## What the security review changed (so you are not surprised)
 
 | Area | Change |
@@ -277,6 +319,7 @@ npx vitest run src/features/tasks src/features/collaboration
 
 ## Known limits (not hidden, not fixed here)
 
+- ForgeAI summarizes and suggests soft deadlines; it does not create tasks, and it has not been run against the real NVIDIA service (no key in the build environment).
 - Calendar and Sheets "connections" record consent for one-way exports only. No Google or Microsoft account is linked and no OAuth token is stored.
 - Emails go to the in-app dev outbox in demo mode; a real mail provider is not wired up.
 - The rate limiter and the live-update hub live in one server process. Running several API processes needs a shared store.

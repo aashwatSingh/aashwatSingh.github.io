@@ -6,6 +6,8 @@
  *   explained right under the controls before anything is sent (date must be earlier than the final due
  *   date); if the server still rejects an edit, the controls snap back to the original saved value it
  *   returns, and a timed-out save offers Retry / Cancel while keeping what was typed (SE-NFR-04).
+ *   People who may add checkpoints also get "Suggest with Nemotron": three proposed soft deadlines that
+ *   are added one click at a time through the same save.
  * @traces SE-FR-06, SE-FR-07, SE-FR-08, SE-FR-09, SE-FR-10, SE-NFR-03, SE-NFR-04, UC-05, UC-06, UC-07
  */
 import { useCallback, useEffect, useState } from 'react';
@@ -16,6 +18,7 @@ import { formatDateTime } from '../../shared/format';
 import { Alert, Badge, EmptyState, Icon, RetryBanner, Spinner, type Tone } from '../../shared/ui';
 import { toApiError, useSave } from '../../shared/useSave';
 import { SoftDeadlineStateBadge } from './SoftDeadlineBadge';
+import { SoftDeadlineSuggestions } from '../ai/SoftDeadlineSuggestions';
 import { softDeadlineController } from './softDeadlineController';
 import { NEEDS_DUE_DATE, SOFT_DEADLINE_PRIORITIES, softDeadlineError } from './validation';
 
@@ -23,6 +26,8 @@ interface Props {
   taskId: string;
   taskDueDate: string | null;
   canManage: boolean;
+  /** When given, people who may manage the checkpoints are offered ForgeAI suggestions. */
+  projectId?: string;
 }
 
 const PRIORITY_TONE: Record<SoftDeadlinePriority, Tone> = { high: 'danger', medium: 'warn', low: 'info' };
@@ -108,7 +113,7 @@ function EditRow({ item, taskDueDate, onSaved, onCancel }: { item: SoftDeadline;
   );
 }
 
-export function SoftDeadlineList({ taskId, taskDueDate, canManage }: Props) {
+export function SoftDeadlineList({ taskId, taskDueDate, canManage, projectId }: Props) {
   const [items, setItems] = useState<SoftDeadline[] | null>(null);
   const [title, setTitle] = useState('');
   const [date, setDate] = useState('');
@@ -207,6 +212,14 @@ export function SoftDeadlineList({ taskId, taskDueDate, canManage }: Props) {
             <button type="button" className="btn-primary btn-sm" onClick={add} disabled={create.saving}><Icon name="plus" /> Add</button>
           </div>
         </div>
+      ) : null}
+      {canManage && taskDueDate && projectId ? (
+        <SoftDeadlineSuggestions
+          projectId={projectId}
+          taskId={taskId}
+          taskDueDate={taskDueDate}
+          onAdded={(saved) => setItems((current) => [...(current ?? []).filter((x) => x.id !== saved.id), saved].sort((a, b) => a.due_at.localeCompare(b.due_at)))}
+        />
       ) : null}
     </div>
   );

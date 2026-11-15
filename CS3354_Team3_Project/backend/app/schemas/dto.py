@@ -972,6 +972,66 @@ class PerformanceReport(BaseModel):
 # ---------------------------------------------------------------------------
 # Field-level validation errors raised by routers (e.g. "username already taken")
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# ForgeAI - Nemotron copilot (Aashwat Singh; see docs/decisions/005-nemotron-ai-assistant.md)
+# ---------------------------------------------------------------------------
+AiMode = Literal["nvidia-nim", "local-fallback"]
+AI_PROMPT_MAX = 2000
+
+
+class AiChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str
+    task_id: IdStr | None = None
+
+    @field_validator("prompt")
+    @classmethod
+    def _prompt(cls, v: str) -> str:
+        """1 to 2,000 characters after trimming; invisible control characters removed."""
+        v = clean_text(v).strip()
+        if not v:
+            raise ValueError("Ask ForgeAI a question")
+        if len(v) > AI_PROMPT_MAX:
+            raise ValueError(f"Questions are limited to {AI_PROMPT_MAX:,} characters")
+        return v
+
+
+class AiChatResponse(BaseModel):
+    reply: str
+    model: str
+    mode: AiMode
+    role_scope: Role
+    # True when the answer is the "needs Owner or Manager" refusal (lets the UI show a lock, not an error).
+    restricted: bool = False
+
+
+class AiStatusResponse(BaseModel):
+    """Which engine will answer, so the UI can say so before the first question is sent."""
+
+    model: str
+    mode: AiMode
+    role_scope: Role
+
+
+class AiSuggestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: IdStr
+
+
+class AiSoftDeadlineSuggestion(BaseModel):
+    title: str
+    due_at: UTCDateTimeOut
+    priority: SoftDeadlinePriority
+
+
+class AiSuggestResponse(BaseModel):
+    suggestions: list[AiSoftDeadlineSuggestion]
+    model: str
+    mode: AiMode
+
+
 class FieldValidationError(Exception):
     """Rendered by main.py as HTTP 422 {"detail": "...", "errors": {field: message}}."""
 

@@ -104,6 +104,9 @@ class Settings:
     frontend_url: str = "http://localhost:5173"
     frontend_dist: Path = PROJECT_ROOT / "web" / "dist"
     force_https: bool = False
+    # ForgeAI: requests per person per window on the two AI endpoints (each may call a paid external model).
+    ai_rate_limit_requests: int = 20
+    ai_rate_limit_window_seconds: int = 60
 
     @property
     def is_sqlite(self) -> bool:
@@ -149,4 +152,6 @@ def get_settings() -> Settings:
         frontend_dist=Path(os.getenv("FRONTEND_DIST", str(PROJECT_ROOT / "web" / "dist"))),
         # SE-NFR-06: HTTPS redirect + HSTS. On by default whenever demo mode is off.
         force_https=_bool("FORCE_HTTPS", not demo_mode),
+        ai_rate_limit_requests=_int("AI_RATE_LIMIT_REQUESTS", 20),
+        ai_rate_limit_window_seconds=_int("AI_RATE_LIMIT_WINDOW_SECONDS", 60),
     )

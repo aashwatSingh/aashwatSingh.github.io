@@ -6,8 +6,9 @@
     app call the API from another port (CORS), refuses request bodies over 1 MB, makes retried saves safe
     (the same Idempotency-Key and body never save twice), formats validation errors as
     {"detail", "errors": {field: message}}, answers malformed ids with 404 instead of crashing, plugs in
-    every feature router, hosts the WebSocket used for live progress and notification updates (signed-in
-    users only), and - after `npm run build` - also serves the website itself.
+    every feature router (including the ForgeAI copilot), hosts the WebSocket used for live progress and
+    notification updates (signed-in users only), and - after `npm run build` - also serves the website
+    itself.
 @traces: SE-NFR-04, SE-NFR-06, SE-NFR-08, SE-NFR-10, SE-NFR-11, SE-NFR-12, UC-08, UC-09
 """
 
@@ -35,6 +36,7 @@ from app.core.database import InvalidIdentifier, SessionLocal, create_all, datab
 from app.core.realtime import hub
 from app.core.security import rate_limit_middleware, session_from_token, transport_security_headers
 from app.routers import (
+    ai,
     auth,
     collaboration,
     costs,
@@ -337,6 +339,7 @@ for module in (
     costs,
     time_tracking,
     reports,
+    ai,
 ):
     app.include_router(module.router)
 

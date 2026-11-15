@@ -168,7 +168,7 @@ export function TaskDetailPage() {
             {task.description ? <SafeMarkdown source={task.description} memberNames={memberNames} /> : <p className="text-sm text-muted">No description.</p>}
           </Card>
           <Card title="Soft deadlines">
-            <SoftDeadlineList taskId={task.id} taskDueDate={task.due_date} canManage={task.can_edit} />
+            <SoftDeadlineList taskId={task.id} taskDueDate={task.due_date} canManage={task.can_edit} projectId={task.project_id} />
           </Card>
           <Card title={`Comments (${task.comment_count})`}>
             <CommentThread taskId={task.id} members={members} />

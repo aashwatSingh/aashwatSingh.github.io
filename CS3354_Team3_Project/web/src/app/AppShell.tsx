@@ -5,11 +5,13 @@
  *   gold-hammer logo and wordmark, Home / Projects / Tasks / Charts / Cost / People / Calendar / Time tracking
  *   links, and at the bottom the Notifications link (with unread count) and the profile row. The sidebar
  *   footer also holds the Quick Demo Role Switcher (Jon = Owner, Tyler = Manager, Staff = Member - demo mode
- *   only), the live-connection dot and the theme toggle. Live notifications pop up as toasts.
+ *   only), the live-connection dot and the theme toggle. Live notifications pop up as toasts. The
+ *   "ForgeAI (Nemotron)" button above Notifications opens the copilot slide-over panel.
  * @traces SE-FR-14, SE-FR-29, SE-NFR-05, SE-NFR-12, UC-01, UC-02, UC-18, UC-22
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { ForgeAIButton, ForgeAICopilot } from '../components/ForgeAICopilot';
 import { useAuth } from '../features/auth/AuthProvider';
 import { authController } from '../features/auth/authController';
 import { notificationController } from '../features/collaboration/commentController';
@@ -73,7 +75,7 @@ function DemoRoleSwitcher() {
   );
 }
 
-function Sidebar({ unread, onNavigate }: { unread: number; onNavigate?: () => void }) {
+function Sidebar({ unread, onNavigate, onOpenAi }: { unread: number; onNavigate?: () => void; onOpenAi: () => void }) {
   const { user, logout, demoMode } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [connected, setConnected] = useState(realtime.connected);
@@ -102,6 +104,7 @@ function Sidebar({ unread, onNavigate }: { unread: number; onNavigate?: () => vo
             <Icon name={theme === 'dark' ? 'sun' : 'moon'} className="h-3.5 w-3.5" /> {theme === 'dark' ? 'Light' : 'Dark'}
           </button>
         </div>
+        <ForgeAIButton onClick={() => { onNavigate?.(); onOpenAi(); }} />
         <NavLink to="/notifications" onClick={onNavigate} className={navClass}>
           <Icon name="bell" className="h-5 w-5" />
           <span className="flex-1">Notifications</span>
@@ -157,6 +160,7 @@ export function AppShell() {
   const [unread, setUnread] = useState(0);
   const [toasts, setToasts] = useState<Notification[]>([]);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const location = useLocation();
 
   // Escape closes the slide-in navigation drawer on small screens.
@@ -182,13 +186,13 @@ export function AppShell() {
     <ProjectScopeProvider key={user?.id}>
       <div className="flex min-h-screen bg-canvas">
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 border-r border-line bg-surface-2 lg:block">
-          <Sidebar unread={unread} />
+          <Sidebar unread={unread} onOpenAi={() => setAiOpen(true)} />
         </aside>
         {mobileOpen ? (
           <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
             <div className="absolute inset-0 bg-black/60" onClick={() => setMobileOpen(false)} />
             <aside className="absolute inset-y-0 left-0 w-60 border-r border-line bg-surface-2">
-              <Sidebar unread={unread} onNavigate={() => setMobileOpen(false)} />
+              <Sidebar unread={unread} onNavigate={() => setMobileOpen(false)} onOpenAi={() => setAiOpen(true)} />
             </aside>
           </div>
         ) : null}
@@ -210,6 +214,7 @@ export function AppShell() {
         </div>
       </div>
       <Toasts items={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
+      <ForgeAICopilot open={aiOpen} onClose={() => setAiOpen(false)} />
     </ProjectScopeProvider>
   );
 }
