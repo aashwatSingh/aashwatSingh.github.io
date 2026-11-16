@@ -3,3 +3,8 @@ __pycache__/
 
 # Playwright MCP output (snapshots, screenshots)
 .playwright-mcp/
+
+# Third-party impeccable skill (installed from github.com/pbakaus/impeccable, not committed)
+.claude/skills/impeccable/
+# Per-machine Claude settings (the impeccable hook wiring points at the ignored skill folder)
+.claude/settings.local.json
