@@ -170,7 +170,7 @@ def _pick_project(profile: dict, focus: str) -> dict:
 
 def _shared_tech(profile: dict, job_text: str, project: dict, limit: int = 3) -> list[str]:
     """Technologies named in the posting that the profile also lists; else the project's own stack."""
-    skills = [*profile["skills"]["languages"], *profile["skills"]["backend"], *profile["skills"]["tools"]]
+    skills = [*profile["skills"]["languages"], *profile["skills"]["backend"], *profile["skills"].get("ai_ml", []), *profile["skills"]["tools"]]
     names = [re.sub(r"\s*\(.*\)", "", s) for s in skills]
     banned = {b.lower() for b in profile["skills"].get("never_claim", [])}
     low = job_text.lower()

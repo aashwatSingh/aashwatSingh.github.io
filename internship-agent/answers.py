@@ -994,7 +994,7 @@ class AnswerEngine:
             mine = any(_simple(n) in _simple(label) for n in names)
             return YesNo(mine and _within_window(label, log) is not False)
 
-        skills_all = [*p["skills"]["languages"], *p["skills"]["backend"], *p["skills"]["tools"]]
+        skills_all = [*p["skills"]["languages"], *p["skills"]["backend"], *p["skills"].get("ai_ml", []), *p["skills"]["tools"]]
         skill_terms = {re.sub(r"\s*\(.*\)", "", x).lower() for x in skills_all}
         skill_terms |= {"node", "postgres", "llm", "large language model"}
         never = [x.lower().rstrip("s") for x in p["skills"].get("never_claim", [])]
