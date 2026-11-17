@@ -736,3 +736,31 @@ def test_greenhouse_school_picker_prefers_the_form_spelling():
     assert _pick_school(["The University of Texas at Dallas", "University of Texas - Dallas"], edu) == "University of Texas - Dallas"
     assert _pick_school(["University of Texas at Austin", "University of Texas at Dallas"], edu) == "University of Texas at Dallas"
     assert _pick_school(["University of Texas - Austin"], edu) is None
+
+
+# ---- "internship dates" -------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("label", [
+    "Internship dates", "What are your internship dates?", "Please enter the dates of the internship",
+    "Preferred internship dates (MM/DD/YYYY - MM/DD/YYYY)",
+    "Proposed start and end dates", "Summer internship period", "What are the dates for your summer internship?"])
+@pytest.mark.parametrize("kind", ["text", "textarea"])
+def test_internship_dates_answer_is_one_range(label, kind):
+    got = filled(label, kind=kind)
+    lo, hi = PROFILE["logistics"]["preferred_start"], PROFILE["logistics"].get("preferred_end") or PROFILE["logistics"]["latest_end"]
+    f = lambda iso: f"{iso[5:7]}/{iso[8:10]}/{iso[:4]}"
+    assert got == f"{f(lo)} - {f(hi)}"
+
+
+def test_internship_dates_text_in_the_profile_wins():
+    profile = json.loads(json.dumps(PROFILE))
+    profile["logistics"]["internship_dates_text"] = "06/07/2027 - 08/19/2027"
+    eng = AnswerEngine(profile, custom_answers=[])
+    d = eng.resolve(Question(label="Internship dates", kind="text", required=True), Context(company="Acme"))
+    assert (d.action, d.value) == ("fill", "06/07/2027 - 08/19/2027")
+
+
+def test_internship_dates_rule_leaves_other_date_questions_alone():
+    assert ask("Start and end month of university", kind="text").value != PROFILE["logistics"].get("internship_dates_text")
+    d = ask("Internship start date", kind="text")
+    assert d.action == "fill" and " - " not in str(d.value)          # a single date, not the range

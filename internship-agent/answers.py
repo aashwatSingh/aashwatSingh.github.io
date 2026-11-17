@@ -718,6 +718,17 @@ class AnswerEngine:
                 return Text(f"{_long_date(iso)} – {_long_date(log['latest_end'])}")
             return Text(_fmt_date(iso, q))
 
+        def internship_dates(q, label, ctx):
+            """"Internship dates": one text answer, 'MM/DD/YYYY - MM/DD/YYYY' (logistics.internship_dates_text)."""
+            if q.kind not in ("text", "textarea") or re.search(r"universit|college|school|degree|graduat|semester", label):
+                return None
+            given = (log.get("internship_dates_text") or "").strip()
+            if given:
+                return Text(given)
+            start, end = log.get("preferred_start") or log["earliest_start"], log.get("preferred_end") or log["latest_end"]
+            fmt = lambda iso: f"{iso[5:7]}/{iso[8:10]}/{iso[:4]}"
+            return Text(f"{fmt(start)} - {fmt(end)}")
+
         def end_date(q, label, ctx):
             if q.kind in CHOICE_KINDS:
                 month = MONTHS[int((log.get("preferred_end") or log["latest_end"])[5:7]) - 1]
@@ -1758,6 +1769,13 @@ class AnswerEngine:
                          r"(be|are you) an? (active|current) (college |university )?student|actively enrolled",
              lambda q, label, ctx: YesNo(False) if "high school" in label
              else None if re.search(r"master|ph\.?d|graduate (program|degree)|mba", label) else YesNo(True)),
+            ("x-internship-dates",
+             r"(internship|intern|program|co-?op|summer|employment|work|assignment) (dates|date range|period|time ?frame)|"
+             r"dates? (of|for) (the |your |this |our )?(internship|program|co-?op|employment|assignment|summer)|"
+             r"(proposed|preferred|anticipated|intended|expected|requested) (internship |work |employment )?dates\b|"
+             r"dates? you (are|will be|would be|can be|could be) (available|interning|working|able)|"
+             r"(start|begin)(ning)? (and|&|/) end(ing)? dates?",
+             internship_dates),
             ("coursework", r"coursework|relevant courses", t(edu["coursework"])),
 
             # --- logistics ---------------------------------------------------

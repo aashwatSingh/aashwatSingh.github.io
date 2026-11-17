@@ -124,7 +124,8 @@
     "requires_housing": null,
     "further_education_text": "",
     "preferred_end": null,
-    "availability_dates_text": ""
+    "availability_dates_text": "",
+    "internship_dates_text": ""
   },
   "eeo": {
     "gender": "",
