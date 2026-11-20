@@ -262,14 +262,35 @@ class WorkdayAdapter(BaseAdapter):
         if errors:
             return MANUAL_REVIEW, "WORKDAY_REVIEW_ERRORS", f"Review shows: {errors[:200]}"
         await self.before_submit(page)                         # inbox position, for the confirmation e-mail
+        review_step = await self.current_step(page)
+        button = page.locator(AID.format(submit)).first
+        try:                                                   # centred: sticky footers and banners cover the edges
+            await button.evaluate("e => e.scrollIntoView({block: 'center'})")
+            await button.wait_for(state="visible", timeout=5000)
+        except Exception:                                      # noqa: BLE001 - _click still tries what a person would
+            pass
+        clicked_at = time.time()
         await self._click(page, submit)
-        deadline = time.monotonic() + 45
+        started = time.monotonic()
+        deadline = started + 45
         while time.monotonic() < deadline:
             await page.wait_for_timeout(700)
             proof = await self.confirmed(page)
             if proof:
                 return SUBMITTED, "submitted from the Review page", proof
-            if time.monotonic() - (deadline - 45) > 4:
+            code = await self.code_step(page, clicked_at)
+            if code == "entered":
+                deadline = max(deadline, time.monotonic() + 30)
+                continue
+            if code == "manual" and not self.human_wait_s:
+                return MANUAL_REVIEW, "EMAIL_VERIFICATION_CODE", "Workday asked for an e-mailed code after Submit"
+            step = await self.current_step(page)
+            if step and review_step and step != review_step and not REVIEW_STEP.search(step):
+                # Workday sent the wizard back to a page with a problem: never loop through the pages again
+                errors = await self._errors(page)
+                return MANUAL_REVIEW, "WORKDAY_RETURNED", (f"Submit went back to the '{step}' page"
+                                                           + (f": {errors[:160]}" if errors else ""))
+            if time.monotonic() - started > 4:
                 errors = await self._errors(page)
                 if errors:
                     return MANUAL_REVIEW, "VALIDATION_ERROR", f"after Submit: {errors[:200]}"
@@ -632,8 +653,11 @@ class WorkdayAdapter(BaseAdapter):
                 break
             await page.fill(AID.format("email"), user)
             await page.fill(AID.format("password"), attempt)
+            clicked_at = time.time()
             await self._click(page, "signInSubmitButton")
             moved = await self._wait_step_change(page, step, 12)
+            if not moved and await self.code_step(page, clicked_at) == "entered":   # e-mailed sign-in code
+                moved = await self._wait_step_change(page, step, 20)
             if moved and not AUTH_STEP.search(moved):
                 return None
         self._sign_in_failed.add(host)                         # never retry this site in this run
@@ -780,11 +804,14 @@ class WorkdayAdapter(BaseAdapter):
                 if not page_unknowns:
                     await _screenshot(page, shot_path)         # what was filled on this page, for the audit trail
                     signature = await self._signature(page)
+                    clicked_at = time.time()
                     for aid in ("bottom-navigation-next-button", "pageFooterNextButton"):
                         if await self._visible(page, aid):
                             await self._click(page, aid)
                             break
                     moved = await self._wait_step_change(page, step, 20, stop_on_errors=True)
+                    if not moved and await self.code_step(page, clicked_at) == "entered":
+                        moved = await self._wait_step_change(page, step, 30, stop_on_errors=True)
                     if moved and moved != "DONE":
                         await self._wait_new_page(page, signature)
                     if not moved:

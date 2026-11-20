@@ -1,39 +1,47 @@
-"""Mission Control: the tracker count, the runner's live step, and the controls for a blitz run.
+"""Mission Control: run and watch blitz batches from the browser instead of PowerShell.
 
-    python app_server.py            # http://127.0.0.1:4760
+    Launch_Mission_Control.bat          # Windows: starts this server and opens the page
+    python app_server.py                # http://127.0.0.1:4760
 
-Shows internship_tracker.xlsx's total and status breakdown (the same numbers Internship Hunter
-shows, both via tracker_sync.py), the active posting's step from run_state.json, and the
-confirmation-gate buttons when an e-mail timed out. Start / Pause / Stop runs
+A FastAPI backend (this file) and a React page (mission_control_ui/, built to mission_control_ui/dist).
+The page shows:
 
-    agent_runner.py --local-blitz --dedup-level role --max-per-company 3
+  * the 500-application goal from internship_tracker.xlsx (via tracker_sync.py, the same numbers
+    Internship Hunter shows): applied, e-mail verified, in the queue, blocked, failed, remaining;
+  * the posting being worked on and its step, and the recent results;
+  * Start / Pause / Resume / Stop for a batch of N postings, and the runner's log, live (SSE);
+  * the Unblock Queue (unblock.py): postings that stopped on a CAPTCHA, a question the profile
+    cannot answer, a login wall or a missing confirmation e-mail, with Retry / Confirm Submitted /
+    Dismiss and a form whose answers are saved to custom_answers.json.
 
-from the page. Pause and Stop are read by the runner between applications (run_control.json),
-so they also work on a run started from a terminal.
-
-It binds to 127.0.0.1, answers only requests addressed to localhost, refuses cross-site POSTs,
-and only ever starts that one fixed command. No dependencies beyond the standard library and
-the project's own modules.
+It binds to 127.0.0.1, answers only requests addressed to localhost (DNS-rebinding guard), refuses
+cross-site POSTs, only ever starts the one fixed runner command, and never sends .env values to
+the page.
 """
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
 import config
 import run_state
+import unblock
+from fileutil import read_json
 
 HOST, PORT = "127.0.0.1", 4760
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
-MAX_BODY = 4096
+MAX_BODY = 64 * 1024
+MAX_BATCH = 500
+UI_DIR = Path(__file__).resolve().parent / "mission_control_ui" / "dist"
 CODE_DIR = Path(__file__).resolve().parent
 BLITZ_ARGS = ["--local-blitz", "--dedup-level", "role", "--max-per-company", "3"]
 ATTENTION = "[ACTION REQUIRED]"
@@ -77,6 +85,10 @@ class TrackerCache:
                 return value                               # not cached: try again on the next poll
             self._key, self._value = key, value
             return value
+
+    def invalidate(self) -> None:
+        with self._lock:
+            self._key = None
 
 
 tracker = TrackerCache()
@@ -127,17 +139,25 @@ class Blitz:
             "external": running and not own,           # started from a terminal, not this page
             "exit_code": exit_code,
             "command": "agent_runner.py " + " ".join(BLITZ_ARGS),
+            "limit": getattr(self, "limit", None) if running else None,
         }
 
-    def act(self, action) -> tuple[int, dict]:
+    def act(self, action, limit=None) -> tuple[int, dict]:
         if action not in self.ACTIONS:
             return 400, {"error": "action must be one of: " + ", ".join(self.ACTIONS)}
+        if limit not in (None, "", 0):
+            if isinstance(limit, bool) or not isinstance(limit, (int, str)) or not str(limit).isdigit() \
+                    or not 1 <= int(limit) <= MAX_BATCH:
+                return 400, {"error": f"batch size must be a whole number from 1 to {MAX_BATCH}"}
+            limit = int(limit)
+        else:
+            limit = None
         with self._lock:
             st = self.status()
             if action == "start":
                 if st["running"]:
                     return 409, {"error": "a run is already going"}
-                return self._start()
+                return self._start(limit)
             if not st["running"]:
                 return 409, {"error": "no run is going"}
             if action == "pause":
@@ -158,7 +178,7 @@ class Blitz:
                 run_state.update(None, "", "Run force-stopped from Mission Control")
             return 200, {"ok": True, **self.status()}
 
-    def _start(self) -> tuple[int, dict]:
+    def _start(self, limit: int | None = None) -> tuple[int, dict]:
         run_state.clear_control()
         run_state.clear_choice()
         config.LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -170,13 +190,15 @@ class Blitz:
             flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
         with blitz_log_path().open("w", encoding="utf-8") as log:
             try:
-                self.proc = self._popen([sys.executable, "-u", str(CODE_DIR / "agent_runner.py"), *BLITZ_ARGS],
+                extra = ["--limit", str(limit)] if limit else []
+                self.proc = self._popen([sys.executable, "-u", str(CODE_DIR / "agent_runner.py"), *BLITZ_ARGS, *extra],
                                         cwd=str(CODE_DIR), stdin=subprocess.DEVNULL, stdout=log,
                                         stderr=subprocess.STDOUT, env=env, creationflags=flags)
             except OSError as exc:
                 return 500, {"error": f"could not start the runner ({exc.strerror or type(exc).__name__})"}
         self.started = time.strftime("%Y-%m-%d %H:%M:%S")
-        run_state.update(None, "", "Blitz run starting...")
+        self.limit = limit
+        run_state.update(None, "", f"Blitz run starting ({f'batch of {limit}' if limit else 'whole queue'})...")
         return 200, {"ok": True, **self.status()}
 
 
@@ -215,6 +237,9 @@ def build_state() -> dict:
             status, label = "skipped", label + " (not asked for)"
         steps.append({"key": key, "label": label, "status": status})
     log = _log_tail()
+    tracker_view = tracker.get()
+    open_items = unblock.items(open_only=True)
+    open_blockers = sum(1 for i in open_items if i.get("status") == unblock.OPEN)
     return {
         "job": state.get("job"),
         "step": step,
@@ -227,7 +252,10 @@ def build_state() -> dict:
         "waiting": (state.get("waiting") or {}) if step == run_state.WAITING_FOR_ANSWER else None,
         "steps": steps,
         "choices": [{"key": k, "label": v} for k, v in run_state.CHOICES.items()],
-        "tracker": tracker.get(),
+        "tracker": tracker_view,
+        "metrics": metrics(tracker_view, queue_stats.get(), open_blockers),
+        "unblock": open_items,
+        "activity": activity.get(),
         "blitz": blitz.status(),
         "log": log,
         "attention": next((line for line in reversed(log) if ATTENTION in line), ""),
@@ -247,10 +275,24 @@ def handle_choice(payload) -> tuple[int, dict]:
 
 
 def handle_blitz(payload) -> tuple[int, dict]:
-    """POST /api/blitz {"action": "start" | "pause" | "resume" | "stop" | "force-stop"}."""
+    """POST /api/blitz {"action": "start" | "pause" | "resume" | "stop" | "force-stop", "limit": N}."""
     if not isinstance(payload, dict):
         return 400, {"error": "send {\"action\": ...}"}
-    return blitz.act(payload.get("action"))
+    return blitz.act(payload.get("action"), payload.get("limit"))
+
+
+def handle_unblock(item_id: str, payload) -> tuple[int, dict]:
+    """POST /api/unblock/<id> {"action": "retry" | "resume" | "confirm" | "dismiss", "answers": {label: text}}."""
+    if not isinstance(payload, dict):
+        return 400, {"error": "send {\"action\": ...}"}
+    answers = payload.get("answers")
+    if answers is not None and (not isinstance(answers, dict)
+                                or not all(isinstance(k, str) and isinstance(v, (str, int, float)) for k, v in answers.items())):
+        return 400, {"error": "answers must map each question to its answer text"}
+    code, body = unblock.resolve(item_id, payload.get("action"), answers)
+    if code == 200:
+        tracker.invalidate()
+    return code, body
 
 
 def host_ok(host_header: str) -> bool:
@@ -270,303 +312,253 @@ def origin_ok(origin: str, host_header: str) -> bool:
         return False
 
 
-PAGE = r"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mission Control</title>
-<style>
-  :root {
-    --paper: oklch(97% 0.008 85); --card: oklch(99.5% 0.004 85); --ink: oklch(24% 0.02 260);
-    --dim: oklch(50% 0.02 260); --line: oklch(88% 0.012 85); --accent: oklch(52% 0.17 262);
-    --ok: oklch(50% 0.12 155); --warn: oklch(55% 0.16 50); --warn-bg: oklch(95% 0.045 75);
-    --bad: oklch(52% 0.18 25);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --paper: oklch(19% 0.015 260); --card: oklch(23% 0.018 260); --ink: oklch(93% 0.01 85);
-      --dim: oklch(70% 0.02 260); --line: oklch(33% 0.02 260); --accent: oklch(74% 0.13 262);
-      --ok: oklch(76% 0.13 155); --warn: oklch(80% 0.13 70); --warn-bg: oklch(30% 0.05 60);
-      --bad: oklch(72% 0.15 25);
+
+
+# ---- queue, activity and the goal numbers -------------------------------------------------- #
+
+class MtimeCache:
+    """A value recomputed only when the files / directories it depends on change."""
+
+    def __init__(self, paths, compute, empty, ttl_s: float = 0):
+        self._paths, self._compute, self._empty, self._ttl = paths, compute, empty, ttl_s
+        self._key, self._value = None, None
+        self._lock = threading.Lock()
+
+    def get(self):
+        key = tuple(TrackerCache._stamp(p) for p in self._paths())
+        if self._ttl:                                      # a rewritten file does not touch its folder's mtime
+            key += (int(time.time() // self._ttl),)
+        with self._lock:
+            if key != self._key or self._value is None:
+                try:
+                    self._value = self._compute()
+                except Exception:                          # noqa: BLE001 - mid-write: keep the last good one
+                    return self._value if self._value is not None else self._empty()
+                self._key = key
+            return self._value
+
+
+def _queue_counts() -> dict:
+    data = read_json(config.QUEUE_JSON, [])
+    counts: dict[str, int] = {}
+    for job in data if isinstance(data, list) else []:
+        status = (job or {}).get("status") or "pending"
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+queue_stats = MtimeCache(lambda: (config.QUEUE_JSON,), _queue_counts, dict)
+
+ACTIVITY_SIZE = 15
+
+
+def _recent_activity() -> list[dict]:
+    folder = config.LOG_DIR / "applications"
+    try:
+        entries = sorted(os.scandir(folder), key=lambda e: e.stat().st_mtime, reverse=True)[:ACTIVITY_SIZE]
+    except OSError:
+        return []
+    out = []
+    for e in entries:
+        d = read_json(Path(e.path), {})
+        if not isinstance(d, dict):
+            continue
+        job = d.get("job") or {}
+        out.append({"when": d.get("when", ""), "company": job.get("company", ""), "title": job.get("title", ""),
+                    "ats": job.get("ats", ""), "url": job.get("url", ""), "status": d.get("status", ""),
+                    "reason": d.get("reason", ""), "detail": (d.get("detail") or "")[:200]})
+    return out
+
+
+activity = MtimeCache(lambda: (config.LOG_DIR / "applications",), _recent_activity, list, ttl_s=10)
+
+
+def metrics(tracker_view: dict, queue_counts: dict, blocked: int) -> dict:
+    """The goal tracker: everything counted from the workbook, the queue and the Unblock Queue."""
+    applied = int(tracker_view.get("total") or 0)
+    target = int(tracker_view.get("target") or config.TARGET_TOTAL)
+    return {
+        "applied": applied,
+        "verified": int(tracker_view.get("verified") or 0),
+        "unverified": int(tracker_view.get("unverified") or 0),
+        "inProgress": int(queue_counts.get("pending", 0)),
+        "blocked": blocked,
+        "failed": int(queue_counts.get("error", 0)),
+        "remaining": max(target - applied, 0),
+        "target": target,
+        "progress": round(min(applied / target, 1.0), 4) if target else 0.0,
     }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--paper); color: var(--ink);
-    font: 15px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif; }
-  main { max-width: 760px; margin: 0 auto; padding: 28px 20px 48px; }
-  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-  h1 { font-size: 20px; font-weight: 600; margin: 0; }
-  .count { font-variant-numeric: tabular-nums; color: var(--dim); }
-  .count b { color: var(--ink); font-size: 18px; font-weight: 600; }
-  .track { height: 6px; background: var(--line); border-radius: 3px; margin: 12px 0 10px; overflow: hidden; }
-  .track i { display: block; height: 100%; width: 0; background: var(--accent); }
-  .statuses { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--dim); font-size: 13px; margin-bottom: 4px; }
-  .statuses b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
-  .warnline { color: var(--warn); font-size: 13px; }
-  .control { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 20px 0 18px;
-    padding: 14px 16px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
-  .control .state { flex: 1 1 220px; min-width: 0; }
-  .control .state b { display: block; font-weight: 600; }
-  .control .state small { color: var(--dim); overflow-wrap: anywhere; }
-  .banner { background: var(--warn-bg); border: 1px solid var(--warn); border-radius: 10px;
-    padding: 16px 18px; margin-bottom: 18px; }
-  .banner h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; color: var(--warn); }
-  .banner p { margin: 0 0 12px; overflow-wrap: anywhere; }
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  button { font: inherit; font-weight: 500; padding: 8px 14px; border-radius: 8px; cursor: pointer;
-    border: 1px solid var(--ink); background: var(--card); color: var(--ink); }
-  button.primary { background: var(--ink); color: var(--paper); }
-  button.danger { border-color: var(--bad); color: var(--bad); }
-  button:disabled { opacity: .5; cursor: default; }
-  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
-  .card h2 { font-size: 17px; font-weight: 600; margin: 0; overflow-wrap: anywhere; }
-  .card .sub { color: var(--dim); margin: 2px 0 16px; overflow-wrap: anywhere; }
-  ol.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-  ol.steps li { display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: start;
-    color: var(--dim); overflow-wrap: anywhere; }
-  ol.steps .dot { width: 14px; height: 14px; margin-top: 4px; border-radius: 50%; border: 2px solid var(--line); }
-  ol.steps li.done { color: var(--ink); }
-  ol.steps li.done .dot { background: var(--ok); border-color: var(--ok); }
-  ol.steps li.active { color: var(--ink); font-weight: 600; }
-  ol.steps li.active .dot { border-color: var(--accent); background: var(--accent); }
-  .msg { margin-top: 14px; color: var(--dim); }
-  .msg.waiting { border-left: 3px solid #a855f7; padding: 8px 12px; color: inherit; }
-  .msg.waiting .hint { color: var(--dim); margin-top: 4px; }
-  .idle { color: var(--dim); }
-  h3 { font-size: 13px; font-weight: 600; color: var(--dim); margin: 26px 0 8px; }
-  pre { margin: 0; padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-    font: 12px/1.55 Consolas, ui-monospace, monospace; overflow-x: auto; white-space: pre; }
-  #note, #cnote { min-height: 1.5em; color: var(--dim); }
-  #note { margin-top: 10px; }
-  #cnote { flex-basis: 100%; font-size: 13px; }
-</style>
-</head>
-<body>
-<main>
-  <header>
-    <h1>Mission Control</h1>
-    <div class="count"><b id="total">0</b> / <span id="target">500</span> applications ·
-      <span id="left"></span></div>
-  </header>
-  <div class="track" role="progressbar" aria-label="Applications in the tracker" id="bar"><i id="fill"></i></div>
-  <div class="statuses" id="statuses"></div>
-  <div class="warnline" id="trackwarn"></div>
-
-  <section class="control" aria-label="Blitz run">
-    <div class="state"><b id="bstate">Not running</b><small id="bsub"></small></div>
-    <button class="primary" id="b-start">Start Blitz Run</button>
-    <button id="b-pause" hidden>Pause</button>
-    <button id="b-resume" hidden>Resume</button>
-    <button id="b-stop" hidden>Stop</button>
-    <button class="danger" id="b-force" hidden>Force stop</button>
-    <div id="cnote" role="status"></div>
-  </section>
-
-  <section class="banner" id="banner" hidden>
-    <h2>No confirmation email yet</h2>
-    <p id="banner-text"></p>
-    <div class="actions" id="actions"></div>
-    <div id="note" role="status"></div>
-  </section>
-
-  <section class="card" id="card"></section>
-
-  <h3>Runner output</h3>
-  <pre id="log"></pre>
-</main>
-<script>
-const SHORT = { wait: "Wait 60s", retry: "Retry in Browser", skip: "Skip as Unconfirmed" };
-const $ = (id) => document.getElementById(id);
-const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls;
-  if (text !== undefined) n.textContent = text; return n; };
-let sending = false, lastAlert = "", audio = null;
-
-// Browsers only allow sound after a click on the page, so the context is made on the first one.
-document.addEventListener("click", () => { if (!audio) { try { audio = new AudioContext(); } catch (e) {} } });
-function ring() {
-  if (!audio) return;
-  for (const [at, f] of [[0, 880], [0.25, 660], [0.5, 880]]) {
-    const o = audio.createOscillator(), g = audio.createGain();
-    o.frequency.value = f; g.gain.value = 0.12; o.connect(g).connect(audio.destination);
-    o.start(audio.currentTime + at); o.stop(audio.currentTime + at + 0.18);
-  }
-}
-
-async function post(path, body) {
-  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body) });
-  return [r.ok, await r.json().catch(() => ({}))];
-}
-
-async function choose(key) {
-  if (sending) return;
-  sending = true; for (const b of $("actions").querySelectorAll("button")) b.disabled = true;
-  try {
-    const [ok, d] = await post("api/gate-choice", { choice: key });
-    $("note").textContent = ok ? "Sent to the runner: " + SHORT[key] : "Not sent: " + (d.error || "error");
-  } catch (e) { $("note").textContent = "Could not reach this server."; }
-  sending = false; refresh();
-}
-
-async function control(action) {
-  if (action === "force-stop" && !confirm("Force stop ends the run immediately, even in the middle of an application. Continue?")) return;
-  for (const b of document.querySelectorAll(".control button")) b.disabled = true;
-  try {
-    const [ok, d] = await post("api/blitz", { action });
-    $("cnote").textContent = ok ? "" : "Not done: " + (d.error || "error");
-  } catch (e) { $("cnote").textContent = "Could not reach this server."; }
-  refresh();
-}
-for (const [id, action] of [["b-start", "start"], ["b-pause", "pause"], ["b-resume", "resume"],
-                            ["b-stop", "stop"], ["b-force", "force-stop"]]) {
-  $(id).addEventListener("click", () => control(action));
-}
-
-function renderControl(b) {
-  const show = (id, on) => { $(id).hidden = !on; $(id).disabled = false; };
-  show("b-start", !b.running);
-  show("b-pause", b.running && !b.paused && !b.stopping);
-  show("b-resume", b.running && b.paused && !b.stopping);
-  show("b-stop", b.running && !b.stopping);
-  show("b-force", b.running && b.stopping);
-  let head = "Not running", sub = b.command;
-  if (b.running) {
-    head = b.stopping ? "Stopping after the current application" : b.paused ? "Paused between applications" : "Running";
-    sub = (b.started ? "since " + b.started + " · " : "") + "pid " + b.pid
-      + (b.external ? " · started from a terminal" : "") + " · " + b.command;
-  } else if (b.exit_code !== null && b.exit_code !== undefined) {
-    head = b.exit_code === 0 ? "Last run finished" : "Last run ended with exit code " + b.exit_code;
-  }
-  $("bstate").textContent = head; $("bsub").textContent = sub;
-}
-
-function renderTracker(t) {
-  $("total").textContent = t.total; $("target").textContent = t.target;
-  $("left").textContent = t.remaining ? t.remaining + " to go" : "goal reached";
-  $("fill").style.width = (t.target ? Math.min(100, 100 * t.total / t.target) : 0) + "%";
-  $("bar").setAttribute("aria-valuenow", t.total); $("bar").setAttribute("aria-valuemax", t.target);
-  const box = $("statuses"); box.replaceChildren();
-  for (const s of t.byStatus || []) {
-    const span = el("span"); span.append(el("b", "", s.count), " " + s.status); box.append(span);
-  }
-  const warn = [];
-  if (t.error) warn.push(t.error);
-  if (t.pendingWrites) warn.push(t.pendingWrites + " submitted application(s) waiting for Excel to close the workbook");
-  if (t.unconfirmed) warn.push(t.unconfirmed + " unconfirmed (on the hold list, not counted)");
-  $("trackwarn").textContent = warn.join(" · ");
-}
-
-function renderAll(s) {
-  renderTracker(s.tracker); renderControl(s.blitz);
-  const banner = $("banner");
-  if (s.timed_out && s.job) {
-    $("banner-text").textContent = s.job.company + " — " + s.job.title + ". " + s.message;
-    if (banner.hidden) {
-      const box = $("actions"); box.replaceChildren(); $("note").textContent = "";
-      for (const c of s.choices) {
-        const b = el("button", c.key === "wait" ? "primary" : "", SHORT[c.key] || c.label);
-        b.title = c.label; b.addEventListener("click", () => choose(c.key)); box.append(b);
-      }
-    }
-    banner.hidden = false;
-  } else { banner.hidden = true; }
-
-  const card = $("card"); card.replaceChildren();
-  if (!s.job) { card.append(el("div", "idle", s.message || "The runner is not working on a posting.")); }
-  else {
-    card.append(el("h2", "", s.job.title || "Application"));
-    card.append(el("div", "sub", [s.job.company, s.job.ats].filter(Boolean).join(" · ")));
-    const ol = el("ol", "steps");
-    for (const st of s.steps) {
-      const li = el("li", st.status); li.append(el("span", "dot"), el("span", "", st.label));
-      if (st.status === "active") li.setAttribute("aria-current", "step");
-      ol.append(li);
-    }
-    card.append(ol);
-    if (s.waiting) {
-      const w = el("div", "msg waiting");
-      w.append(el("strong", "", "Needs your answer in the browser"),
-               el("div", "", s.waiting.field || ""),
-               el("div", "hint", "Fill the highlighted field and click outside it. The form continues by itself" +
-                  (s.waiting.remaining > 1 ? " (" + s.waiting.remaining + " questions left)." : ".")));
-      card.append(w);
-    }
-    else if (s.unconfirmed) card.append(el("div", "msg", "Logged as unconfirmed. Not counted toward the total."));
-    else if (s.message && !s.timed_out) card.append(el("div", "msg", s.message));
-  }
-  $("log").textContent = (s.log || []).join("\n");
-
-  const alert = s.timed_out ? "timeout:" + (s.job && s.job.id)
-    : s.waiting ? "answer:" + (s.job && s.job.id) + ":" + s.waiting.field : s.attention;
-  if (alert && alert !== lastAlert) ring();
-  lastAlert = alert;
-}
-
-async function refresh() {
-  try {
-    const r = await fetch("api/state", { cache: "no-store" });
-    if (r.ok) renderAll(await r.json());
-  } catch (e) { /* server restarting: keep the last view */ }
-}
-refresh(); setInterval(refresh, 1500);
-</script>
-</body>
-</html>
-"""
 
 
-class Handler(BaseHTTPRequestHandler):
-    server_version = "MissionControl/2"
+# ---- live log ---------------------------------------------------------------------------- #
 
-    def log_message(self, *args) -> None:                  # quiet: the runner owns the terminal
-        pass
+def current_log() -> Path | None:
+    """The newer of the blitz output and runner.log."""
+    candidates = [p for p in (blitz_log_path(), config.LOG_DIR / "runner.log") if p.exists()]
+    return max(candidates, key=lambda p: p.stat().st_mtime) if candidates else None
 
-    def _send(self, code: int, body: bytes, content_type: str) -> None:
-        self.send_response(code)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; "
-                                                    "script-src 'unsafe-inline'; frame-ancestors 'none'")
-        self.end_headers()
-        self.wfile.write(body)
 
-    def _json(self, code: int, data: dict) -> None:
-        self._send(code, json.dumps(data, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+def _clean(line: str) -> str:
+    return line.replace("\a", "").rstrip("\r\n")
 
-    def do_GET(self) -> None:                              # noqa: N802 - http.server API
-        if not host_ok(self.headers.get("Host", "")):
-            return self._json(403, {"error": "local requests only"})
-        path = urlparse(self.path).path
-        if path in ("/", "/index.html"):
-            return self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
-        if path == "/api/state":
-            return self._json(200, build_state())
-        self._json(404, {"error": "not found"})
 
-    def do_POST(self) -> None:                             # noqa: N802
-        host = self.headers.get("Host", "")
-        if not host_ok(host) or not origin_ok(self.headers.get("Origin", ""), host):
-            return self._json(403, {"error": "cross-site request refused"})
-        route = {"/api/gate-choice": handle_choice, "/api/blitz": handle_blitz}.get(urlparse(self.path).path)
-        if route is None:
-            return self._json(404, {"error": "not found"})
-        if "application/json" not in (self.headers.get("Content-Type") or "").lower():
-            return self._json(415, {"error": "send JSON"})
+async def log_events(follow: bool = True, backlog: int = 200, poll_s: float = 0.5,
+                     disconnected=None, heartbeat_s: float = 15.0):
+    """Server-sent events: the last `backlog` lines, then each new line as it is written.
+    Follows a switch to a newer log file (a new run truncates blitz.log)."""
+    path = current_log()
+    pos = 0
+    if path is not None:
         try:
-            length = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            length = -1
-        if not 0 < length <= MAX_BODY:
-            return self._json(413, {"error": "bad body size"})
+            raw = path.read_bytes()
+        except OSError:
+            raw = b""
+        pos = len(raw)
+        for line in raw.decode("utf-8", "replace").splitlines()[-backlog:]:
+            if line.strip():
+                yield f"data: {json.dumps(_clean(line), ensure_ascii=False)}\n\n"
+    if not follow:
+        return
+    yield "event: ready\ndata: {}\n\n"
+    last_beat = time.monotonic()
+    buffer = b""
+    while True:
+        if disconnected is not None and await disconnected():
+            return
+        await asyncio.sleep(poll_s)
+        newest = current_log()
+        if newest != path:
+            path, pos, buffer = newest, 0, b""
+        if path is None:
+            continue
         try:
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            size = path.stat().st_size
+            if size < pos:                                 # truncated: a new run started
+                pos, buffer = 0, b""
+            if size > pos:
+                with path.open("rb") as fh:
+                    fh.seek(pos)
+                    chunk = fh.read(size - pos)
+                pos = size
+                buffer += chunk
+                *lines, buffer = buffer.split(b"\n")
+                for line in lines:
+                    text = _clean(line.decode("utf-8", "replace"))
+                    if text.strip():
+                        yield f"data: {json.dumps(text, ensure_ascii=False)}\n\n"
+        except OSError:
+            continue
+        if time.monotonic() - last_beat > heartbeat_s:
+            last_beat = time.monotonic()
+            yield ": ping\n\n"
+
+
+# ---- the web app ------------------------------------------------------------------------- #
+
+NO_UI = """<!doctype html><meta charset="utf-8"><title>Mission Control</title>
+<body style="font:15px system-ui;margin:40px">The Mission Control page has not been built.
+Run <code>npm --prefix mission_control_ui install</code> and <code>npm --prefix mission_control_ui run build</code>,
+then reload. The API is running: <a href="/api/state">/api/state</a>.</body>"""
+
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                               "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+}
+
+
+try:                                                       # module level: the route signatures name it
+    from fastapi import Request
+except ImportError:                                        # main() explains how to install it
+    Request = None
+
+
+def create_app():
+    from fastapi import FastAPI
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+
+    app = FastAPI(title="Mission Control", docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.middleware("http")
+    async def guard(request: Request, call_next):
+        host = request.headers.get("host", "")
+        if not host_ok(host):
+            return JSONResponse({"error": "local requests only"}, status_code=403)
+        if request.method not in ("GET", "HEAD"):
+            if not origin_ok(request.headers.get("origin", ""), host):
+                return JSONResponse({"error": "cross-site request refused"}, status_code=403)
+            if "application/json" not in (request.headers.get("content-type") or "").lower():
+                return JSONResponse({"error": "send JSON"}, status_code=415)
+            try:
+                length = int(request.headers.get("content-length") or 0)
+            except ValueError:
+                length = -1
+            if not 0 < length <= MAX_BODY:
+                return JSONResponse({"error": "bad body size"}, status_code=413)
+        response = await call_next(request)
+        for k, v in SECURITY_HEADERS.items():
+            response.headers.setdefault(k, v)
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+    async def body(request: Request):
+        try:
+            return json.loads((await request.body()).decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
-            return self._json(400, {"error": "bad json"})
-        self._json(*route(payload))
+            return None
+
+    def reply(result: tuple[int, dict]):
+        code, data = result
+        return JSONResponse(data, status_code=code)
+
+    @app.get("/api/state")
+    def state():
+        return build_state()
+
+    @app.post("/api/blitz")
+    async def blitz_action(request: Request):
+        payload = await body(request)
+        return reply(handle_blitz(payload) if payload is not None else (400, {"error": "bad json"}))
+
+    @app.post("/api/gate-choice")
+    async def gate_choice(request: Request):
+        payload = await body(request)
+        return reply(handle_choice(payload) if payload is not None else (400, {"error": "bad json"}))
+
+    @app.get("/api/unblock")
+    def unblock_list(all: int = 0):                         # noqa: A002 - query parameter name
+        return {"items": unblock.items(open_only=not all)}
+
+    @app.post("/api/unblock/{item_id}")
+    async def unblock_action(item_id: str, request: Request):
+        payload = await body(request)
+        return reply(handle_unblock(item_id, payload) if payload is not None else (400, {"error": "bad json"}))
+
+    @app.get("/api/logs/stream")
+    async def logs_stream(request: Request, follow: int = 1):
+        return StreamingResponse(log_events(follow=bool(follow), disconnected=request.is_disconnected),
+                                 media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+    @app.get("/")
+    def index():
+        page = UI_DIR / "index.html"
+        if page.is_file():
+            return FileResponse(page, media_type="text/html")
+        return HTMLResponse(NO_UI)
+
+    @app.get("/assets/{name}")
+    def asset(name: str):
+        if not re.fullmatch(r"[\w.-]+\.(js|css|svg|png|woff2?)", name) or ".." in name:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        path = UI_DIR / "assets" / name
+        if not path.is_file():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return FileResponse(path)
+
+    return app
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -574,18 +566,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--port", type=int, default=PORT)
     args = ap.parse_args(argv)
     try:
-        server = ThreadingHTTPServer((HOST, args.port), Handler)
-    except OSError as exc:
-        print(f"Port {args.port} is in use: Mission Control is probably already running ({exc})", file=sys.stderr)
-        return 1
+        import uvicorn
+        app = create_app()
+    except ImportError:
+        print("Mission Control needs FastAPI and uvicorn:  python -m pip install -r requirements.txt", file=sys.stderr)
+        return 2
+    import socket
+    with socket.socket() as probe:
+        if probe.connect_ex((HOST, args.port)) == 0:
+            print(f"Port {args.port} is in use: Mission Control is probably already running "
+                  f"(http://{HOST}:{args.port})", file=sys.stderr)
+            return 1
     print(f"Mission Control: http://{HOST}:{args.port}  (close this window to stop it; a blitz run keeps going)",
           flush=True)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
+    uvicorn.run(app, host=HOST, port=args.port, log_level="warning", access_log=False)
     return 0
 
 

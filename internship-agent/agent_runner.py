@@ -34,6 +34,7 @@ import config
 import dedup
 import email_receipt_verifier
 import run_state
+import unblock
 import scraper
 from answers import AnswerEngine, Context, load_custom_answers, remember_answers
 from ats import ADAPTERS, DEFAULT_ATS, adapter_for
@@ -63,6 +64,18 @@ def append_manual_review(job: dict, result: ApplyResult) -> None:
             "URL": job["url"], "Reason": result.reason, "Detail": result.detail,
             "Screenshot": os.path.relpath(result.screenshot, config.BASE) if result.screenshot else "",
         })
+
+
+def push_blocker(job: dict, result: ApplyResult) -> None:
+    """Hand a stopped posting to Mission Control's Unblock Queue, with the questions it could not answer."""
+    if result.reason in unblock.NOT_BLOCKERS:
+        return
+    answered = {x.get("label") for x in result.learned or []}
+    questions = [q for q in dict.fromkeys(result.unknowns or []) if q not in answered]
+    try:
+        unblock.add(job, result.reason or result.status, result.detail, questions, result.screenshot or "")
+    except OSError as exc:                                 # never stop the batch over the dashboard's file
+        log(f"  ! could not add it to the Unblock Queue ({type(exc).__name__})")
 
 
 def write_application_log(job: dict, result: ApplyResult) -> None:
@@ -169,12 +182,17 @@ async def ask_gate_choice(job: dict, *, poll_s: float = 0.5, bell_every_s: float
 
 async def confirm_receipt(gate: ReceiptGate, context, job: dict, *, attended: bool, ask=ask_gate_choice,
                           timeout: float = email_receipt_verifier.POLL_TIMEOUT_S,
-                          extra: float = email_receipt_verifier.EXTRA_WAIT_S) -> tuple[str, dict]:
+                          extra: float = email_receipt_verifier.EXTRA_WAIT_S,
+                          on_timeout: str | None = None) -> tuple[str, dict]:
     """Block until the confirmation e-mail is in Gmail, or the candidate decides what to do.
 
-    Returns (CONFIRMED, receipt), (RETRY, {}) or (UNCONFIRMED, {}). An unattended run has nobody
-    to ask, so a timeout there goes to the hold list; it is never counted as submitted.
+    Returns (CONFIRMED, receipt), (RETRY, {}) or (UNCONFIRMED, {}). It is never counted as
+    submitted without the e-mail. On a timeout, on_timeout="queue" (the default, RECEIPT_ON_TIMEOUT
+    in .env) flags it Unverified and moves on; Mission Control's Unblock Queue then offers
+    "Confirm Submitted" / "Retry". on_timeout="ask" pauses and asks (terminal or Mission Control).
+    An unattended run has nobody to ask, so it always behaves like "queue".
     """
+    on_timeout = on_timeout or config.receipt_on_timeout()
     while True:
         gate.step(run_state.AWAITING_EMAIL, "Waiting for confirmation email in Gmail...")
         receipt = await gate.wait(context, job["company"], timeout)
@@ -183,6 +201,10 @@ async def confirm_receipt(gate: ReceiptGate, context, job: dict, *, attended: bo
             return CONFIRMED, receipt
         if not attended:
             gate.step(run_state.UNCONFIRMED, "No confirmation e-mail; logged as unconfirmed (unattended run)")
+            return UNCONFIRMED, {}
+        if on_timeout != "ask":
+            gate.step(run_state.UNCONFIRMED, f"No confirmation e-mail after {int(timeout)}s: flagged "
+                      f"{config.UNVERIFIED_STATUS!r}, in the Unblock Queue")
             return UNCONFIRMED, {}
         gate.step(run_state.AWAITING_EMAIL, f"No confirmation e-mail after {int(timeout)}s. Queue paused.",
                   timed_out=True)
@@ -289,6 +311,26 @@ async def launch_browser(pw, args):
     return await pw.chromium.launch_persistent_context(args.profile_dir, **options)
 
 
+def merged_custom(current: list[dict]) -> list[dict]:
+    """custom_answers.json (which Mission Control may have just added to) ahead of the other answers."""
+    fresh = load_custom_answers()
+    patterns = {e["pattern"] for e in fresh}
+    return fresh + [e for e in current if e.get("pattern") not in patterns]
+
+
+def apply_requeued(queue: list[dict], taken: list[dict]) -> list[dict]:
+    """Postings Mission Control sent back from the Unblock Queue: pending again. Returns those jobs."""
+    by_id = {j.get("id"): j for j in queue}
+    back = []
+    for item in taken:
+        job = by_id.get((item.get("job") or {}).get("id"))
+        if job is None:
+            continue
+        job["status"], job["status_detail"] = "pending", "retry requested in Mission Control"
+        back.append(job)
+    return back
+
+
 def select_jobs(queue: list[dict], args) -> list[dict]:
     if args.only_url:
         key = dedup.canonical_url(args.only_url)
@@ -344,6 +386,10 @@ async def run(args) -> int:
         log(f"queue: {len(queue)} listings ({added} new)")
     queue, _ = dedup.filter_queue(queue, ledger, args.dedup_level, args.max_per_company)
     save_queue = (lambda q: None) if args.dry_run else dedup.save_queue    # a dry run never edits the queue
+    if not args.dry_run:
+        back = apply_requeued(queue, unblock.take_requeued())
+        if back:
+            log(f"{len(back)} posting(s) sent back from Mission Control's Unblock Queue are pending again")
     save_queue(queue)
 
     use_llm = args.ats == "all" and bool(os.environ.get("ANTHROPIC_API_KEY"))
@@ -390,6 +436,14 @@ async def run(args) -> int:
             for job in jobs:
                 if await hold_if_paused():
                     break
+                if not args.dry_run:                       # retries asked for in Mission Control: run them next
+                    here = jobs.index(job)
+                    back = [j for j in apply_requeued(queue, unblock.take_requeued()) if j not in jobs[here:]]
+                    if back:
+                        jobs[here:here] = back                 # this posting runs right after them
+                        job = back[0]
+                        engine.custom = merged_custom(engine.custom)      # answers typed in the dashboard
+                        log(f"retrying {len(back)} posting(s) from the Unblock Queue first")
                 if _stop or (deadline and time.time() > deadline):
                     break
                 if not args.dry_run and ledger.total >= args.target:
@@ -418,23 +472,28 @@ async def run(args) -> int:
                     os.replace(result.screenshot, config.SUBMITTED_DIR / os.path.basename(result.screenshot))
                 if result.status == SUBMITTED and outcome == UNCONFIRMED:
                     # Submitted in the browser but never confirmed by e-mail: hold list, not counted.
-                    ledger.record_unconfirmed(job, f"{result.reason}: {result.detail}"[:300])
+                    detail = f"{result.reason}: {result.detail}"[:300]
+                    ledger.record_unconfirmed(job, detail)
+                    if not ledger.record_unverified(job, detail):
+                        log(f"  ! could not flag it in {config.TRACKER_XLSX.name} (locked?); it is in the Unblock Queue")
+                    unblock.add(job, "UNCONFIRMED", f"no confirmation e-mail within "
+                                f"{int(email_receipt_verifier.POLL_TIMEOUT_S)}s ({detail})", screenshot=result.screenshot)
                     job["status"] = "unconfirmed"
                     job["status_detail"] = "no confirmation e-mail arrived"
                 elif result.status == SUBMITTED:
                     ledger.record_application(job, receipt=receipt)
+                    unblock.finished(job["id"])
                     job["status"] = "applied"
                     if result.learned:
                         kept = remember_answers(result.learned, job["company"])
-                        fresh = load_custom_answers()        # ahead of, not instead of, profile and shared answers
-                        patterns = {e["pattern"] for e in fresh}
-                        engine.custom = fresh + [e for e in engine.custom if e.get("pattern") not in patterns]
+                        engine.custom = merged_custom(engine.custom)   # ahead of, not instead of, profile answers
                         log(f"  remembered {kept} answer(s) you gave in the browser (custom_answers.json)")
                 elif result.status == DRY_RUN_OK:
                     pass                                   # stays pending for the live run
                 elif result.status == MANUAL_REVIEW:
                     if not args.dry_run:
                         append_manual_review(job, result)
+                        push_blocker(job, result)
                         job["status"] = "manual_review"
                 elif result.status == SKIPPED_INELIGIBLE:
                     job["status"] = "skipped_ineligible"
@@ -443,6 +502,7 @@ async def run(args) -> int:
                 else:
                     if not args.dry_run:
                         append_manual_review(job, result)
+                        push_blocker(job, result)
                         job["status"] = "error"
                 if result.status not in (SUBMITTED, DRY_RUN_OK):
                     job["status_detail"] = f"{result.reason}: {result.detail}"[:300]
@@ -541,6 +601,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="skip postings already attempted at or after this time (resume a dry-run sweep)")
     ap.add_argument("--only-ready", action="store_true",
                     help="only postings listed in ready_to_submit.csv (fully filled in the last dry-run sweep)")
+    ap.add_argument("--receipt-timeout", type=int, default=0, metavar="SECONDS",
+                    help="how long to wait for each confirmation e-mail (30-600; default RECEIPT_TIMEOUT_S in "
+                         f".env, else {config.RECEIPT_TIMEOUT_DEFAULT_S})")
     ap.add_argument("--only-url", help="apply to this single posting")
     ap.add_argument("--company", help="company name for --only-url postings not in the queue")
     ap.add_argument("--title", help="role title for --only-url postings not in the queue")
@@ -551,6 +614,8 @@ def main(argv: list[str] | None = None) -> int:
         prefetch_schemas()
         return 0
 
+    email_receipt_verifier.POLL_TIMEOUT_S = (max(30, min(600, args.receipt_timeout)) if args.receipt_timeout
+                                             else config.receipt_timeout_s())
     if args.local_blitz:
         args.headed = True
         args.assist = args.assist or 120

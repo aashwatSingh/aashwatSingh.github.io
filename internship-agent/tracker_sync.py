@@ -25,6 +25,7 @@ HUNTER_MARK = "Logged in Internship Hunter"
 # The workbook's own status names, in the order its summary block lists them.
 STATUS_ORDER = [
     config.XLSX_APPLIED_STATUS,
+    config.UNVERIFIED_STATUS,
     "Assessment invited / Awaiting completion",
     "Assessment submitted / Awaiting result",
     "Assessments expired / Inactive",
@@ -70,6 +71,10 @@ def summary(path=None, target: int = config.TARGET_TOTAL) -> dict:
             "url": dedup._first_url(_text(r.get("Next Step / Notes"))),
         })
     counts = Counter(r["status"] for r in rows)
+    unverified = counts.get(config.UNVERIFIED_STATUS, 0)
+    applied = len(rows) - unverified                       # an Unverified row is not an application yet
+    verified = sum(1 for r in rows if r["status"] != config.UNVERIFIED_STATUS
+                   and (r["subject"] or "verified by Gmail receipt" in r["notes"]))
     ordered = [s for s in STATUS_ORDER if counts[s]] + sorted(s for s in counts if s not in STATUS_ORDER)
     try:
         modified = datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
@@ -80,9 +85,11 @@ def summary(path=None, target: int = config.TARGET_TOTAL) -> dict:
         "ok": True,
         "source": str(path),
         "modified": modified,
-        "total": len(rows),
+        "total": applied,
         "target": target,
-        "remaining": max(target - len(rows), 0),
+        "remaining": max(target - applied, 0),
+        "verified": verified,
+        "unverified": unverified,
         "byStatus": [{"status": s, "count": counts[s]} for s in ordered],
         "pendingWrites": pending,
         "unconfirmed": _count_lines(config.UNCONFIRMED_CSV),

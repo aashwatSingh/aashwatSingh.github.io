@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from urllib.parse import urlparse
 
 from playwright.async_api import Page
@@ -151,12 +152,22 @@ class LeverAdapter(BaseAdapter):
         has_widget = await page.evaluate("() => typeof window.hcaptcha !== 'undefined'")
         if not has_widget and await page.locator("#h-captcha, .h-captcha").count():
             return MANUAL_REVIEW, "CAPTCHA", "hCaptcha could not load in this environment; submit by hand"
+        clicked_at = time.time()
         await page.locator("#btn-submit").click()
         watch = SubmitWatch(self, 12)
         while watch.running():
             await page.wait_for_timeout(500)
             if "/thanks" in page.url:
                 return SUBMITTED, "thanks page", page.url
+            code = await self.code_step(page, clicked_at)
+            if code == "entered":
+                watch.extend(30)
+                continue
+            if code == "manual":
+                done = watch.human_gate("EMAIL_VERIFICATION_CODE", "Lever e-mailed a verification code")
+                if done:
+                    return done
+                continue
             if await visible_captcha(page):
                 done = watch.human_gate("CAPTCHA", "hCaptcha challenge shown on submit")
                 if done:

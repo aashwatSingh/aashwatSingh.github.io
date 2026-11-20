@@ -30,6 +30,7 @@ from urllib.parse import parse_qs, urlparse
 import openpyxl
 
 import config
+from fileutil import atomic_write_json, file_lock
 
 # --------------------------------------------------------------------------- #
 # Normalisation
@@ -154,41 +155,15 @@ def _plain(value):
 
 
 LOCK_TIMEOUT_S = 20
-STALE_LOCK_S = 120
 
 
-@contextmanager
 def tracker_lock(path: Path, timeout: float = LOCK_TIMEOUT_S):
     """One writer at a time. The runner and both dashboards can write the workbook, and each write
     reads the whole file and saves it back, so two at once would lose a row.
 
     Raises TimeoutError (an OSError, so callers treat it like Excel holding the file).
     """
-    lock = Path(path).with_name(Path(path).name + ".lock")
-    deadline = time.monotonic() + timeout
-    while True:
-        try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(fd, str(os.getpid()).encode())
-            os.close(fd)
-            break
-        except FileExistsError:
-            try:
-                if time.time() - lock.stat().st_mtime > STALE_LOCK_S:   # a writer that crashed mid-save
-                    lock.unlink()
-                    continue
-            except OSError:
-                pass
-            if time.monotonic() > deadline:
-                raise TimeoutError(f"{Path(path).name} is being written by another program")
-            time.sleep(0.2)
-    try:
-        yield
-    finally:
-        try:
-            lock.unlink()
-        except OSError:
-            pass
+    return file_lock(path, timeout)
 
 
 def _save(wb, path: Path) -> None:
@@ -233,6 +208,30 @@ def delete_from_tracker_xlsx(match, path: Path | None = None, limit: int = 1) ->
                 ws.auto_filter.ref = f"{m.group(1)}{m.group(2)}:{m.group(3)}{new_last}"
         _save(wb, path)
         return len(doomed)
+
+
+def update_tracker_rows(match, values: dict, path: Path | None = None, limit: int = 1) -> int:
+    """Set `values` (header -> value) on up to `limit` data rows for which match(row_dict) is true,
+    newest first. Styles and formulas are untouched. Returns how many rows changed."""
+    path = Path(path or config.TRACKER_XLSX)
+    with tracker_lock(path):
+        wb = openpyxl.load_workbook(path)
+        ws = wb.active
+        header_row = _find_header_row(ws)
+        headers = [str(c.value or "").strip() for c in ws[header_row]]
+        col = {h: i + 1 for i, h in enumerate(headers) if h}
+        changed = 0
+        for r in range(_last_data_row(ws, header_row), header_row, -1):
+            if changed >= limit:
+                break
+            if match({h: c.value for h, c in zip(headers, ws[r]) if h}):
+                for header, value in values.items():
+                    if header in col:
+                        ws.cell(r, col[header]).value = _plain(value)
+                changed += 1
+        if changed:
+            _save(wb, path)
+        return changed
 
 
 def append_to_tracker_xlsx(row: dict, path: Path | None = None) -> int:
@@ -367,6 +366,8 @@ class Ledger:
                 "URL": _first_url(str(t.get("Next Step / Notes") or "")),
                 "Status": str(t.get("Current Status") or "").strip(),
             }
+            if row["Status"] == config.UNVERIFIED_STATUS:
+                continue                                   # not an application until it is confirmed
             key = (normalize_company(row["Company"]), normalize_role(row["Role"]))
             if in_csv[key] > 0:
                 in_csv[key] -= 1
@@ -530,8 +531,25 @@ class Ledger:
             w.writerow({k: _plain(v) for k, v in row.items()})
         return row
 
+    def record_unverified(self, job: dict, detail: str = "", *, when: datetime | None = None) -> bool:
+        """A row with config.UNVERIFIED_STATUS in the workbook: visible there, but not counted (it is not
+        indexed in the ledger, and tracker_sync leaves it out of the total). False when the workbook is
+        locked or missing; the hold list and the Unblock Queue still have it."""
+        if not self.xlsx.exists():
+            return False
+        when = when or datetime.now()
+        location = "; ".join(job.get("locations") or []) or job.get("location", "")
+        row = {"Company": job.get("company", ""), "Role": job.get("title", ""), "ATS_Platform": job.get("ats", ""),
+               "URL": job.get("url", "")}
+        try:
+            self._append_xlsx(job, row, when, location, status=config.UNVERIFIED_STATUS, detail=detail)
+        except OSError:
+            return False
+        return True
+
     def _append_xlsx(self, job: dict, row: dict, when: datetime, location: str,
-                     receipt: dict | None = None) -> None:
+                     receipt: dict | None = None, *, status: str = config.XLSX_APPLIED_STATUS,
+                     detail: str = "") -> None:
         if True:
             day = when.strftime("%Y-%m-%d")
             if receipt and receipt.get("confirmed"):
@@ -540,6 +558,11 @@ class Ledger:
                 notes = (f"Application confirmation received via {ats} ({date}); verified by Gmail receipt."
                          + (f" {location}." if location else "") + f" {row['URL']}")
                 subject = receipt.get("subject") or None
+            elif status == config.UNVERIFIED_STATUS:
+                notes = (f"Submitted via {row['ATS_Platform'] or 'ATS'} but no confirmation e-mail arrived; "
+                         f"check it in Mission Control's Unblock Queue."
+                         + (f" ({detail[:120]})" if detail else "") + f" {row['URL']}")
+                subject = None
             else:
                 notes = (f"Auto-applied via {row['ATS_Platform'] or 'ATS'}"
                          + (f" — {location}" if location else "") + f" — {row['URL']}")
@@ -549,7 +572,7 @@ class Ledger:
                 "Role": row["Role"],
                 "Cycle": ", ".join(job.get("terms") or []) or "Summer 2027",
                 "Date Applied": day,
-                "Current Status": config.XLSX_APPLIED_STATUS,
+                "Current Status": status,
                 "Status Date": day,
                 "Application ID / Ref": job.get("ats_job_id") or None,
                 "Next Step / Notes": notes,

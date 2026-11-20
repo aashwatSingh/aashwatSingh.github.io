@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from urllib.parse import urlparse
 
 from playwright.async_api import Page, TimeoutError as PWTimeout
@@ -239,6 +240,7 @@ class AshbyAdapter(BaseAdapter):
     async def submit(self, page: Page) -> tuple[str, str, str]:
         button = page.locator(SUBMIT_BUTTON).first
         await button.scroll_into_view_if_needed()
+        clicked_at = time.time()
         await button.click()
         watch = SubmitWatch(self, 20)                           # uploads finalise on submit
         while watch.running():
@@ -252,6 +254,15 @@ class AshbyAdapter(BaseAdapter):
                 return SUBMITTED, "confirmation text", page.url
             if re.search(r"flagged as (possible )?spam|couldn.t submit your application|unable to submit", body):
                 return MANUAL_REVIEW, "REJECTED_BY_ATS", "Ashby refused the automated submission (spam/bot check)"
+            code = await self.code_step(page, clicked_at)
+            if code == "entered":
+                watch.extend(30)
+                continue
+            if code == "manual":
+                done = watch.human_gate("EMAIL_VERIFICATION_CODE", "Ashby e-mailed a verification code")
+                if done:
+                    return done
+                continue
             if await visible_captcha(page):
                 done = watch.human_gate("CAPTCHA", "challenge shown on submit")
                 if done:

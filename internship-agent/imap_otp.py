@@ -25,7 +25,8 @@ POLL_INTERVAL_S = 3
 POLL_TIMEOUT_S = 45
 CODE_LENGTH = 8
 SENDER_DOMAINS = ("greenhouse-mail.io", "greenhouse.io")
-CODE_SUBJECT = re.compile(r"security code|verification code", re.I)
+CODE_SUBJECT = re.compile(r"security code|verification code|one[- ]time (pass)?code|passcode|confirmation code|"
+                          r"(sign[- ]?in|log[- ]?in|access) code|\bverify your (e-?mail|identity)\b", re.I)
 # Gmail's clock and this machine's can differ by a few seconds.
 CLOCK_SLACK_S = 10
 MAILBOXES = ("INBOX", '"[Gmail]/All Mail"', '"[Gmail]/Spam"')
@@ -45,7 +46,14 @@ def already_used(code: str) -> bool:
 
 # ---- parsing ------------------------------------------------------------------ #
 
-_TOKEN = re.compile(r"(?<![A-Za-z0-9_\-./@#=&%+])[A-Za-z0-9]{8}(?![A-Za-z0-9_\-/@=&%+])")
+_TOKENS: dict[int, re.Pattern] = {}
+
+
+def _token(length: int) -> re.Pattern:
+    if length not in _TOKENS:
+        _TOKENS[length] = re.compile(r"(?<![A-Za-z0-9_\-./@#=&%+])[A-Za-z0-9]{" + str(int(length)) + r"}"
+                                     r"(?![A-Za-z0-9_\-/@=&%+])")
+    return _TOKENS[length]
 _INTRODUCED = re.compile(r"\bcode\b[^.\n]{0,60}(:|\bis)\s*$", re.I)
 
 
@@ -60,8 +68,9 @@ def to_text(body: str) -> str:
     return "\n".join(line.strip() for line in body.splitlines())
 
 
-def extract_code(body: str) -> str | None:
-    """The 8-character alphanumeric code in a Greenhouse security-code e-mail (plain text or HTML).
+def extract_code(body: str, length: int = CODE_LENGTH) -> str | None:
+    """The `length`-character alphanumeric code in a verification e-mail (plain text or HTML);
+    8 for Greenhouse, usually 6 elsewhere.
 
     Every 8-character word in the message is a candidate ("security", "received"), so one is
     only accepted when it looks like a code: letters mixed with digits or irregular capitals,
@@ -73,7 +82,7 @@ def extract_code(body: str) -> str | None:
     for line in lines:
         if not line:
             continue
-        for m in _TOKEN.finditer(line):
+        for m in _token(length).finditer(line):
             token = m.group()
             alone = line.strip(" .:*\"'") == token
             introduced = bool(_INTRODUCED.search(line[:m.start()])) or \
@@ -95,10 +104,15 @@ def _randomness(token: str) -> int:
     return 1 if digits else 0
 
 
+def from_sender(sender: str, domains=SENDER_DOMAINS) -> bool:
+    """The From header is an address at one of `domains` (or a subdomain of one)."""
+    domain = parseaddr(sender or "")[1].rpartition("@")[2].lower()
+    return any(domain == d or domain.endswith("." + d) for d in domains)
+
+
 def from_greenhouse(sender: str) -> bool:
     """The From header is an address at one of Greenhouse's sending domains (or a subdomain)."""
-    domain = parseaddr(sender or "")[1].rpartition("@")[2].lower()
-    return any(domain == d or domain.endswith("." + d) for d in SENDER_DOMAINS)
+    return from_sender(sender, SENDER_DOMAINS)
 
 
 def message_bodies(msg: Message) -> list[str]:
@@ -116,16 +130,16 @@ def message_bodies(msg: Message) -> list[str]:
     return [content for _, content in sorted(parts, key=lambda p: p[0])]
 
 
-def code_from_message(msg: Message) -> str | None:
-    """The code in one message, or None if it is not a Greenhouse security-code e-mail."""
-    if not from_greenhouse(str(msg.get("From", ""))):
+def code_from_message(msg: Message, domains=SENDER_DOMAINS, length: int = CODE_LENGTH) -> str | None:
+    """The code in one message, or None if it is not a verification-code e-mail from `domains`."""
+    if not from_sender(str(msg.get("From", "")), domains):
         return None
     bodies = message_bodies(msg)
     subject = str(msg.get("Subject", ""))
     if not CODE_SUBJECT.search(subject + "\n" + "\n".join(to_text(b) for b in bodies)):
         return None
     for body in bodies:
-        code = extract_code(body)
+        code = extract_code(body, length)
         if code:
             return code
     return None
@@ -138,7 +152,7 @@ def _imap_date(ts: float) -> str:
     return f"{t.tm_mday:02d}-{_MONTHS[t.tm_mon - 1]}-{t.tm_year}"
 
 
-def _recent_greenhouse_uids(conn, since: float) -> list[bytes]:
+def _recent_greenhouse_uids(conn, since: float, domains=SENDER_DOMAINS) -> list[bytes]:
     """UIDs in the selected mailbox from Greenhouse that arrived after `since`, newest first."""
     # SINCE only has day resolution (and uses the server's timezone): search a day wide, filter exactly below.
     typ, data = conn.uid("search", None, "SINCE", _imap_date(since - 86400))
@@ -159,12 +173,12 @@ def _recent_greenhouse_uids(conn, since: float) -> list[bytes]:
             continue
         arrived = time.mktime(when)
         sender = email.message_from_bytes(header, policy=email.policy.default).get("From", "")
-        if arrived >= since - CLOCK_SLACK_S and from_greenhouse(str(sender)):
+        if arrived >= since - CLOCK_SLACK_S and from_sender(str(sender), domains):
             hits.append((arrived, uid.group(1)))
     return [uid for _, uid in sorted(hits, reverse=True)]
 
 
-def newest_code(conn, since: float) -> str | None:
+def newest_code(conn, since: float, domains=SENDER_DOMAINS, length: int = CODE_LENGTH) -> str | None:
     """One pass over the mailboxes for an unused Greenhouse code received after `since`."""
     for box in MAILBOXES:
         try:
@@ -173,19 +187,20 @@ def newest_code(conn, since: float) -> str | None:
             continue
         if typ != "OK":
             continue
-        for uid in _recent_greenhouse_uids(conn, since):
+        for uid in _recent_greenhouse_uids(conn, since, domains):
             typ, data = conn.uid("fetch", uid, "(BODY.PEEK[])")
             raw = next((item[1] for item in data or [] if isinstance(item, tuple)), None)
             if typ != "OK" or not raw:
                 continue
-            code = code_from_message(email.message_from_bytes(raw, policy=email.policy.default))
+            code = code_from_message(email.message_from_bytes(raw, policy=email.policy.default), domains, length)
             if code and not already_used(code):
                 return code
     return None
 
 
 def fetch_code_imap(address: str, password: str, since: float, *, timeout: float = POLL_TIMEOUT_S,
-                    interval: float = POLL_INTERVAL_S, connect=None, sleep=time.sleep) -> str | None:
+                    interval: float = POLL_INTERVAL_S, connect=None, sleep=time.sleep,
+                    domains=SENDER_DOMAINS, length: int = CODE_LENGTH) -> str | None:
     """Poll Gmail for the code e-mailed after `since` (epoch seconds). Blocking: call via asyncio.to_thread.
 
     Raises imaplib.IMAP4.error / OSError when the mailbox cannot be opened (wrong app password,
@@ -196,7 +211,7 @@ def fetch_code_imap(address: str, password: str, since: float, *, timeout: float
         conn.login(address, password.replace(" ", ""))      # Google shows app passwords in spaced groups
         deadline = time.monotonic() + timeout
         while True:
-            code = newest_code(conn, since)
+            code = newest_code(conn, since, domains, length)
             if code or time.monotonic() + interval > deadline:
                 return code
             sleep(interval)

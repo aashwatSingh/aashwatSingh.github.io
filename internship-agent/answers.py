@@ -1894,6 +1894,12 @@ def remember_answers(items: list[dict], company: str, path: Path | None = None) 
     Essays and questions that name the employer are stored for that employer only.
     """
     path = Path(path or config.CUSTOM_ANSWERS_JSON)
+    from fileutil import file_lock
+    with file_lock(path):                               # the runner and Mission Control both learn answers
+        return _remember_locked(items, company, path)
+
+
+def _remember_locked(items: list[dict], company: str, path: Path) -> int:
     custom = load_custom_answers(path)
     added = 0
     for item in items:
@@ -1926,11 +1932,10 @@ def save_custom_answers(entries: list[dict], path: Path | None = None) -> None:
     """
     path = Path(path or config.CUSTOM_ANSWERS_JSON)
     text = json.dumps(entries, indent=1, ensure_ascii=False)
+    from fileutil import atomic_write_text
     for target in (path, backup_path(path)):
-        tmp = target.with_name(target.name + ".tmp")
         try:
-            tmp.write_text(text, encoding="utf-8")
-            os.replace(tmp, target)
+            atomic_write_text(target, text)
         except OSError:
             if target == path:
                 raise                                          # the backup is best effort; the answers are not

@@ -292,7 +292,7 @@ def test_timeout_pauses_and_wait_60s_keeps_polling(home):
     gate = FakeGate([erv.NOT_CONFIRMED, erv.NOT_CONFIRMED, RECEIPT])
     gate.start(JOB)
     ask, asked = asker(run_state.WAIT, run_state.WAIT)
-    outcome, receipt = run(agent_runner.confirm_receipt(gate, None, JOB, attended=True, ask=ask))
+    outcome, receipt = run(agent_runner.confirm_receipt(gate, None, JOB, attended=True, ask=ask, on_timeout="ask"))
     assert outcome == "confirmed" and receipt == RECEIPT
     assert gate.timeouts == [120, 60, 60]
     # While the question was open the state said so, which is what puts the buttons on the dashboard.
@@ -304,7 +304,8 @@ def test_skip_and_retry_choices(home):
         gate = FakeGate([erv.NOT_CONFIRMED])
         gate.start(JOB)
         ask, _ = asker(choice)
-        assert run(agent_runner.confirm_receipt(gate, None, JOB, attended=True, ask=ask)) == (expected, {})
+        assert run(agent_runner.confirm_receipt(gate, None, JOB, attended=True, ask=ask,
+                                                on_timeout="ask")) == (expected, {})
 
 
 def test_unattended_timeout_goes_to_the_hold_list_without_asking(home):

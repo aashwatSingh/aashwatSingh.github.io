@@ -110,6 +110,13 @@ runs never do this: the posting goes to manual review as before.
 
 If neither finds a code, or Greenhouse rejects it, the run falls back to you pasting the code.
 
+Other portals: when Ashby, Lever or Workday (sign-in, Next, or the final Submit) asks for an
+e-mailed code, in the application's tab or in a tab it opened, the runner finds the code boxes in
+whichever tab shows them, reads the newest code from an ATS sender over IMAP (the length the page
+asks for, usually 6), enters it, presses Verify / Continue, and returns to the application tab
+(`ats/otp.py`). Without `GMAIL_APP_PASSWORD` you type it in that tab. Fields such as "ZIP code",
+"Promo code" or "code of conduct" are never mistaken for a code prompt.
+
 **Confirmation e-mail gate.** On a live run, a submission counts only once its confirmation e-mail
 ("Thank you for applying to ...") is in your Gmail inbox. The browser's confirmation page is not
 enough: until the e-mail arrives the runner does not write `internship_tracker.xlsx`, does not
@@ -130,23 +137,44 @@ count the application, and does not open the next posting.
   confirmation received via <ATS> (<date>); verified by Gmail receipt." and `Source Email Subject`
   holds the exact subject.
 
-If no e-mail arrives in 120 s the queue pauses, the bell rings, and you choose:
+If no e-mail arrives in time (`RECEIPT_TIMEOUT_S` in `.env`, 30-600 s, default 120; or
+`--receipt-timeout N`), the application is **not** counted:
 
-1. **Wait another 60s**: keep checking Gmail.
-2. **Check browser & retry submit**: the form's tab is still open. If it shows a confirmation the
-   runner does not submit again and checks Gmail for another 60 s; otherwise it opens the form again.
-3. **Log as "Application incomplete / Unconfirmed" & move on**: the posting goes to
-   `unconfirmed_applications.csv`, a hold list that is not counted toward the 500.
+* it gets a row in `internship_tracker.xlsx` with status `Unverified / Needs Check`, which Mission
+  Control and `tracker_sync.py` leave out of the total, and a line in `unconfirmed_applications.csv`;
+* it goes to Mission Control's Unblock Queue with **Confirm submitted** (you checked; the row becomes
+  an application) and **Retry** (the row is removed and the posting is queued again);
+* the batch moves on to the next posting.
 
-Type 1, 2 or 3 in the terminal, or use the buttons in Mission Control. An unattended run (no
-`--assist` / `--local-blitz`) has nobody to ask, so a timeout there goes straight to the hold list.
+Set `RECEIPT_ON_TIMEOUT=ask` in `.env` to pause the batch instead and choose in the terminal or
+Mission Control: wait another 60 s, check the browser and retry, or log it as unconfirmed.
 A `--dry-run` never submits, so the gate does not apply.
 
-**Mission Control.** `python app_server.py` serves a local page at http://127.0.0.1:4760 showing
-the active posting and its step (Submitting Form, Entering OTP Code, Verifying Receipt Email in
-Gmail, Confirmed with the e-mail's subject), the confirmed total, the hold-list count, the last
-runner log lines, and the three buttons when a confirmation times out. It only reads the runner's
-files; the one thing it writes is your button press.
+### Mission Control
+
+Double-click **`Launch_Mission_Control.bat`** (or run it from any terminal). It finds Python,
+installs FastAPI / uvicorn the first time, starts `app_server.py` in a minimized window and opens
+http://127.0.0.1:4760. Closing that window stops the page, not a running batch.
+
+* **Goal**: applied / 500 with a progress bar, e-mail verified, still in the queue, needs action,
+  failed, remaining; and the last 15 results.
+* **Batch**: choose how many applications, then Start, Pause / Resume (between applications),
+  Stop (after the current one) or Force stop. It runs
+  `agent_runner.py --local-blitz --dedup-level role --max-per-company 3 --limit N`.
+* **Now**: the posting being worked on and its step (submitting, e-mailed code, waiting for the
+  receipt, confirmed), and which question it is waiting on in the browser.
+* **Unblock Queue** (`unblock_queue.json`): every posting that stopped on a CAPTCHA, a login wall,
+  a question the profile cannot answer, an empty required field before Submit, or a missing
+  receipt. Type answers into the form and press **Save answers & retry** (they go to
+  `custom_answers.json` and are reused on later forms), **Resume after manual fix**, **Confirm
+  submitted**, or **Dismiss**. A retried posting runs next in the current batch, or first in the next.
+* **Live log**: the runner's output as it is written.
+
+The page is React + TypeScript in `mission_control_ui/`, prebuilt into `mission_control_ui/dist`,
+so Node.js is only needed to change it (`npm --prefix mission_control_ui install`, then
+`run build`, `run lint`, or `run dev` for a hot-reloading copy on port 5173). The server listens on
+127.0.0.1 only, refuses requests addressed to any other host name and cross-site POSTs, and never
+sends `.env` values to the page.
 
 **It does not invent answers.** `answers.py` answers a question only from
 `candidate_profile.json`: your stated facts and preferences (relocation, office order, salary,
@@ -243,6 +271,10 @@ auto-answered, never remembered, and stop essay drafting on that form.
   on a Workday page) and carries on with the e-mail code, the confirmation e-mail and the tracker
   as usual. Mission Control shows which question it is waiting on. If nothing is entered for
   `--assist` seconds (minimum 180), the posting goes to manual review.
+* *Checked again before Submit.* Right before the click, the page is scanned once more for a
+  required field that is still empty (one that appeared late, or that the page cleared) and for
+  any error message already showing. Attended runs hand those to you the same way; unattended
+  runs and dry runs report `PRESUBMIT_CHECK` instead of clicking.
 * *Required but unmarked.* When Submit / Next is refused with a validation error, only the fields
   carrying the error are treated as required: answered from the profile if it can, otherwise
   highlighted for you, then the click is repeated (up to three times).

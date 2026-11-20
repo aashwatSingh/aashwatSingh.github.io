@@ -45,6 +45,31 @@ LEDGER_APPLIED_STATUS = "Applied"
 # (UNCONFIRMED_CSV) and never counted toward TARGET_TOTAL.
 UNCONFIRMED_STATUS = "Application incomplete / Unconfirmed"
 UNCONFIRMED_COLUMNS = ["Timestamp", "Company", "Role", "ATS_Platform", "URL", "Status", "Detail"]
+# The same submission, as it appears in internship_tracker.xlsx: a row with this status is visible
+# in the workbook but is not an application yet. Mission Control's "Confirm Submitted" turns it into
+# XLSX_APPLIED_STATUS; "Retry" removes it and puts the posting back in the queue.
+UNVERIFIED_STATUS = "Unverified / Needs Check"
+
+# Postings that stopped on something only the candidate can clear (Mission Control's Unblock Queue).
+UNBLOCK_JSON = BASE / "unblock_queue.json"
+
+RECEIPT_TIMEOUT_DEFAULT_S = 120
+
+
+def receipt_timeout_s() -> int:
+    """How long the confirmation gate waits for the receipt e-mail: RECEIPT_TIMEOUT_S in .env (30-600)."""
+    try:
+        value = int(float(os.environ.get("RECEIPT_TIMEOUT_S", RECEIPT_TIMEOUT_DEFAULT_S)))
+    except ValueError:
+        value = RECEIPT_TIMEOUT_DEFAULT_S
+    return max(30, min(600, value))
+
+
+def receipt_on_timeout() -> str:
+    """'queue' (default): flag Unverified, add to the Unblock Queue and move on.
+    'ask': pause the batch and ask (terminal or Mission Control) what to do. RECEIPT_ON_TIMEOUT in .env."""
+    value = os.environ.get("RECEIPT_ON_TIMEOUT", "queue").strip().lower()
+    return value if value in ("queue", "ask") else "queue"
 
 USER_AGENT_NOTE = "internship-agent"
 

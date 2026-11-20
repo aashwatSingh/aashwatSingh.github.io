@@ -155,7 +155,8 @@ ASSIST_JS = "(() => { if (window.__iaAssist) return;" + _WRAP_JS + r"""
 })()"""
 
 # [selectors] -> ["error text" | "" ...]: the validation error showing on each field, if any.
-FLAGGED_JS = "(sels) => {" + _WRAP_JS + r"""
+FLAGGED_JS = ("(arg) => { const sels = Array.isArray(arg) ? arg : arg.sels;"
+              " const textOnly = !Array.isArray(arg) && !!arg.textOnly;") + _WRAP_JS + r"""
   const ERR = '[id$="-error"], .helper-text--error, .error-message, .error, .invalid-feedback, ' +
     '[class*="_error_"], [class*="_errors_"], [class*="error-text"], [class*="errorText"], [role="alert"], ' +
     '[data-automation-id="inputAlert"], [data-automation-id="errorMessage"]';
@@ -169,6 +170,7 @@ FLAGGED_JS = "(sels) => {" + _WRAP_JS + r"""
       if (own && shown(own) && text(own)) found.push(own);
     }
     if (found.length) return text(found[0]).slice(0, 160);
+    if (textOnly) return '';                // before Submit: only messages the page actually shows
     const ctls = isControl(el) ? [el] : [...wrap.querySelectorAll('input:not([type=hidden]), textarea, select, [role=combobox]')];
     if (ctls.some(c => c.getAttribute('aria-invalid') === 'true')) return 'invalid';
     if (ctls.some(c => c.willValidate && c.validity && !c.validity.valid)) return 'invalid';

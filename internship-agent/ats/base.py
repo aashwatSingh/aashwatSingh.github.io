@@ -21,7 +21,7 @@ import essays
 import run_state
 from answers import (AI_POLICY, AnswerEngine, Context, Decision, Question, load_custom_answers, pattern_for,
                      remember_answers)
-from ats import assist
+from ats import assist, otp
 
 SKIPPED_OPTIONAL = "SKIPPED_OPTIONAL"     # an optional question the profile does not answer: left blank
 FILLED, SUBMITTED_BY_CANDIDATE = "filled", "submitted_by_candidate"     # wait_for_answers outcomes
@@ -70,6 +70,7 @@ class FormState:
     resolved: set[str] = field(default_factory=set)       # unknown fields the candidate has since filled in
     forced: set[str] = field(default_factory=set)         # fields a validation error showed to be required
     learned: list[dict] = field(default_factory=list)     # what the candidate entered, for ApplyResult.learned
+    filled: set[str] = field(default_factory=set)         # fields this run put a value into
 
     def pending(self) -> list[FormField]:
         """Required questions nobody has answered yet."""
@@ -184,6 +185,17 @@ class BaseAdapter:
     async def confirmed(self, page: Page) -> str | None:
         """Evidence that the application went through (a URL or phrase), else None."""
         return None
+
+    # ---- e-mailed codes ---------------------------------------------------------
+    async def code_step(self, page: Page, since: float) -> str | None:
+        """An e-mailed code asked for in any open tab. None: no prompt. "entered": read from Gmail and
+        submitted. "manual": showing, but only the candidate can enter it (or nobody: unattended)."""
+        if not self.human_wait_s:
+            return "manual" if await otp.find_code_prompt(page.context) else None
+        tried = self.__dict__.setdefault("_codes_tried", set())
+        if self.receipt_gate is not None and await otp.find_code_prompt(page.context):
+            self._show_step(run_state.ENTERING_OTP, "Entering the e-mailed code")
+        return await otp.clear_code_prompt(page.context, since, back_to=page, tried=tried)
 
     # ---- required vs optional ------------------------------------------------
     async def refine_required(self, page: Page, fields: list[FormField], state: FormState | None = None) -> None:
@@ -359,6 +371,27 @@ class BaseAdapter:
             f.extra["had_value"] = bool(await self.read_value(page, f))
         return flagged
 
+    async def presubmit_blockers(self, page: Page, state: FormState) -> list[FormField]:
+        """Right before Submit: required fields that are still empty and that this run did not fill
+        (they appeared late, or the page reset them), and fields already showing an error message."""
+        try:
+            fields = await self.extract(page, include_filled=True)
+            await self.refine_required(page, fields, state)
+            errors = await page.evaluate(assist.FLAGGED_JS, {"sels": [f.sel for f in fields], "textOnly": True})
+        except Exception:                                  # noqa: BLE001 - navigating: Submit decides
+            return []
+        blockers: dict[str, FormField] = {}
+        for f, err in zip(fields, errors):
+            if err:
+                f.question.required = True
+                blockers[f.key] = f
+                continue
+            if not f.question.required or f.key in state.filled or f.key in state.resolved:
+                continue
+            if not await self._entered(page, f, {}):
+                blockers[f.key] = f
+        return list(blockers.values())
+
     async def complete_form(self, page: Page, job: dict, engine: AnswerEngine, ctx: Context, text: str,
                             state: FormState, attended: bool) -> str:
         """Fill the page; hand each unanswerable required question to the candidate; repeat while
@@ -465,6 +498,7 @@ class BaseAdapter:
                 if decision.action == "fill":
                     try:
                         await self.fill(page, f, decision.value, engine.p)
+                        state.filled.add(f.key)
                     except Exception as exc:              # noqa: BLE001
                         note = f"could not fill: {type(exc).__name__}: {str(exc)[:140]}"
                         decision = Decision("unknown" if q.required else "skip", rule=decision.rule, note=note)
@@ -520,6 +554,24 @@ class BaseAdapter:
             return ApplyResult(MANUAL_REVIEW, "UNANSWERED_REQUIRED",
                                " | ".join(f.question.label[:90] for f in state.pending()[:8]),
                                answers, unknowns, shot_path, state.learned)
+        # Safety net: never click Submit over an empty required field or an error already on the page.
+        late = await self.presubmit_blockers(page, state)
+        if late:
+            labels = [f.question.label for f in late]
+            state.unknowns.extend(l for l in labels if l not in state.unknowns)
+            outcome = await self.wait_for_answers(page, late, job, engine, state) if attended else ""
+            if outcome == SUBMITTED_BY_CANDIDATE:
+                return ApplyResult(SUBMITTED, "completed by the candidate in the browser",
+                                   str(await self.confirmed(page) or ""), state.answers, state.unknowns,
+                                   shot_path, state.learned)
+            if outcome != FILLED:
+                await _screenshot(page, shot_path)
+                return ApplyResult(MANUAL_REVIEW, "PRESUBMIT_CHECK",
+                                   "required and still empty, or showing an error: "
+                                   + " | ".join(l[:90] for l in labels[:8]),
+                                   state.answers, state.unknowns, shot_path, state.learned)
+            state.resolved.update(f.key for f in late)
+
         if dry_run:
             return ApplyResult(DRY_RUN_OK, "all required questions answered (not submitted)",
                                answers=answers, screenshot=shot_path)
@@ -559,8 +611,8 @@ class SubmitWatch:
         if self.gate is None:
             self.gate = (reason, detail)
             self.deadline = time.monotonic() + wait
-            what = ("Paste the 8-character code from your email into the browser window "
-                    "(it is submitted for you once entered)" if reason == "EMAIL_VERIFICATION_CODE"
+            what = ("Enter the code from your e-mail in the browser tab that asks for it "
+                    "(Greenhouse submits it for you once entered)" if reason == "EMAIL_VERIFICATION_CODE"
                     else "Solve CAPTCHA in browser window and click Submit")
             print(f"\a[ACTION REQUIRED] {what}... (waiting up to {wait}s; the form is already filled)",
                   flush=True)
