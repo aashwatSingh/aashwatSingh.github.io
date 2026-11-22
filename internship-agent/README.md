@@ -219,7 +219,10 @@ twice, so it becomes a skip. `FREEZE_STALL_S` (default 120) sets how long a stal
 
 **hCaptcha grids from your phone** (`ats/hcaptcha_grid.py`). With Discord set up, an attended run that meets
 an hCaptcha 3x3 image grid posts the prompt and a screenshot of the grid with big numbers 1-9 on the tiles
-(left to right, top to bottom) and relays what you answer. You do the solving; the runner only clicks:
+(left to right, top to bottom) and relays what you answer. The numbers are drawn onto the screenshot with Pillow
+(`python -m pip install -r requirements.txt`); nothing is ever written into hCaptcha's page. Without Pillow the
+plain screenshot goes out with a note to count the tiles. Only the visible challenge frame is used (`frame=challenge`
+on an hcaptcha.com address), never the checkbox frame or a hidden one. You do the solving; the runner only clicks:
 `7 8` or `1, 4, 7` clicks those tiles and then Next / Verify; `0` or `none` clicks Skip; `reload` clicks the
 refresh icon and posts the new grid; `/skip` gives up on the posting (manual review). It repeats for every round
 hCaptcha serves until the challenge closes or the page reaches `/thanks`, stops after 10 rounds or 20 minutes, and

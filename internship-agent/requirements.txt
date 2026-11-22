@@ -3,6 +3,8 @@ playwright>=1.49
 openpyxl>=3.1
 pandas>=2.0
 requests>=2.31
+# Draws the tile numbers on hCaptcha grid screenshots sent to your phone (ats/hcaptcha_grid.py)
+pillow>=10.1
 
 # Mission Control (app_server.py). The page itself is prebuilt in mission_control_ui/dist;
 # Node.js is only needed to change it (npm --prefix mission_control_ui run build).

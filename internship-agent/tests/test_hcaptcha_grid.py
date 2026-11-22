@@ -131,9 +131,9 @@ def fake_phone():
     return fake
 
 
-async def open_site(pw, site, *, tabs_before=0, tabs_after=0, shown=True):
+async def open_site(pw, site, *, tabs_before=0, tabs_after=0, shown=True, scale=1):
     browser = await pw.chromium.launch()
-    context = await browser.new_context()
+    context = await browser.new_context(device_scale_factor=scale)
     await context.route("**/*", site.handle)
     for _ in range(tabs_before):
         await context.new_page()
@@ -143,7 +143,7 @@ async def open_site(pw, site, *, tabs_before=0, tabs_after=0, shown=True):
     await page.goto(PARENT_URL)
     if shown:
         for _ in range(100):
-            if grid.challenge_frame(page) is not None and await grid.read_challenge(page):
+            if await grid.challenge_frame(page) is not None and await grid.read_challenge(page):
                 break
             await asyncio.sleep(0.1)
     return browser, context, page
@@ -195,33 +195,145 @@ def test_unusable_replies_are_rejected_not_guessed(text):
     assert grid.parse_reply(text)[0] == "invalid"
 
 
-# ---- numbering follows the screen, and the badges come off again ---------------------------------------- #
+# ---- numbering: read-only, drawn on the image bytes, nothing written into hCaptcha's page ---------------- #
 
-def test_tiles_are_numbered_by_position_on_screen_not_dom_order_and_badges_are_removed():
-    async def go(page):
-        frame = grid.challenge_frame(page)
-        count = await frame.evaluate(grid.TAG_JS, True)
-        badges = await frame.evaluate("[...document.querySelectorAll('[data-ia-badge]')].map(b => b.textContent)")
-        mapping = await frame.evaluate("""[...document.querySelectorAll('.task-image')].map(t =>
-            [t.getAttribute('data-ia-tile'), t.dataset.idx, Math.round(t.getBoundingClientRect().top / 50),
-             Math.round(t.getBoundingClientRect().left)])""")
-        shot = await grid.numbered_screenshot(page, frame)
-        left = await frame.evaluate("document.querySelectorAll('[data-ia-badge]').length")
-        return count, badges, mapping, shot, left
+OBSERVE_JS = """() => { window.__mut = []; new MutationObserver(list => list.forEach(m => window.__mut.push(
+  {type: m.type, attr: m.attributeName, added: m.addedNodes.length, target: m.target.className || m.target.nodeName})))
+  .observe(document, {subtree: true, childList: true, attributes: true, characterData: true}); }"""
 
-    async def run_it():
+
+def on_challenge(fn, *, scale=1):
+    async def go():
         async with async_playwright() as pw:
-            browser, context, page = await open_site(pw, Site())
+            browser, context, page = await open_site(pw, Site(), scale=scale)
             try:
-                return await go(page)
+                return await fn(page, await grid.challenge_frame(page))
             finally:
                 await browser.close()
-    count, badges, mapping, shot, left = run(run_it())
-    assert count == 9 and badges == [str(i) for i in range(1, 10)]
-    assert all(tag == idx for tag, idx, _, _ in mapping)                  # tile n is the one in visual position n
-    rows = sorted({(row, int(tag)) for tag, _, row, _ in mapping})
-    assert [t for _, t in rows[:3]] == [1, 2, 3] and [t for _, t in rows[6:]] == [7, 8, 9]
-    assert shot is not None and shot[:8] == b"\x89PNG\r\n\x1a\n" and left == 0
+    return run(go())
+
+
+def test_the_numbered_picture_is_made_without_touching_the_challenge_dom():
+    async def go(page, frame):
+        await frame.evaluate(OBSERVE_JS)
+        shot, numbered = await grid.numbered_screenshot(page, frame)
+        await asyncio.sleep(0.2)                                         # let any mutation records arrive
+        layout = await frame.evaluate(grid.TILES_JS)
+        idx = await frame.evaluate("[...document.querySelectorAll('.task-grid .task-image')].map(t => +t.dataset.idx)")
+        marked = await frame.evaluate("document.querySelectorAll('[data-ia-tile], [data-ia-badge]').length")
+        return shot, numbered, await frame.evaluate("window.__mut"), layout, idx, marked
+    shot, numbered, mutations, layout, idx, marked = on_challenge(go)
+    assert numbered and shot[:8] == b"\x89PNG\r\n\x1a\n"
+    assert mutations == [] and marked == 0                              # not one change in hCaptcha's page
+    assert [idx[t["dom"]] for t in layout["tiles"]] == list(range(1, 10))  # reading order = position on screen
+
+
+@pytest.mark.parametrize("scale", [1, 2])                               # 2: Windows display scaling
+def test_each_number_is_drawn_on_its_own_tile_and_nothing_else_changes(scale):
+    from PIL import Image
+    import io
+
+    async def go(page, frame):
+        layout = await frame.evaluate(grid.TILES_JS)
+        raw = await frame.locator(grid.SEL["grid"]).first.screenshot()
+        return layout, raw
+    layout, raw = on_challenge(go, scale=scale)
+    numbered, ok = grid.draw_numbers(raw, layout)
+    a, b = Image.open(io.BytesIO(raw)).convert("RGB"), Image.open(io.BytesIO(numbered)).convert("RGB")
+    assert ok and a.size == b.size and a.width == round(layout["grid"]["w"] * scale)
+    g = layout["grid"]
+    for t in layout["tiles"]:
+        left, top = (t["x"] - g["x"]) * scale, (t["y"] - g["y"]) * scale
+        r = max(12, round(min(t["w"], t["h"]) * scale * 0.14))
+        badge = (int(left + r + 5 * scale), int(top + r + 5 * scale - r * 0.7))     # inside the circle, above the digit
+        middle = (int(left + t["w"] * scale * 0.7), int(top + t["h"] * scale * 0.7))
+        assert b.getpixel(badge) != a.getpixel(badge) and sum(b.getpixel(badge)) < 120   # dark badge drawn there
+        assert b.getpixel(middle) == a.getpixel(middle)                  # the picture itself is untouched
+
+
+def test_without_pillow_the_plain_screenshot_goes_out_and_the_phone_is_told(home, monkeypatch):
+    monkeypatch.setitem(sys.modules, "PIL", None)                        # as if Pillow were not installed
+    assert grid.draw_numbers(b"png", {"grid": {"w": 1}, "tiles": [{}]}) == (b"png", False)
+    out, events, fake = relay(Site(), [("round 1", "5")], reply_wait_s=30)
+    assert out == "verified" and fake.posts[0]["file"] == "screenshot.png"
+    assert "could not be drawn" in fake.posts[0]["content"] and "left to right, top to bottom" in fake.posts[0]["content"]
+
+
+def test_clicks_are_plain_clicks_that_never_mark_the_page():
+    async def go(page, frame):
+        await frame.evaluate(OBSERVE_JS)
+        await grid.click_tiles(frame, [7, 8])
+        await asyncio.sleep(0.2)
+        muts = await frame.evaluate("window.__mut")
+        picked = await frame.evaluate("""[...document.querySelectorAll('.task-image')]
+            .filter(t => t.style.outline).map(t => +t.dataset.idx).sort()""")
+        return muts, picked
+    mutations, picked = on_challenge(go)
+    assert picked == [7, 8]                                              # the tiles the person named
+    # what changes is the widget's own reaction to a click (tile outline, Skip -> Next label); nothing of ours
+    assert all((m["type"] == "attributes" and m["attr"] == "style" and m["target"] == "task-image")
+               or (m["type"] == "childList" and m["target"] == "text") for m in mutations), mutations
+    assert not any((m["attr"] or "").startswith("data-ia") for m in mutations)
+
+
+# ---- the frame: only the active challenge, never the checkbox, never a look-alike ------------------------------ #
+
+FRAMES_PAGE = """<html><body>
+<iframe id="checkbox" src="https://newassets.hcaptcha.com/captcha/v1/abc123/static/hcaptcha.html#frame=checkbox&id=1"
+        width="300" height="80"></iframe>
+<iframe id="hidden" src="https://newassets.hcaptcha.com/captcha/v1/abc123/static/hcaptcha.html#frame=challenge&id=2"
+        width="400" height="560" style="visibility:hidden"></iframe>
+<iframe id="fake" src="https://evil.example/hcaptcha.com/hcaptcha.html#frame=challenge&id=3" width="400" height="560"></iframe>
+<iframe id="active" src="https://newassets.hcaptcha.com/captcha/v1/abc123/static/hcaptcha.html#frame=challenge&id=4"
+        width="400" height="560"></iframe>
+</body></html>"""
+
+
+def frames_site(page_html):
+    site = Site(parent=page_html)
+    real = site.handle
+
+    async def handle(route):
+        if route.request.url.startswith("https://evil.example/"):
+            await route.fulfill(status=200, content_type="text/html", body=site.challenge)
+        else:
+            await real(route)
+    site.handle = handle
+    return site
+
+
+def test_only_the_visible_challenge_frame_is_used_across_origins():
+    async def go():
+        async with async_playwright() as pw:
+            browser, context, page = await open_site(pw, frames_site(FRAMES_PAGE), shown=False)
+            try:
+                for _ in range(50):
+                    frame = await grid.challenge_frame(page)
+                    if frame:
+                        break
+                    await asyncio.sleep(0.1)
+                prompt = await frame.evaluate("document.querySelector('.prompt-text').innerText")
+                cross = await page.evaluate("document.getElementById('active').contentDocument === null")
+                await page.evaluate("document.getElementById('active').remove()")
+                left = await grid.challenge_frame(page)
+                return frame.url, prompt, cross, left
+            finally:
+                await browser.close()
+    url, prompt, cross, left = run(go())
+    assert url.endswith("frame=challenge&id=4")                          # not the checkbox, the hidden one, or the fake
+    assert prompt and cross                                              # cross-origin to the page, still readable
+    assert left is None                                                  # hidden challenge + checkbox = nothing showing
+
+
+@pytest.mark.parametrize("url, ok", [
+    ("https://newassets.hcaptcha.com/captcha/v1/a/static/hcaptcha.html#frame=challenge&id=1", True),
+    ("https://hcaptcha.com/x#frame=challenge", True),
+    ("https://newassets.hcaptcha.com/captcha/v1/a/static/hcaptcha.html#frame=checkbox&id=1", False),
+    ("https://evil.example/hcaptcha.com#frame=challenge", False),
+    ("https://hcaptcha.com.evil.example/#frame=challenge", False),
+    ("https://newassets.hcaptcha.com/captcha/v1/a/static/hcaptcha.html?frame=challenge", False), ("", False)])
+def test_challenge_urls_are_matched_strictly(url, ok):
+    assert grid.is_challenge_url(url) is ok
 
 
 # ---- the relay: single round, multi-round, skip, reload, abandon ---------------------------------------------- #

@@ -16,15 +16,23 @@ person moves a mouse. Challenges that are not a 3x3 grid (drag, click on a point
 never attempted: the phone is told what it is, which tab is waiting and for how long, so it can be cleared
 in the browser.
 
+Nothing is ever written into hCaptcha's page: the tile positions are read, the grid is screenshotted as is,
+and the numbers are drawn onto the image bytes with Pillow. Clicks are ordinary clicks on the tile the
+candidate named. Only the active challenge frame is used (an hcaptcha.com frame whose URL says
+frame=challenge and that is actually on screen), never the checkbox frame. Playwright drives that frame
+over the DevTools protocol, so its being cross-origin to the job site does not matter; a frame that
+detaches mid-call is treated as "no challenge showing".
+
 Selectors follow hCaptcha's current markup (.prompt-text, .task-grid .task-image, .button-submit,
 .refresh.button) and are kept in SEL; they are exercised against a mock of that markup, not the live widget.
 """
 from __future__ import annotations
 
 import asyncio
+import io
 import re
 import time
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import run_state
 
@@ -39,31 +47,21 @@ GRID_TILES = 9
 HELP = ("Reply with the tile numbers (`1`-`9`, left to right, top to bottom), e.g. `7 8`; `0` or `none` to Skip; "
         "`reload` for a new grid; `/skip` to give up on this posting.")
 
-# Number the tiles by where they are on screen (row by row), not by DOM order, and optionally draw big
-# numbered badges over them. The badges sit in fixed-position elements, so the tiles themselves are untouched.
-TAG_JS = r"""
-(badges) => {
-  document.querySelectorAll('[data-ia-badge]').forEach(e => e.remove());
+# Read-only: where the grid and each tile are (CSS pixels), tiles in reading order (row by row, by position
+# on screen, not DOM order), with each tile's DOM index so it can be clicked without being marked.
+TILES_JS = r"""
+() => {
+  const grid = document.querySelector('.task-grid');
   const tiles = [...document.querySelectorAll('.task-grid .task-image')];
-  const boxes = tiles.map(t => ({t, r: t.getBoundingClientRect()}));
-  const h = Math.max(1, ...boxes.map(b => b.r.height));
-  const row = b => Math.round(b.r.top / (h / 2));
-  boxes.sort((a, b) => (row(a) - row(b)) || (a.r.left - b.r.left));
-  boxes.forEach((b, i) => {
-    b.t.setAttribute('data-ia-tile', String(i + 1));
-    if (!badges) return;
-    const d = document.createElement('div');
-    d.setAttribute('data-ia-badge', '1'); d.textContent = String(i + 1);
-    Object.assign(d.style, {position: 'fixed', left: (b.r.left + 5) + 'px', top: (b.r.top + 5) + 'px', width: '30px',
-      height: '30px', lineHeight: '30px', textAlign: 'center', font: '700 20px/30px Arial, sans-serif',
-      color: '#fff', background: '#000', border: '2px solid #ffeb3b', borderRadius: '50%', zIndex: 2147483647,
-      pointerEvents: 'none', boxShadow: '0 0 0 2px rgba(0,0,0,.55)'});
-    document.body.appendChild(d);
-  });
-  return boxes.length;
+  const boxes = tiles.map((t, dom) => { const r = t.getBoundingClientRect();
+    return {dom, x: r.left, y: r.top, w: r.width, h: r.height}; });
+  const h = Math.max(1, ...boxes.map(b => b.h));
+  const row = b => Math.round(b.y / (h / 2));
+  boxes.sort((a, b) => (row(a) - row(b)) || (a.x - b.x));
+  const g = grid ? grid.getBoundingClientRect() : null;
+  return {grid: g && {x: g.left, y: g.top, w: g.width, h: g.height}, tiles: boxes};
 }
 """
-UNBADGE_JS = "() => document.querySelectorAll('[data-ia-badge]').forEach(e => e.remove())"
 READ_JS = r"""
 () => {
   const tiles = [...document.querySelectorAll('.task-grid .task-image')];
@@ -115,23 +113,40 @@ def parse_reply(text: str) -> tuple:
 
 # ---- the challenge in the page -------------------------------------------------------------------------- #
 
-def challenge_frame(page):
+def is_challenge_url(url: str) -> bool:
+    """An hCaptcha challenge frame: host hcaptcha.com (or a subdomain) and frame=challenge in the fragment.
+    The checkbox frame (frame=checkbox) and look-alike URLs on other hosts are not."""
+    p = urlparse(url or "")
+    host = (p.hostname or "").lower()
+    return (host == "hcaptcha.com" or host.endswith(".hcaptcha.com")) and \
+        parse_qs(p.fragment).get("frame") == ["challenge"]
+
+
+async def challenge_frame(page):
+    """The challenge frame that is showing: hCaptcha keeps a hidden challenge iframe on the page until it is
+    needed, so a matching URL alone is not enough. None when no challenge is on screen."""
     for frame in page.frames:
-        url = frame.url or ""
-        if "hcaptcha.com" in url and "frame=challenge" in url and not frame.is_detached():
+        if not is_challenge_url(frame.url) or frame.is_detached():
+            continue
+        try:
+            element = await frame.frame_element()
+            if not await element.is_visible():
+                continue
+            box = await element.bounding_box()
+        except Exception:                                  # noqa: BLE001 - detached while we looked
+            continue
+        if box and box["width"] > 100 and box["height"] > 100 and box["y"] + box["height"] > 0 \
+                and box["x"] + box["width"] > 0:
             return frame
     return None
 
 
 async def read_challenge(page) -> dict | None:
     """{prompt, tiles, grid, canvas, button, sig} of the open challenge, or None when none is showing."""
-    frame = challenge_frame(page)
+    frame = await challenge_frame(page)
     if frame is None:
         return None
     try:
-        element = await frame.frame_element()
-        if not await element.is_visible():
-            return None
         return await asyncio.wait_for(frame.evaluate(READ_JS), 3.0)
     except Exception:                                      # noqa: BLE001 - mid-navigation, detached
         return None
@@ -149,23 +164,69 @@ async def status(page) -> str:
     return "open" if await read_challenge(page) else "gone"
 
 
-async def numbered_screenshot(page, frame) -> bytes | None:
-    """The grid with big numbers on the tiles, as PNG bytes. The numbers are removed again at once."""
-    try:
-        await frame.evaluate(TAG_JS, True)
-        target = frame.locator(SEL["grid"]).first
+def _font(size: int):
+    from PIL import ImageFont
+    for name in ("arialbd.ttf", "Arial Bold.ttf", "DejaVuSans-Bold.ttf", "arial.ttf", "DejaVuSans.ttf"):
         try:
-            return await target.screenshot(timeout=4000)
-        finally:
-            await frame.evaluate(UNBADGE_JS)
-    except Exception:                                      # noqa: BLE001 - the text prompt still goes out
-        return None
+            return ImageFont.truetype(name, size)
+        except OSError:
+            continue
+    try:
+        return ImageFont.load_default(size=size)       # Pillow >= 10.1
+    except TypeError:
+        return ImageFont.load_default()
+
+
+def draw_numbers(png: bytes, layout: dict) -> tuple[bytes, bool]:
+    """Draw 1-9 onto a screenshot of the grid, using each tile's box from TILES_JS. Pure image work: the page
+    is never touched. Returns (png bytes, True), or the screenshot unchanged and False without Pillow."""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return png, False
+    grid, tiles = layout.get("grid"), layout.get("tiles") or []
+    if not grid or not grid.get("w") or not tiles:
+        return png, False
+    img = Image.open(io.BytesIO(png)).convert("RGB")
+    scale = img.width / grid["w"]                          # device pixels per CSS pixel (Windows display scaling)
+    draw = ImageDraw.Draw(img)
+    for n, t in enumerate(tiles, 1):
+        left, top = (t["x"] - grid["x"]) * scale, (t["y"] - grid["y"]) * scale
+        r = max(12, round(min(t["w"], t["h"]) * scale * 0.14))
+        cx, cy = left + r + 5 * scale, top + r + 5 * scale
+        draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(0, 0, 0), outline=(255, 235, 59), width=max(2, r // 6))
+        font = _font(round(r * 1.3))
+        label = str(n)
+        try:
+            draw.text((cx, cy), label, fill=(255, 255, 255), font=font, anchor="mm")
+        except (ValueError, TypeError):                    # a bitmap font has no anchors: centre it by hand
+            box = draw.textbbox((0, 0), label, font=font)
+            draw.text((cx - (box[2] - box[0]) / 2, cy - (box[3] - box[1]) / 2), label, fill=(255, 255, 255), font=font)
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue(), True
+
+
+async def numbered_screenshot(page, frame) -> tuple[bytes | None, bool]:
+    """(PNG of the grid with 1-9 drawn on it, numbered?). A plain screenshot of the grid, then drawing on the
+    bytes. (None, False) when the grid cannot be captured; the text prompt still goes out."""
+    try:
+        layout = await frame.evaluate(TILES_JS)
+        raw = await frame.locator(SEL["grid"]).first.screenshot(timeout=4000)
+    except Exception:                                      # noqa: BLE001
+        return None, False
+    return draw_numbers(raw, layout)
 
 
 async def click_tiles(frame, tiles: list[int]) -> None:
-    await frame.evaluate(TAG_JS, False)                    # same numbering as the picture, right before clicking
+    """Click the tiles the candidate named, by the same reading order as the picture (re-read now, in case the
+    grid moved). An ordinary click on each tile; nothing in the page is marked or changed."""
+    layout = await frame.evaluate(TILES_JS)
+    if len(layout["tiles"]) != GRID_TILES:
+        raise LookupError(f"the grid has {len(layout['tiles'])} tiles now")
+    cells = frame.locator(SEL["tile"])
     for n in tiles:
-        await frame.locator(f'[data-ia-tile="{n}"]').first.click(timeout=4000)
+        await cells.nth(layout["tiles"][n - 1]["dom"]).click(timeout=4000)
         await asyncio.sleep(CLICK_PAUSE_S)
 
 
@@ -285,13 +346,18 @@ async def relay_grid(page, phone, *, reply_wait_s: float = 180.0, total_s: float
             return "timeout"
         if touch:
             touch()
-        frame = challenge_frame(page)
+        frame = await challenge_frame(page)
+        if frame is None:                                  # closed between reading it and now
+            continue
         last_sig, force_repost = state["sig"], False
-        shot = await numbered_screenshot(page, frame)
+        shot, numbered = await numbered_screenshot(page, frame)
         tab = await describe_tab(page)
         text = "\n".join([f"**🧩 hCaptcha grid — round {rounds}**", *job_lines(), f"**Prompt:** {state['prompt']}",
                           *(["hCaptcha shows the same challenge again (it may have rejected that answer)."]
                             if same_again else []),
+                          *([] if numbered else ["(The numbers could not be drawn on the picture: install Pillow with "
+                                                 "`python -m pip install -r requirements.txt`. Count tiles 1-9 left to "
+                                                 "right, top to bottom.)"]),
                           f"**Time left:** {fmt_remaining(reply_wait_s)} · {tab}", HELP])
         same_again = False
         await asyncio.to_thread(phone.ask_choice, text, shot)
