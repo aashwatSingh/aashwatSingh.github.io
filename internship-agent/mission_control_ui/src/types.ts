@@ -88,6 +88,7 @@ export interface State {
   timed_out: boolean;
   unconfirmed: boolean;
   waiting: Waiting | null;
+  captchas: number;
   steps: Step[];
   choices: { key: string; label: string }[];
   tracker: Tracker;

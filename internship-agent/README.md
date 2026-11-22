@@ -110,6 +110,16 @@ runs never do this: the posting goes to manual review as before.
 
 If neither finds a code, or Greenhouse rejects it, the run falls back to you pasting the code.
 
+**CAPTCHAs** (`ats/captcha_solver.py`). When a reCAPTCHA, hCaptcha or Turnstile checkbox is on the
+page, the runner ticks it once in the browser window you are looking at, before Submit, on the
+Workday Review page, and when Submit raises one. If the site accepts that, the form continues. If it
+shows an image puzzle or does not accept the click, the widget is outlined in purple, the bell rings
+once, and the runner continues the moment you solve it (an unattended run goes to manual review as
+before). At most two attempts per page, and it never clicks Submit a second time once the page
+shows a confirmation. It does not use a solving service or hide that the browser is automated, and
+there is no setting for either. Mission Control shows "Solving CAPTCHA..." and how many were
+cleared on the current posting.
+
 Other portals: when Ashby, Lever or Workday (sign-in, Next, or the final Submit) asks for an
 e-mailed code, in the application's tab or in a tab it opened, the runner finds the code boxes in
 whichever tab shows them, reads the newest code from an ATS sender over IMAP (the length the page

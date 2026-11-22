@@ -35,7 +35,7 @@ import config
 from answers import Decision, Question, school_names
 from urls import host_matches
 from ats.base import (CLOSED, DRY_RUN_OK, FILLED, MANUAL_REVIEW, SUBMITTED, SUBMITTED_BY_CANDIDATE, ApplyResult,
-                      BaseAdapter, FormField, FormState, _screenshot)
+                      BaseAdapter, FormField, FormState, _screenshot, visible_captcha)
 
 AID = '[data-automation-id="{}"]'
 AUTH_STEP = re.compile(r"sign in|create account|log ?in", re.I)
@@ -261,6 +261,7 @@ class WorkdayAdapter(BaseAdapter):
         errors = await self._errors(page)
         if errors:
             return MANUAL_REVIEW, "WORKDAY_REVIEW_ERRORS", f"Review shows: {errors[:200]}"
+        await self.captcha_step(page, manual=bool(self.human_wait_s))     # a CAPTCHA on the Review page
         await self.before_submit(page)                         # inbox position, for the confirmation e-mail
         review_step = await self.current_step(page)
         button = page.locator(AID.format(submit)).first
@@ -284,6 +285,12 @@ class WorkdayAdapter(BaseAdapter):
                 continue
             if code == "manual" and not self.human_wait_s:
                 return MANUAL_REVIEW, "EMAIL_VERIFICATION_CODE", "Workday asked for an e-mailed code after Submit"
+            if not code and await visible_captcha(page):       # Submit raised a challenge: tick it, never click again
+                if await self.captcha_step(page):
+                    deadline = max(deadline, time.monotonic() + 30)
+                    continue
+                if not self.human_wait_s:
+                    return MANUAL_REVIEW, "CAPTCHA", "Workday showed a CAPTCHA after Submit"
             step = await self.current_step(page)
             if step and review_step and step != review_step and not REVIEW_STEP.search(step):
                 # Workday sent the wizard back to a page with a problem: never loop through the pages again

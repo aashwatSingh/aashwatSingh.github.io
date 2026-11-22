@@ -66,6 +66,19 @@ def append_manual_review(job: dict, result: ApplyResult) -> None:
         })
 
 
+def tracker_writable(path=None) -> bool:
+    """False when another program (Excel) holds the workbook open so it cannot be written; True when it
+    is free, or does not exist yet."""
+    path = path or config.TRACKER_XLSX
+    if not path.exists():
+        return True
+    try:
+        with open(path, "r+b"):
+            return True
+    except OSError:
+        return False
+
+
 def push_blocker(job: dict, result: ApplyResult) -> None:
     """Hand a stopped posting to Mission Control's Unblock Queue, with the questions it could not answer."""
     if result.reason in unblock.NOT_BLOCKERS:
@@ -98,6 +111,8 @@ async def apply_one(context, job: dict, engine: AnswerEngine, ledger: dedup.Ledg
     ctx = Context(company=job["company"], title=job["title"], locations=list(job.get("locations") or []),
                   applied_before=ledger.has_company(job["company"]))
     page = await context.new_page()
+    if adapter is not None:
+        adapter.reset_captchas()
     kept = False
     try:
         if adapter is None:
@@ -408,6 +423,10 @@ async def run(args) -> int:
     start_total = ledger.total
     log(f"ledger: {start_total} applied, target {args.target}; {len(jobs)} candidate postings "
         f"({'DRY RUN' if args.dry_run else 'LIVE'}; ats={args.ats}; dedup={args.dedup_level})")
+    if not args.dry_run and not tracker_writable():
+        log(f"! {config.TRACKER_XLSX.name} is open in another program (Excel?). Close it, then start the run "
+            "again: nothing was started, so no application was lost.")
+        return 3
     if not args.dry_run:
         backup = dedup.backup_tracker()
         if backup:

@@ -418,6 +418,8 @@ class GreenhouseAdapter(BaseAdapter):
                     await button.click()
                 continue
             if await visible_captcha(page):
+                if await self.captcha_step(page):
+                    continue
                 done = watch.human_gate("CAPTCHA", "reCAPTCHA challenge shown on submit")
                 if done:
                     return done

@@ -250,6 +250,7 @@ def build_state() -> dict:
         # A required question the profile cannot answer is highlighted in the browser; the runner
         # continues by itself once it is filled and focus has left it.
         "waiting": (state.get("waiting") or {}) if step == run_state.WAITING_FOR_ANSWER else None,
+        "captchas": int(state.get("captchas") or 0),            # CAPTCHAs cleared on this posting (the message names the current one)
         "steps": steps,
         "choices": [{"key": k, "label": v} for k, v in run_state.CHOICES.items()],
         "tracker": tracker_view,

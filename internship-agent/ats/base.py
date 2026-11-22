@@ -22,6 +22,7 @@ import run_state
 from answers import (AI_POLICY, AnswerEngine, Context, Decision, Question, load_custom_answers, pattern_for,
                      remember_answers)
 from ats import assist, otp
+from ats.captcha_solver import detect_and_solve_captcha
 
 SKIPPED_OPTIONAL = "SKIPPED_OPTIONAL"     # an optional question the profile does not answer: left blank
 FILLED, SUBMITTED_BY_CANDIDATE = "filled", "submitted_by_candidate"     # wait_for_answers outcomes
@@ -185,6 +186,48 @@ class BaseAdapter:
     async def confirmed(self, page: Page) -> str | None:
         """Evidence that the application went through (a URL or phrase), else None."""
         return None
+
+    # ---- CAPTCHAs ---------------------------------------------------------------
+    CAPTCHA_ATTEMPTS = 2                                   # per page: never loop on a widget that will not clear
+
+    async def captcha_step(self, page: Page, *, manual: bool = False) -> bool:
+        """A visible CAPTCHA: tick its checkbox in this browser window (ats/captcha_solver.py).
+
+        With manual=True the candidate is handed the image puzzle (outlined in purple) and the call
+        returns as soon as it is solved; the adapters' own submit loops already wait for a person
+        after this call, so they use manual=False. True when the widget is cleared or has left the
+        page, so the caller should look at the page again; False when it needs a person, or after
+        CAPTCHA_ATTEMPTS tries on this page.
+        """
+        tries = self.__dict__.setdefault("_captcha_tries", {})
+        if tries.get(id(page), 0) >= self.CAPTCHA_ATTEMPTS:
+            return False
+        result = await detect_and_solve_captcha(
+            page, allow_manual_fallback=manual and bool(self.human_wait_s), on_status=self._captcha_status,
+            manual_timeout_s=max(self.human_wait_s, 60))
+        if not (result.detected and result.visible):
+            return False                                   # nothing was shown: not an attempt
+        tries[id(page)] = tries.get(id(page), 0) + 1
+        if result.solved and result.method != "already_solved":
+            self.__dict__["_captchas_solved"] = self.__dict__.get("_captchas_solved", 0) + 1
+            self._captcha_status(f"Solved {self.__dict__['_captchas_solved']} CAPTCHA"
+                                 f"{'s' if self.__dict__['_captchas_solved'] != 1 else ''}")
+        return result.solved or result.method in ("gone", "navigated")
+
+    def reset_captchas(self) -> None:
+        """A new posting: its own CAPTCHA attempts and count."""
+        self.__dict__["_captcha_tries"] = {}
+        self.__dict__["_captchas_solved"] = 0
+
+    def _captcha_status(self, message: str) -> None:
+        """The dashboard's active-job message and CAPTCHA count (run_state.json); never stops a form."""
+        if self.receipt_gate is None:
+            return
+        try:
+            step = run_state.read().get("step") or run_state.SUBMITTING
+            self.receipt_gate.step(step, message, captchas=self.__dict__.get("_captchas_solved", 0))
+        except Exception:                                  # noqa: BLE001
+            pass
 
     # ---- e-mailed codes ---------------------------------------------------------
     async def code_step(self, page: Page, since: float) -> str | None:
@@ -576,6 +619,7 @@ class BaseAdapter:
             return ApplyResult(DRY_RUN_OK, "all required questions answered (not submitted)",
                                answers=answers, screenshot=shot_path)
 
+        await self.captcha_step(page, manual=attended)      # a checkbox CAPTCHA already on the form
         for attempt in range(4):
             await self.before_submit(page)
             status, reason, detail = await self.submit(page)
