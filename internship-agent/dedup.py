@@ -30,6 +30,7 @@ from urllib.parse import parse_qs, urlparse
 import openpyxl
 
 import config
+import tracker_rows
 from fileutil import atomic_write_json, file_lock
 
 # --------------------------------------------------------------------------- #
@@ -116,35 +117,32 @@ def _token_prefix(a: str, b: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 def _find_header_row(ws) -> int:
-    for r in range(1, min(ws.max_row, 30) + 1):
-        if str(ws.cell(r, 1).value or "").strip().lower() == "company":
-            return r
-    raise ValueError("Could not find a header row with 'Company' in column A")
+    """The row with the Company header (any column): tracker_rows.find_header."""
+    return tracker_rows.find_header(ws)[0]
 
 
 def _last_data_row(ws, header_row: int) -> int:
-    """Last row of the contiguous data block under the header."""
-    r = header_row
-    while r + 1 <= ws.max_row and ws.cell(r + 1, 1).value not in (None, ""):
-        r += 1
-    return r
+    """The last application row: the last non-empty Company cell above the Summary row (blank rows in
+    between do not end the block). header_row when there are none."""
+    names = tracker_rows.find_header(ws)[1]
+    col = names["company"]
+    last = header_row
+    for r in range(header_row + 1, ws.max_row + 1):
+        company = tracker_rows.clean(ws.cell(r, col).value)
+        if company.lower() == "summary":
+            break
+        if company:
+            last = r
+    return last
 
 
 def load_tracker_rows(path: Path | None = None) -> list[dict]:
-    """All application rows from the workbook as dicts keyed by header name."""
+    """All application rows from the workbook as dicts keyed by header name (see tracker_rows.py:
+    the rows between the header and the Summary row whose Company is not blank)."""
     path = Path(path or config.TRACKER_XLSX)
     if not path.exists():
         return []
-    wb = openpyxl.load_workbook(path)
-    ws = wb.active
-    header_row = _find_header_row(ws)
-    headers = [str(c.value or "").strip() for c in ws[header_row]]
-    last = _last_data_row(ws, header_row)
-    rows = []
-    for r in range(header_row + 1, last + 1):
-        values = [c.value for c in ws[r]]
-        rows.append({h: v for h, v in zip(headers, values) if h})
-    return rows
+    return tracker_rows.read_tracker(path).rows()
 
 
 def _plain(value):
@@ -181,7 +179,7 @@ def delete_from_tracker_xlsx(match, path: Path | None = None, limit: int = 1) ->
     path = Path(path or config.TRACKER_XLSX)
     with tracker_lock(path):
         wb = openpyxl.load_workbook(path)
-        ws = wb.active
+        ws = tracker_rows.pick_sheet(wb)
         header_row = _find_header_row(ws)
         headers = [str(c.value or "").strip() for c in ws[header_row]]
         last = _last_data_row(ws, header_row)
@@ -216,7 +214,7 @@ def update_tracker_rows(match, values: dict, path: Path | None = None, limit: in
     path = Path(path or config.TRACKER_XLSX)
     with tracker_lock(path):
         wb = openpyxl.load_workbook(path)
-        ws = wb.active
+        ws = tracker_rows.pick_sheet(wb)
         header_row = _find_header_row(ws)
         headers = [str(c.value or "").strip() for c in ws[header_row]]
         col = {h: i + 1 for i, h in enumerate(headers) if h}
@@ -248,7 +246,7 @@ def append_to_tracker_xlsx(row: dict, path: Path | None = None) -> int:
 
 def _append_unlocked(row: dict, path: Path) -> int:
     wb = openpyxl.load_workbook(path)
-    ws = wb.active
+    ws = tracker_rows.pick_sheet(wb)
     header_row = _find_header_row(ws)
     headers = [str(c.value or "").strip() for c in ws[header_row]]
     last = _last_data_row(ws, header_row)
@@ -303,6 +301,7 @@ class Ledger:
         # Submitted, but the workbook was locked. Kept on disk (pending_xlsx.json) so a later run
         # still writes the row, with the confirmation e-mail's subject, sender and date.
         self.pending_xlsx: list[dict] = self._load_pending()
+        self.workbook_total: int | None = None      # application rows in the workbook: THE count (see `total`)
         self.reload()
 
     def _load_pending(self) -> list[dict]:
@@ -349,6 +348,7 @@ class Ledger:
     def reload(self) -> None:
         self.rows.clear(); self.companies.clear(); self.company_roles.clear()
         self.urls.clear()
+        self.workbook_total = tracker_rows.read_tracker(self.xlsx).total if self.xlsx.exists() else None
         # The CSV is the live ledger; workbook rows are added only when the CSV
         # does not already hold that application (matched per company + role,
         # counting repeats, so the same row is never double counted).
@@ -395,7 +395,27 @@ class Ledger:
     # -- queries ------------------------------------------------------------
     @property
     def total(self) -> int:
-        return len(self.rows)
+        """Total applications = the rows in internship_tracker.xlsx (tracker_rows.read_tracker): exactly
+        what the sheet's own COUNTA shows. applied_tracker.csv is only a duplicate-check index and a
+        crash-safety copy; counting it too is what made this number drift above the tracker whenever
+        a row was edited or deleted in Excel. Without a workbook, the ledger's own rows."""
+        return self.workbook_total if self.workbook_total is not None else len(self.rows)
+
+    def untracked_rows(self) -> list[dict]:
+        """Ledger rows (applied_tracker.csv) with no matching row in the workbook, matched per company +
+        role with repeats counted. They are not in `total`; this lists what the old count added."""
+        if self.workbook_total is None:
+            return []
+        have: Counter = Counter((normalize_company(r.get("Company")), normalize_role(r.get("Role")))
+                                for r in load_tracker_rows(self.xlsx))
+        out = []
+        for r in self._read_csv():
+            key = (normalize_company(r.get("Company")), normalize_role(r.get("Role")))
+            if have[key] > 0:
+                have[key] -= 1
+            else:
+                out.append(r)
+        return out
 
     def has_company(self, company: str) -> bool:
         n = normalize_company(company)
@@ -578,6 +598,8 @@ class Ledger:
                 "Next Step / Notes": notes,
                 "Source Email Subject": subject,
             }, self.xlsx)
+            if self.workbook_total is not None:
+                self.workbook_total += 1                    # only once the row is really in the workbook
 
 
 def _first_url(text: str) -> str:

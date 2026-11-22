@@ -33,6 +33,8 @@ export interface Tracker {
   byStatus: { status: string; count: number }[];
   pendingWrites: number;
   unconfirmed: number;
+  duplicates: { company: string; role: string; rows: number[] }[];
+  formulaIssues: string[];
   error: string;
 }
 

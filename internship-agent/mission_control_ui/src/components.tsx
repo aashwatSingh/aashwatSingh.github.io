@@ -12,7 +12,7 @@ function fmtTime(stamp: string) {
 export function GoalTracker({ metrics, tracker }: { metrics: Metrics; tracker: Tracker }) {
   const pct = Math.round(metrics.progress * 1000) / 10;
   const tiles: { label: string; value: number; tone?: string; hint: string }[] = [
-    { label: "Applied", value: metrics.applied, tone: "accent", hint: "rows in internship_tracker.xlsx (Unverified rows excluded)" },
+    { label: "Applied", value: metrics.applied, tone: "accent", hint: "rows in internship_tracker.xlsx, every status (the sheet's own count)" },
     { label: "E-mail verified", value: metrics.verified, tone: "ok", hint: "confirmed by a receipt e-mail" },
     { label: "In the queue", value: metrics.inProgress, hint: "pending postings in job_queue.json" },
     { label: "Needs action", value: metrics.blocked, tone: metrics.blocked ? "warn" : undefined, hint: "open items in the Unblock Queue" },
@@ -45,12 +45,17 @@ export function GoalTracker({ metrics, tracker }: { metrics: Metrics; tracker: T
           </div>
         ))}
       </div>
-      {(tracker.error || tracker.pendingWrites > 0 || metrics.unverified > 0) && (
+      {(tracker.error || tracker.pendingWrites > 0 || metrics.unverified > 0 || tracker.duplicates?.length > 0 ||
+        tracker.formulaIssues?.length > 0) && (
         <p className="note">
           {[
             tracker.error,
             tracker.pendingWrites > 0 && `${tracker.pendingWrites} waiting to be written (close the workbook in Excel)`,
-            metrics.unverified > 0 && `${metrics.unverified} marked "Unverified / Needs Check" in the tracker`,
+            metrics.unverified > 0 && `${metrics.unverified} marked "Unverified / Needs Check" (counted: they are rows)`,
+            tracker.duplicates?.length > 0 &&
+              `${tracker.duplicates.length} company + role pair(s) appear twice (kept in the count): ` +
+                tracker.duplicates.slice(0, 3).map((d) => `${d.company} (rows ${d.rows.join(", ")})`).join("; "),
+            tracker.formulaIssues?.length > 0 && `Summary formula: ${tracker.formulaIssues[0]}`,
           ]
             .filter(Boolean)
             .join(" · ")}

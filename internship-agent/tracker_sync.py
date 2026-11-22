@@ -19,6 +19,7 @@ from datetime import date, datetime
 
 import config
 import dedup
+import tracker_rows
 
 HUNTER_MARK = "Logged in Internship Hunter"
 
@@ -51,48 +52,54 @@ def _count_lines(path) -> int:
 
 
 def summary(path=None, target: int = config.TARGET_TOTAL) -> dict:
-    """Every application row, the total, the status breakdown and how many are left to the target."""
+    """Every application row, the total, the status breakdown and how many are left to the target.
+
+    The total is tracker_rows.read_tracker(path).total: the rows between the header and the Summary row
+    whose Company is not blank, one per application whatever its status. It is the number the sheet's
+    own "Total applications tracked" (COUNTA) shows.
+    """
     path = path or config.TRACKER_XLSX
-    raw = dedup.load_tracker_rows(path)
+    read = tracker_rows.read_tracker(path)
     rows = []
-    for r in raw:
-        company = _text(r.get("Company"))
-        if not company:
-            continue
+    for sheet_row, r in read.entries:
         rows.append({
-            "company": company,
+            "row": sheet_row,
+            "company": _text(r.get("Company")),
             "role": _text(r.get("Role")),
             "dateApplied": _text(r.get("Date Applied")),
-            "status": _text(r.get("Current Status")) or "Unknown",
+            "status": read.status_of(r),
             "statusDate": _text(r.get("Status Date")),
             "ref": _text(r.get("Application ID / Ref")),
             "notes": _text(r.get("Next Step / Notes")),
             "subject": _text(r.get("Source Email Subject")),
             "url": dedup._first_url(_text(r.get("Next Step / Notes"))),
         })
-    counts = Counter(r["status"] for r in rows)
-    unverified = counts.get(config.UNVERIFIED_STATUS, 0)
-    applied = len(rows) - unverified                       # an Unverified row is not an application yet
+    counts = read.status_counts()
+    ordered = [s for s in STATUS_ORDER if counts[s]] + sorted(s for s in counts if s not in STATUS_ORDER)
+    unverified = counts.get(config.UNVERIFIED_STATUS, 0)    # in the total (they are rows), shown separately
     verified = sum(1 for r in rows if r["status"] != config.UNVERIFIED_STATUS
                    and (r["subject"] or "verified by Gmail receipt" in r["notes"]))
-    ordered = [s for s in STATUS_ORDER if counts[s]] + sorted(s for s in counts if s not in STATUS_ORDER)
     try:
         modified = datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
     except OSError:
         modified = ""
     pending = Pending.count()
+    total = read.total
     return {
         "ok": True,
         "source": str(path),
         "modified": modified,
-        "total": applied,
+        "total": total,
         "target": target,
-        "remaining": max(target - applied, 0),
+        "remaining": max(target - total, 0),
         "verified": verified,
         "unverified": unverified,
         "byStatus": [{"status": s, "count": counts[s]} for s in ordered],
         "pendingWrites": pending,
         "unconfirmed": _count_lines(config.UNCONFIRMED_CSV),
+        "duplicates": read.duplicates(),                    # kept in the total, flagged for you
+        "firstRow": read.first_row, "lastRow": read.last_row, "summaryRow": read.summary_row,
+        "formulaIssues": read.stale_formula_ranges(),
         "rows": rows,
     }
 

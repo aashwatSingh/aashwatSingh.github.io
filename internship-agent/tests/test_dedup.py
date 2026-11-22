@@ -109,9 +109,11 @@ def test_locked_workbook_does_not_lose_the_application(tmp_path, monkeypatch):
     job = {"company": "=Initech", "title": "SWE Intern", "url": "https://job-boards.greenhouse.io/initech/jobs/1",
            "ats": "Greenhouse", "locations": ["Austin, TX"]}
     ledger.record_application(job)                      # must not raise
-    assert ledger.total == 2 and len(ledger.pending_xlsx) == 1
+    assert ledger.total == 1 and len(ledger.pending_xlsx) == 1      # the tracker has 1 row; the other is pending
+    assert ledger.duplicate_reason(job, "role")                      # ...but it is still never applied to twice
     monkeypatch.setattr(dedup, "append_to_tracker_xlsx", real)
     fresh = dedup.Ledger(xlsx, csv_path)
-    assert fresh.total == 2 and fresh.reconcile_xlsx() == 1 and fresh.reconcile_xlsx() == 0
+    assert fresh.total == 1 and fresh.reconcile_xlsx() == 1 and fresh.reconcile_xlsx() == 0
+    assert dedup.Ledger(xlsx, csv_path).total == 2                   # counted once it is a row in the tracker
     ws = openpyxl.load_workbook(xlsx).active
     assert ws.cell(6, 1).value == "'=Initech"           # listing text is never stored as a formula

@@ -36,6 +36,7 @@ import dedup
 import email_receipt_verifier
 import phone_notify
 import run_state
+import tracker_rows
 import unblock
 import scraper
 from answers import AnswerEngine, Context, load_custom_answers, remember_answers
@@ -66,6 +67,32 @@ def append_manual_review(job: dict, result: ApplyResult) -> None:
             "URL": job["url"], "Reason": result.reason, "Detail": result.detail,
             "Screenshot": os.path.relpath(result.screenshot, config.BASE) if result.screenshot else "",
         })
+
+
+def log_tracker_report(ledger: dedup.Ledger) -> None:
+    """What the count is made of, in the run's log: the number is the tracker's rows (see tracker_rows.py),
+    possible duplicates stay in it but are named, and anything that could make another number differ is said."""
+    if not config.TRACKER_XLSX.exists():
+        return
+    try:
+        read = tracker_rows.read_tracker(config.TRACKER_XLSX)
+    except (OSError, ValueError) as exc:
+        log(f"! could not read {config.TRACKER_XLSX.name} ({type(exc).__name__}: {str(exc)[:80]})")
+        return
+    counts = read.status_counts()
+    log(f"tracker: {read.total} applications = the rows {read.first_row}-{read.last_row} of "
+        f"{config.TRACKER_XLSX.name} with a Company (every status counts): "
+        + ", ".join(f"{n} {s}" for s, n in counts.most_common()))
+    for d in read.duplicates():
+        log(f"  ! possible duplicate, kept in the count: {d['company']} — {d['role'] or '(no role)'} "
+            f"(rows {', '.join(map(str, d['rows']))})")
+    for issue in read.stale_formula_ranges():
+        log(f"  ! Summary formula out of step with the data: {issue}")
+    untracked = ledger.untracked_rows()
+    if untracked:
+        log(f"  {len(untracked)} row(s) in applied_tracker.csv are not rows in the tracker, so they are not counted: "
+            + "; ".join(f"{r.get('Company')} — {r.get('Role') or '(no role)'}" for r in untracked[:5])
+            + (" ..." if len(untracked) > 5 else ""))
 
 
 def tracker_writable(path=None) -> bool:
@@ -469,6 +496,7 @@ async def run(args) -> int:
         log("unattended run: postings that hit a CAPTCHA or emailed code go to manual review "
             "(use --local-blitz on your own machine to clear those in the browser)")
     jobs = select_jobs(queue, args)
+    log_tracker_report(ledger)
     start_total = ledger.total
     log(f"ledger: {start_total} applied, target {args.target}; {len(jobs)} candidate postings "
         f"({'DRY RUN' if args.dry_run else 'LIVE'}; ats={args.ats}; dedup={args.dedup_level})")
@@ -524,7 +552,7 @@ async def run(args) -> int:
                         log(f"retrying {len(back)} posting(s) from the Unblock Queue first")
                 if _stop or (deadline and time.time() > deadline):
                     break
-                if not args.dry_run and ledger.total >= args.target:
+                if not args.dry_run and ledger.total + len(ledger.pending_xlsx) >= args.target:
                     break
                 if args.limit and sum(tally.values()) >= args.limit:
                     break

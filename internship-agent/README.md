@@ -127,6 +127,24 @@ asks for, usually 6), enters it, presses Verify / Continue, and returns to the a
 (`ats/otp.py`). Without `GMAIL_APP_PASSWORD` you type it in that tab. Fields such as "ZIP code",
 "Promo code" or "code of conduct" are never mistaken for a code prompt.
 
+**How "total applications" is counted.** One number, everywhere (the runner's log, Mission Control,
+`tracker_sync.py` and Internship Hunter): the rows of `internship_tracker.xlsx` between the header row
+and the row whose Company is "Summary", whose Company is not blank. One row is one application
+whatever its status ("Application incomplete" and "Unverified / Needs Check" included), which is also
+what the sheet's own `=COUNTA(...)` in the Summary block shows. Columns are found by header name and
+nothing is hard-coded to a row number or range (`tracker_rows.py`). The title, subtitle and header
+rows, blank rows, and the whole Summary block are never counted; neither are e-mails or
+`applied_tracker.csv` (a duplicate-check index and crash-safety copy, not a second count).
+Two rows with the same Company and Role are possible duplicates: they stay in the total and are
+named in the run's log and Mission Control. A submission that is waiting to be written because
+Excel had the file open is shown as "waiting", and joins the total once it is a row.
+
+`python verify_tracker_count.py [--xlsx PATH] [--expect 249]` prints the independent count, the
+automation's count and the Summary cell recalculated by LibreOffice on a temporary copy, plus the
+per-status breakdown, duplicates, CSV rows the tracker lacks, and Summary formulas whose range no
+longer matches the data (a `COUNTA(A5:A262)` that runs past the last row also counts the Summary
+labels). It never changes your workbook.
+
 **Confirmation e-mail gate.** On a live run, a submission counts only once its confirmation e-mail
 ("Thank you for applying to ...") is in your Gmail inbox. The browser's confirmation page is not
 enough: until the e-mail arrives the runner does not write `internship_tracker.xlsx`, does not

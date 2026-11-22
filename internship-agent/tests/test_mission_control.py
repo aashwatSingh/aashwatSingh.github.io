@@ -166,7 +166,7 @@ def test_missing_receipt_flags_the_tracker_then_confirm_or_retry(client, home):
     rows = load_tracker_rows(config.TRACKER_XLSX)
     assert rows[-1]["Current Status"] == config.UNVERIFIED_STATUS and JOB["url"] in rows[-1]["Next Step / Notes"]
     s = tracker_sync.summary(config.TRACKER_XLSX)
-    assert (s["total"], s["unverified"], s["remaining"]) == (1, 1, 499)       # not counted toward the 500
+    assert (s["total"], s["unverified"], s["remaining"]) == (2, 1, 498)       # a row is a row: counted, and flagged
     assert Ledger(config.TRACKER_XLSX, config.LEDGER_CSV).duplicate_reason(JOB, "role") is None   # can be retried
 
     item = unblock.add(JOB, "UNCONFIRMED", "no e-mail")
