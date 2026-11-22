@@ -25,6 +25,24 @@ from pathlib import Path
 
 import config
 
+def safe_float(value, default: float | None = None) -> float | None:
+    """float(value), or ``default`` for "", None, whitespace, "n/a", "3.5/4.0" and anything else that is not a
+    plain number. Accepts "$1,200", "76k" and a trailing "%". Never raises."""
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value if value is not None else "").strip().replace(",", "").replace("$", "").rstrip("%").strip()
+    mult = 1000.0 if text[-1:].lower() == "k" else 1.0
+    if mult != 1.0:
+        text = text[:-1].strip()
+    try:
+        number = float(text) * mult
+    except ValueError:
+        return default
+    return number if number == number and abs(number) != float("inf") else default     # not NaN / inf
+
+
 FREE_KINDS = {"text", "textarea", "number", "date", "email", "tel", "url"}
 CHOICE_KINDS = {"select", "radio", "multiselect", "boolean", "checkbox_group"}
 
@@ -701,7 +719,10 @@ class AnswerEngine:
             if not q.required:
                 return Skip()                      # spec: blank whenever optional
             if q.kind in CHOICE_KINDS:
-                hit = gpa_option(q.options, float(edu["gpa"]))
+                gpa_value = safe_float(edu.get("gpa"))
+                if gpa_value is None:
+                    return Unknown("GPA is not a number in the profile")
+                hit = gpa_option(q.options, gpa_value)
                 return Text(hit, [re.escape(hit)]) if hit else Unknown("no GPA range matches")
             return Text(edu["gpa"])
 
@@ -764,7 +785,7 @@ class AnswerEngine:
             if q.kind == "number" or re.search(r"numbers? only|numeric|digits only", f"{label} {q.placeholder}".lower()):
                 return Text(number)
             if q.kind in CHOICE_KINDS:
-                to_num = lambda v: float(v) if v else None
+                to_num = safe_float
                 bucket = money_option(q.options, to_num(log.get("desired_annual_salary")),
                                       to_num(log.get("desired_hourly_rate")))
                 return Text(bucket, [rf"^{re.escape(bucket)}$"]) if bucket else Unknown("no pay bucket matches")
@@ -1051,7 +1072,7 @@ class AnswerEngine:
             if q.kind in CHOICE_KINDS and any(re.search(r"month|week", o, re.I) for o in q.options):
                 return Unknown("experience options are in months")
             if q.kind in CHOICE_KINDS:
-                hit = gpa_option(q.options, float(value)) or pick_pattern(
+                hit = (gpa_option(q.options, safe_float(value, -1.0)) if safe_float(value) is not None else None) or pick_pattern(
                     q.options, [rf"^{value}\b", r"^(less than|under|<) ?1\b|^0\s*-\s*1\b|^none$"] if value in ("0", "1")
                     else [rf"^{value}\b"])
                 return Text(hit, [rf"^{re.escape(hit)}$"]) if hit else Unknown("no matching experience range")
