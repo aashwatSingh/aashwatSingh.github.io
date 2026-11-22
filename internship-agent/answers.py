@@ -1071,6 +1071,8 @@ class AnswerEngine:
 
         def citizenship(q, label, ctx):
             """Answered only when work_authorization.citizenship_status is set in the profile."""
+            if q.kind in ("text", "textarea") and re.search(r"countr(y|ies)", label) and re.search(r"citizen|national", label):
+                return None                  # "list your countries of citizenship": x-citizen-countries answers it
             listed = " ".join(q.options).lower()
             if q.kind in CHOICE_KINDS and re.search(r"refugee|asylee|none of the above", listed):
                 # the standard ITAR list: citizen / permanent resident / refugee / asylee / none of the above
@@ -1661,8 +1663,7 @@ class AnswerEngine:
              lambda q, *_: Check() if q.kind == "checkbox" else None),
             ("x-citizen-countries", r"(list|state|provide|what) .{0,60}countr(y|ies) .{0,40}(citizen|national)|"
                                     r"countr(y|ies) of citizenship",
-             lambda q, *_: Text(auth["country_of_citizenship"]) if auth.get("country_of_citizenship")
-             and q.kind in ("text", "textarea") else Unknown("set work_authorization.country_of_citizenship")),
+             lambda q, label, *_: citizenship_answer(auth, q, label)),
             ("never-answer", r"citizen|u\.?s\.? person|\bitar\b|export control|\bear\b|green card|"
                              r"permanent resident|visa (status|type|category)|immigration status|"
                              r"(current|type of|which|what) visa|work visa|\bopt\b(?! ?-?(in|out))|\bcpt\b|clearance|"
@@ -1947,6 +1948,44 @@ def _read_entries(path: Path) -> list[dict] | None:
     except (OSError, ValueError):
         return None
     return [e for e in data if isinstance(e, dict) and e.get("pattern")] if isinstance(data, list) else None
+
+
+# "...and when you obtained such status", "date acquired", "since when", "year you became a citizen"
+CITIZENSHIP_WHEN = re.compile(
+    r"\bwhen\b.{0,60}(obtain|acquir|became|become|gain|receiv|grant|naturali[sz])|"
+    r"\b(date|year)\b.{0,25}(obtain|acquir|grant|receiv|naturali[sz]|becam|become|of (citizenship|status))|"
+    r"since when|acquired|obtained such status|how long.{0,30}(citizen|resident)", re.I)
+_OBTAINED_PHRASE = re.compile(r"^(citizen|since|by birth|at birth|from birth|born|obtained|acquired|naturali[sz]ed|"
+                              r"granted|became)", re.I)
+_PLACEHOLDER = re.compile(r"date obtained|\bTBD\b|\bTODO\b|^\s*\[.*\]\s*$|<.*>", re.I)
+
+
+def citizenship_obtained_phrase(value) -> str | None:
+    """work_authorization.citizenship_obtained as a clean phrase ('citizen since birth', 'citizen since May
+    2019'), or None when unset or still a template placeholder (it is never sent to an employer as is)."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip().strip("[]()").strip()
+    if not text or _PLACEHOLDER.search(str(value or "")):
+        return None
+    if _OBTAINED_PHRASE.match(text):
+        return text[0].lower() + text[1:]
+    if re.search(r"\b(19|20)\d\d\b|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b", text, re.I):
+        return f"citizen since {text}"                       # a date: say what it is
+    return text
+
+
+def citizenship_answer(auth: dict, q: Question, label: str):
+    """'India' for a countries-of-citizenship question; 'India (citizen since birth)' when it also asks
+    when the status was obtained. That part is never guessed: unset means the candidate is asked."""
+    country = str(auth.get("country_of_citizenship") or "").strip()
+    if not country or q.kind not in ("text", "textarea"):
+        return Unknown("set work_authorization.country_of_citizenship")
+    if CITIZENSHIP_WHEN.search(f"{q.label} {q.description or ''}"):
+        phrase = citizenship_obtained_phrase(auth.get("citizenship_obtained"))
+        if phrase is None:
+            return Unknown("this question asks when the status was obtained: set work_authorization.citizenship_obtained "
+                           "(e.g. 'citizen since birth')")
+        return Text(f"{country} ({phrase})")
+    return Text(country)
 
 
 def school_names(edu: dict) -> list[str]:

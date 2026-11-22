@@ -263,6 +263,7 @@ What still stops a form, because the profile does not say and a template cannot 
 | `logistics.accept_arbitration_agreements` | mandatory arbitration acknowledgements |
 | `education.sat_score`, `act_score`, `school_email`, `transcript_path` | test scores, .edu address, transcript uploads |
 | `logistics.internship_dates_text` | answer to "internship dates" / "dates of the internship" text questions, e.g. `06/07/2027 - 08/19/2027` (defaults to `preferred_start` - `preferred_end` as MM/DD/YYYY). `availability_dates_text` answers "dates you are available" |
+| `work_authorization.country_of_citizenship`, `citizenship_obtained` | "list your countries of citizenship" gets the country; when the question also asks when the status was obtained ("when obtained", "date acquired", "since when") the answer is combined, e.g. `India (citizen since birth)`. If `citizenship_obtained` is unset, or still a template like `[citizen since birth / date obtained]`, you are asked instead and nothing is sent |
 | `education.school_on_forms` | the school name as most forms list it (e.g. `University of Texas - Dallas`). Used first for every school / university field; if a list does not offer it, `school`, `school_aliases` and their other spellings ("X at Y", "X, Y", with / without "The") are tried in turn. `school` stays the name used in essays and the cover letter |
 
 Citizenship status, visa category (F-1 / OPT / CPT), clearance, behavioural stories ("describe a
@@ -398,6 +399,15 @@ attest the answers are your own are never drafted. Read `custom_answers.json` be
 ```bash
 python agent_runner.py --local-blitz --ats Workday --workday-manual-sign-in
 ```
+
+Lever specifics (`ats/lever.py`): after the résumé upload it waits for Lever's `/parseResume` answer and for the
+fields the parser writes to stop changing (up to 20 s); a parse that errors or times out is logged as a warning and the
+form is filled anyway, and a parse that lands late is corrected before Submit (name, e-mail, phone, links, and "Current
+company", which is kept empty unless the profile lists a current job there). The parser's location is kept only when
+it is your city and state; otherwise it is cleared, typed with real key presses (Lever loads suggestions on key
+events), the matching suggestion is picked, and `selectedLocation` is checked: location is never reported as filled
+unless it is. If the hCaptcha script does not load, a `--local-blitz` run retries, then rings the bell, tells your
+phone, and waits for the script to load or for you to submit; an unattended run goes to manual review.
 
 Workday is opt-in. Walked end to end on one live tenant in dry-run: account creation
 (`--workday-create-accounts`, then you click the verification e-mail), sign-in, Autofill with Resume, My

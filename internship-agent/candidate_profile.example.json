@@ -72,7 +72,8 @@
     "future_sponsorship_visa": null,
     "requires_sponsorship_now": null,
     "visa_category": null,
-    "country_of_citizenship": null
+    "country_of_citizenship": null,
+    "citizenship_obtained": null
   },
   "logistics": {
     "willing_to_relocate": true,
