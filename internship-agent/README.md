@@ -217,6 +217,26 @@ the run keeps waiting. A file upload cannot be sent from the phone. The missing-
 page restarts the posting only if Submit was not clicked yet; after Submit a retry could apply
 twice, so it becomes a skip. `FREEZE_STALL_S` (default 120) sets how long a stall must last.
 
+**hCaptcha grids from your phone** (`ats/hcaptcha_grid.py`). With Discord set up, an attended run that meets
+an hCaptcha 3x3 image grid posts the prompt and a screenshot of the grid with big numbers 1-9 on the tiles
+(left to right, top to bottom) and relays what you answer. You do the solving; the runner only clicks:
+`7 8` or `1, 4, 7` clicks those tiles and then Next / Verify; `0` or `none` clicks Skip; `reload` clicks the
+refresh icon and posts the new grid; `/skip` gives up on the posting (manual review). It repeats for every round
+hCaptcha serves until the challenge closes or the page reaches `/thanks`, stops after 10 rounds or 20 minutes, and
+notices when you solve it on the laptop first. A reply it cannot use (`10`, `banana`) is answered and ignored.
+Anything that is not a 3x3 grid (drag, click on a point, an unfamiliar layout) is never attempted: the phone gets
+a ping with the posting, its URL, the kind of challenge, the time left before it moves to manual review, and which
+browser tab is waiting (brought to the front). The same ping is used when Lever's hCaptcha script fails to load.
+The selectors follow hCaptcha's markup and are tested against a mock of it, not the live widget.
+
+**The browser profile.** One browser is started, in `launch_browser`, always as a persistent context: nothing in the
+runner or the adapters clears cookies or storage, and each posting is a new page in the same context, so sign-ins
+and the site's trust in the browser carry over between postings and runs. `--local-blitz` uses `./chrome_profile`
+(Mission Control starts the same command, so it shares it). A lock file next to it (`chrome_profile.runner.lock`)
+keeps two runners off the same profile; a lock left by a crash or a force-stop is taken over. If installed Chrome
+cannot start, the bundled Chromium gets its own folder (`chrome_profile-chromium`) instead of opening the Chrome
+profile.
+
 ### Mission Control
 
 Double-click **`Launch_Mission_Control.bat`** (or run it from any terminal). It finds Python,

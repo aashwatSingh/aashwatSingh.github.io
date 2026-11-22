@@ -23,7 +23,8 @@ import run_state
 from answers import (AI_POLICY, AnswerEngine, Context, Decision, Question, load_custom_answers, pattern_for,
                      remember_answers)
 from ats import assist, otp
-from ats.captcha_solver import detect_and_solve_captcha, notify_phone as captcha_notify
+from ats import hcaptcha_grid
+from ats.captcha_solver import detect_and_solve_captcha
 
 SKIPPED_OPTIONAL = "SKIPPED_OPTIONAL"     # an optional question the profile does not answer: left blank
 FILLED, SUBMITTED_BY_CANDIDATE = "filled", "submitted_by_candidate"     # wait_for_answers outcomes
@@ -237,7 +238,17 @@ class BaseAdapter:
         sent = self.__dict__.setdefault("_captcha_notified", set())
         if id(page) not in sent:
             sent.add(id(page))
-            await captcha_notify(page, phone)
+            per_round = max(self.human_wait_s, 120)
+
+            def touch() -> None:                           # a round in progress keeps the submit loop waiting
+                watch.deadline = max(watch.deadline, time.monotonic() + per_round)
+            outcome = await hcaptcha_grid.handle_challenge(page, phone, reply_wait_s=per_round, touch=touch)
+            if outcome == "skipped":
+                self.__dict__["_phone_skip"] = True
+                watch.deadline = 0
+                return True
+            if outcome == "closed":
+                sent.discard(id(page))                     # a fresh challenge may follow: relay that one too
         if (await phone.apoll_reply()) == "/skip":
             self.__dict__["_phone_skip"] = True
             watch.deadline = 0                             # SubmitWatch.timed_out() then hands it to manual review

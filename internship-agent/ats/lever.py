@@ -17,6 +17,7 @@ from playwright.async_api import Page
 import phone_notify
 import run_state
 from answers import Decision, Question
+from ats import hcaptcha_grid
 from urls import host_matches
 from ats.base import (MANUAL_REVIEW, SUBMITTED, BaseAdapter, FormField, SubmitWatch, fetch_json,
                       strip_html, visible_captcha)
@@ -386,12 +387,10 @@ class LeverAdapter(BaseAdapter):
         self._captcha_status("Waiting for you: hCaptcha did not load")
         phone = phone_notify.notifier()
         if phone.enabled:
-            try:
-                shot = await page.screenshot(timeout=3000)
-            except Exception:                              # noqa: BLE001
-                shot = None
-            await asyncio.to_thread(phone.ask_choice, f"**🧩 hCaptcha did not load** on {who}. Allow js.hcaptcha.com "
-                                    "or submit it yourself in the browser, or reply `/skip`", shot)
+            await hcaptcha_grid.notify_waiting(
+                page, phone, "hCaptcha script failed to load (an ad blocker or the network is blocking js.hcaptcha.com)",
+                remaining_s=wait, headline="hCaptcha did not load",
+                extra=["Allow js.hcaptcha.com for jobs.lever.co, or submit it yourself in the browser."])
         deadline = time.monotonic() + wait
         while time.monotonic() < deadline:
             await page.wait_for_timeout(1000)

@@ -28,6 +28,7 @@ import threading
 import time
 from collections import Counter
 from datetime import datetime
+from pathlib import Path
 
 from playwright.async_api import async_playwright
 
@@ -369,15 +370,79 @@ async def _safe_shot(page, path: str) -> None:
         pass
 
 
+class ProfileBusy(RuntimeError):
+    pass
+
+
+class ProfileLock:
+    """One runner per browser profile. Two browsers on one profile folder corrupt its cookies and
+    sign-ins (and Chrome refuses the second one halfway through a start), so the runner takes a lock
+    file next to the folder, `<profile>.runner.lock`, holding its pid. A lock whose pid is gone (a crash
+    or a force-stop) is taken over; a live one stops the second runner with a clear message."""
+
+    def __init__(self, profile_dir, pid_alive=run_state.pid_alive):
+        self.path = Path(str(profile_dir) + ".runner.lock")
+        self._alive, self.held = pid_alive, False
+
+    def acquire(self) -> "ProfileLock":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        for _ in range(3):
+            try:
+                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                try:
+                    pid, _, started = self.path.read_text(encoding="utf-8").partition(" ")
+                except OSError:
+                    pid, started = "", ""
+                if pid.isdigit() and int(pid) != os.getpid() and self._alive(int(pid)):
+                    raise ProfileBusy(f"another runner (pid {pid}, started {started.strip() or '?'}) is using the browser "
+                                      f"profile {self.path.name[:-len('.runner.lock')]}. Stop it first (Mission Control: "
+                                      "Stop), or give this run its own --profile-dir.")
+                try:
+                    self.path.unlink()                         # left by a runner that is gone
+                except OSError:
+                    pass
+                continue
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(f"{os.getpid()} {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            self.held = True
+            return self
+        raise ProfileBusy(f"could not take {self.path.name}")
+
+    def release(self) -> None:
+        if self.held:
+            try:
+                self.path.unlink()
+            except OSError:
+                pass
+            self.held = False
+
+
+# Not about hiding anything: stops Chrome's "restore pages?" bubble after a force-stop so an unattended
+# window never sits waiting on it. Sign-ins and cookies live in the profile either way.
+PROFILE_ARGS = ["--hide-crash-restore-bubble"]
+
+
+def chromium_fallback_dir(profile_dir) -> str:
+    """Bundled Chromium gets its own folder: a profile written by installed Chrome must not be opened by
+    another browser build (different versions and encryption of the stored cookies)."""
+    return str(profile_dir).rstrip("\\/") + "-chromium"
+
+
 async def launch_browser(pw, args):
-    """Persistent profile so cookies and sign-ins carry over between forms and runs."""
-    options = dict(headless=not args.headed, accept_downloads=False,
+    """Persistent profile so cookies and sign-ins carry over between forms and runs: the one place a
+    browser is started, always a persistent context (nothing here or in the adapters clears cookies or
+    storage, and every posting is just a new page in this context)."""
+    options = dict(headless=not args.headed, accept_downloads=False, args=PROFILE_ARGS,
                    viewport=None if args.headed else {"width": 1280, "height": 1600})
     if args.browser_channel:
         try:
             return await pw.chromium.launch_persistent_context(args.profile_dir, channel=args.browser_channel, **options)
         except Exception as exc:                                   # noqa: BLE001 - e.g. Chrome not installed
-            log(f"could not start '{args.browser_channel}' ({str(exc).splitlines()[0][:90]}); using bundled Chromium")
+            fallback = chromium_fallback_dir(args.profile_dir)
+            log(f"could not start '{args.browser_channel}' ({str(exc).splitlines()[0][:90]}); using bundled Chromium "
+                f"with its own profile folder ({Path(fallback).name}), so the {args.browser_channel} profile is untouched")
+            return await pw.chromium.launch_persistent_context(fallback, **options)
     return await pw.chromium.launch_persistent_context(args.profile_dir, **options)
 
 
@@ -533,8 +598,17 @@ async def run(args) -> int:
             return f"{ledger.total}/{args.target} applied. This session: {dict(tally) or 'nothing yet'}. Now: {now}."
         phone.status_provider = phone_status
         log("phone assist: Discord is on; questions, CAPTCHAs and stalls will ping your phone")
+    try:
+        profile_lock = ProfileLock(args.profile_dir).acquire()
+    except ProfileBusy as exc:
+        log(f"! {exc}")
+        return 4
     async with async_playwright() as pw:
-        context = await launch_browser(pw, args)
+        try:
+            context = await launch_browser(pw, args)
+        except BaseException:
+            profile_lock.release()                          # no browser started: nothing holds the profile
+            raise
         context.set_default_timeout(15000)
         run_state.clear_control()
         run_state.runner_started(sys.argv[1:])
@@ -629,6 +703,7 @@ async def run(args) -> int:
             if gate:
                 run_state.update(None, "", "Runner stopped")
             run_state.runner_finished()
+            profile_lock.release()
 
     ledger.flush_pending_xlsx()
     if ledger.pending_xlsx:

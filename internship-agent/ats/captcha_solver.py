@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from playwright.async_api import Page
 
 import phone_notify
+from ats import hcaptcha_grid
 
 PROBE_TIMEOUT_S = 0.5              # every DOM / frame access is capped at this
 CHECKBOX_WAIT_S = 8.0
@@ -211,20 +212,10 @@ async def _wait_for_solution(page: Page, seconds: float, interval: float, abort=
     return False, "timeout"
 
 
-async def notify_phone(page: Page, phone) -> None:
-    """Screenshot + "CAPTCHA needs attention" on the phone; replies after this can race the browser. Best effort."""
-    try:
-        import run_state
-        job = run_state.read().get("job") or {}
-        who = f"{job.get('company', 'this posting')} ({job.get('title', '')})".replace(" ()", "")
-        try:
-            shot = await page.screenshot(timeout=3000)
-        except Exception:                                  # noqa: BLE001
-            shot = None
-        await asyncio.to_thread(phone.ask_choice, f"**🧩 CAPTCHA needs attention** on {who}. "
-                                "Solve it on the laptop, or reply `/skip`", shot)
-    except Exception:                                      # noqa: BLE001 - never stops the hand-over
-        pass
+async def notify_phone(page: Page, phone, kind: str = "CAPTCHA puzzle", remaining_s: float | None = None) -> None:
+    """Screenshot + "CAPTCHA needs attention" on the phone: posting, URL, kind of challenge, time left and
+    which tab is waiting (hcaptcha_grid.captcha_ping). Best effort."""
+    await hcaptcha_grid.notify_waiting(page, phone, kind, remaining_s=remaining_s)
 
 
 async def detect_and_solve_captcha(page: Page, *, timeout_s: float = 45, allow_manual_fallback: bool = True,
@@ -282,14 +273,23 @@ async def detect_and_solve_captcha(page: Page, *, timeout_s: float = 45, allow_m
           f"(waiting up to {int(manual_timeout_s)}s; the form continues by itself)", flush=True)
     say("Waiting for you to solve the CAPTCHA")
     phone = phone_notify.notifier()
-    if phone.enabled:
-        await notify_phone(page, phone)
+    relayed = None
+    if phone.enabled:                                      # an hCaptcha 3x3 grid goes to the phone, round by round
+        relayed = await hcaptcha_grid.handle_challenge(page, phone, reply_wait_s=manual_timeout_s,
+                                                       fallback_kind=f"{result.kind} puzzle")
 
     async def skipped() -> bool:
         return (await phone.apoll_reply()) == "/skip"
     try:
-        solved, why = await _wait_for_solution(page, manual_timeout_s, MANUAL_POLL_S,
-                                               abort=skipped if phone.enabled else None)
+        if relayed == "skipped":
+            solved, why = False, "skipped"
+        elif relayed == "verified":
+            solved, why = True, "token"
+        elif relayed == "closed":
+            solved, why = False, "gone"
+        else:
+            solved, why = await _wait_for_solution(page, manual_timeout_s, MANUAL_POLL_S,
+                                                   abort=skipped if phone.enabled else None)
     finally:
         try:
             await page.evaluate(CLEAR_JS)
