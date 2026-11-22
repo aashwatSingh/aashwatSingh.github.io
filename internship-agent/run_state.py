@@ -158,6 +158,8 @@ def runner_finished() -> None:
         runner_path().unlink()
     except (OSError, ValueError):
         pass
+    else:
+        clear_control()                                    # a Stop / Pause left for this run ends with it
 
 
 def pid_alive(pid) -> bool:

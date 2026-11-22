@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, blitz as blitzApi, gateChoice, resolveBlocker } from "./api";
-import { ActivityFeed, Controls, CurrentJob, GoalTracker, LiveLog, UnblockQueue } from "./components";
+import { ApiError, blitz as blitzApi, gateChoice, resolveBlocker, runForceStop, runStart, runStop, shutdownServer } from "./api";
+import { ActionBar, ActivityFeed, CurrentJob, GoalTracker, LiveLog, UnblockQueue } from "./components";
 import { ring, useLogStream, usePolledState } from "./hooks";
-import type { BlitzAction, UnblockAction, UnblockItem } from "./types";
+import type { BlitzAction, RunOptions, UnblockAction, UnblockItem } from "./types";
 
 export default function App() {
   const { state, offline, refresh } = usePolledState(1500);
   const { lines, connected } = useLogStream();
   const [busy, setBusy] = useState(false);
+  const [down, setDown] = useState(false);
   const [notice, setNotice] = useState<{ text: string; tone: "ok" | "bad" } | null>(null);
   const lastAlert = useRef("");
 
@@ -40,8 +41,25 @@ export default function App() {
     [refresh],
   );
 
-  const onAction = (action: BlitzAction, limit?: number) =>
-    run(() => blitzApi(action, limit), action === "start" ? `Started a batch of ${limit ?? "all"}` : `${action} sent`);
+  const onStart = (options: RunOptions) =>
+    run(() => runStart(options), `Started ${options.limit ? `a batch of ${options.limit}` : "the whole queue"}${options.dry_run ? " (dry run)" : ""}`);
+
+  const onAction = (action: BlitzAction) => {
+    if (action === "stop") return run(runStop, "Stopping after the current application");
+    if (action === "force-stop") return run(runForceStop, "Runner force-stopped");
+    return run(() => blitzApi(action), `${action} sent`);
+  };
+
+  const onShutdown = () => {
+    const warning = state?.blitz.running
+      ? "A run is going. Shut Down finishes the current application, then stops the runner and the server. Continue?"
+      : "Shut down the Mission Control server?";
+    if (!window.confirm(warning)) return;
+    void run(async () => {
+      await shutdownServer();
+      setDown(true);
+    }, "Shutting down...");
+  };
 
   const onResolve = (item: UnblockItem, action: UnblockAction, answers?: Record<string, string>) => {
     if (action === "confirm" && !window.confirm(`Mark ${item.job.company} as submitted without a confirmation e-mail?`)) return;
@@ -59,6 +77,15 @@ export default function App() {
     const t = window.setTimeout(() => setNotice(null), 5000);
     return () => window.clearTimeout(t);
   }, [notice]);
+
+  if (down) {
+    return (
+      <main>
+        <h1>Mission Control</h1>
+        <p className="dim">Shut down. You can close this tab. Open the SWE Internship Agent shortcut to start it again.</p>
+      </main>
+    );
+  }
 
   if (!state) {
     return (
@@ -79,7 +106,10 @@ export default function App() {
           </span>{" "}
           <span className={offline ? "bad-text" : ""}>
             {offline ? "Server not reachable: showing the last view" : `Updated ${state.updated || "just now"}`}
-          </span>
+          </span>{" "}
+          <button type="button" className="quiet" disabled={busy} onClick={onShutdown}>
+            Shut Down Server
+          </button>
         </span>
       </header>
       {notice && (
@@ -87,10 +117,10 @@ export default function App() {
           {notice.text}
         </div>
       )}
+      <ActionBar blitz={state.blitz} busy={busy} onStart={(o) => void onStart(o)} onAction={(a) => void onAction(a)} />
       <GoalTracker metrics={state.metrics} tracker={state.tracker} />
       <div className="grid">
         <div className="col">
-          <Controls blitz={state.blitz} busy={busy} onAction={(a, l) => void onAction(a, l)} />
           <CurrentJob state={state} busy={busy} onChoice={(c) => void run(() => gateChoice(c), "Choice sent")} />
           <ActivityFeed items={state.activity} />
         </div>

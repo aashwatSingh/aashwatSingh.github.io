@@ -48,6 +48,19 @@ export interface Blitz {
   exit_code: number | null;
   command: string;
   limit: number | null;
+  dry_run: boolean;
+  ats: string | null;
+  max_per_company: number | null;
+  excel_locked: boolean;
+}
+
+/** What POST /api/run/start takes. */
+export interface RunOptions {
+  limit: number | null;
+  dedup_level: "role" | "company";
+  max_per_company: number;
+  dry_run: boolean;
+  ats: string | null;
 }
 
 export type UnblockKind = "question" | "captcha" | "login" | "code" | "receipt" | "workday" | "other";

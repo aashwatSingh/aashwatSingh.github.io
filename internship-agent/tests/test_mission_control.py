@@ -45,7 +45,9 @@ def home(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(home):
-    return TestClient(app_server.create_app(), base_url="http://127.0.0.1:4760")
+    app = app_server.create_app()
+    # Every POST /api/* needs the session token the served page carries.
+    return TestClient(app, base_url="http://127.0.0.1:4760", headers={app_server.TOKEN_HEADER: app.state.session_token})
 
 
 def post(client, path, body, **headers):

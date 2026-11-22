@@ -89,3 +89,14 @@ input[aria-invalid="true"] { border-color: var(--bad); }
 @media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
 .phone-badge { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); margin-right: 8px; }
 .phone-badge.on { color: var(--ok); border-color: var(--ok); } .phone-badge.warn { color: var(--warn); border-color: var(--warn); }
+
+.action-bar { border-width: 1px; }
+.banner { margin: 0 0 12px; padding: 9px 12px; border-radius: 8px; font-weight: 600; }
+.banner.bad { color: var(--bad); border: 1px solid var(--bad); background: color-mix(in oklch, var(--bad) 10%, var(--card)); }
+button.start { font-size: 16px; font-weight: 600; padding: 9px 22px; display: inline-flex; align-items: center; gap: 8px; }
+.size select { font: inherit; font-size: 14px; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; min-width: 110px; }
+.check { display: flex; align-items: center; gap: 6px; font-size: 14px; padding-bottom: 6px; }
+.check input { width: 16px; height: 16px; }
+.spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid color-mix(in oklch, var(--card) 35%, transparent); border-top-color: var(--card); animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }

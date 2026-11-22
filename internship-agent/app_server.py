@@ -9,26 +9,33 @@ The page shows:
   * the 500-application goal from internship_tracker.xlsx (via tracker_sync.py, the same numbers
     Internship Hunter shows): applied, e-mail verified, in the queue, blocked, failed, remaining;
   * the posting being worked on and its step, and the recent results;
-  * Start / Pause / Resume / Stop for a batch of N postings, and the runner's log, live (SSE);
+  * Start Applying (limit, max per company, dry run, portal), Pause / Resume, Stop After Current Job,
+    Force Stop and Shut Down Server, with no terminal window: the runner is a child process of this
+    server and its output is the live log (SSE);
   * the Unblock Queue (unblock.py): postings that stopped on a CAPTCHA, a question the profile
     cannot answer, a login wall or a missing confirmation e-mail, with Retry / Confirm Submitted /
     Dismiss and a form whose answers are saved to custom_answers.json.
 
 It binds to 127.0.0.1, answers only requests addressed to localhost (DNS-rebinding guard), refuses
-cross-site POSTs, only ever starts the one fixed runner command, and never sends .env values to
-the page.
+cross-site POSTs, requires a per-session token (served inside the page, sent as X-Mission-Token) on
+every POST /api/*, only ever starts agent_runner.py --local-blitz with validated options, and never
+sends .env values to the page. The runner is stopped with the server: nothing is left behind.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import atexit
+import hmac
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -109,19 +116,122 @@ def blitz_log_path() -> Path:
     return config.LOG_DIR / "blitz.log"
 
 
-class Blitz:
-    """Starts the one blitz command, and Pause / Resume / Stop via run_control.json."""
+def excel_locked(path=None) -> bool:
+    """True when Excel (or anything else) holds the tracker open, so it cannot be opened for writing.
+
+    Opens it in r+b mode and closes it again without writing a byte. Excel keeps an xlsx it has open
+    locked on Windows, which makes this raise PermissionError (sharing violation)."""
+    target = Path(path or config.TRACKER_XLSX)
+    try:
+        with target.open("r+b"):
+            return False
+    except FileNotFoundError:
+        return False
+    except PermissionError:
+        return True
+    except OSError as exc:
+        return getattr(exc, "winerror", None) in (32, 33)      # sharing / lock violation
+
+
+EXCEL_LOCKED_MESSAGE = "Close internship_tracker.xlsx in Excel first, then click Start Applying."
+
+
+def excel_preflight() -> tuple[int, dict] | None:
+    """423 if the tracker is open in Excel: the runner could not record its applications."""
+    if excel_locked():
+        return 423, {"error": EXCEL_LOCKED_MESSAGE, "excel_locked": True}
+    return None
+
+
+ATS_CHOICES = {"greenhouse": "Greenhouse", "ashby": "Ashby", "lever": "Lever", "workday": "Workday"}
+DEDUP_LEVELS = ("role", "company")
+MAX_PER_COMPANY = 50
+LOG_RING = 250                                               # lines kept for the page: bounded memory
+SHUTDOWN_GRACE_S = 60.0                                      # a running application gets this long to finish
+DEFAULT_RUN = {"limit": None, "dedup_level": "role", "max_per_company": 3, "dry_run": False, "ats": None}
+
+
+def _parse_limit(limit):
+    """A batch size from 1 to MAX_BATCH, or None for the whole queue. (value, error)."""
+    if limit in (None, "", 0):
+        return None, ""
+    if isinstance(limit, bool) or not isinstance(limit, (int, str)) or not str(limit).isdigit() \
+            or not 1 <= int(limit) <= MAX_BATCH:
+        return None, f"batch size must be a whole number from 1 to {MAX_BATCH}"
+    return int(limit), ""
+
+
+def parse_run_params(payload) -> tuple[dict | None, str]:
+    """Validate {limit, dedup_level, max_per_company, dry_run, ats}. (params, error): nothing reaches the command line unchecked."""
+    if not isinstance(payload, dict):
+        return None, 'send {"limit": 20, "dedup_level": "role", "max_per_company": 3, "dry_run": false, "ats": null}'
+    limit, err = _parse_limit(payload.get("limit"))
+    if err:
+        return None, err
+    level = payload.get("dedup_level", DEFAULT_RUN["dedup_level"])
+    if level not in DEDUP_LEVELS:
+        return None, "dedup_level must be one of: " + ", ".join(DEDUP_LEVELS)
+    per = payload.get("max_per_company", DEFAULT_RUN["max_per_company"])
+    if isinstance(per, bool) or not isinstance(per, (int, str)) or not str(per).isdigit() \
+            or not 1 <= int(per) <= MAX_PER_COMPANY:
+        return None, f"max_per_company must be a whole number from 1 to {MAX_PER_COMPANY}"
+    dry = payload.get("dry_run", False)
+    if dry is None:
+        dry = False
+    if not isinstance(dry, bool):
+        return None, "dry_run must be true or false"
+    ats = payload.get("ats")
+    if ats in (None, "") or (isinstance(ats, str) and ats.strip().lower() == "all"):
+        ats = None                                           # the runner's default portals
+    elif isinstance(ats, str) and ats.strip().lower() in ATS_CHOICES:
+        ats = ATS_CHOICES[ats.strip().lower()]
+    else:
+        return None, "ats must be one of: all, " + ", ".join(ATS_CHOICES.values())
+    return {"limit": limit, "dedup_level": level, "max_per_company": int(per), "dry_run": dry, "ats": ats}, ""
+
+
+def build_args(params: dict) -> list[str]:
+    """The fixed runner flags plus the validated options. Defaults give exactly BLITZ_ARGS."""
+    args = ["--local-blitz", "--dedup-level", params["dedup_level"], "--max-per-company", str(params["max_per_company"])]
+    if params.get("limit"):
+        args += ["--limit", str(params["limit"])]
+    if params.get("dry_run"):
+        args.append("--dry-run")
+    if params.get("ats"):
+        args += ["--ats", params["ats"]]
+    return args
+
+
+class RunnerManager:
+    """Starts agent_runner.py as a child process and controls it: Start, Pause / Resume, Stop After
+    Current Job (run_control.json, read by the runner between applications), Force Stop.
+
+    The child's output goes through a daemon thread into a bounded ring buffer (and blitz.log, which
+    the live-log stream reads). `preflight` runs before a start and can refuse it (e.g. 423)."""
 
     ACTIONS = ("start", "pause", "resume", "stop", "force-stop")
 
-    def __init__(self, popen=subprocess.Popen, kill=_kill_tree):
-        self._popen, self._kill = popen, kill
+    def __init__(self, popen=subprocess.Popen, kill=_kill_tree, preflight=None):
+        self._popen, self._kill, self.preflight = popen, kill, preflight
         self.proc = None
         self.started = ""
+        self.params = dict(DEFAULT_RUN)
+        self.logs: deque[str] = deque(maxlen=LOG_RING)
         self._lock = threading.Lock()
+
+    @property
+    def limit(self):
+        return self.params.get("limit")
 
     def _own_running(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
+
+    def owns_run(self) -> bool:
+        return self._own_running()
+
+    def log_lines(self) -> list[str]:
+        """The ring buffer; the log files when the run was started from a terminal or by an earlier server."""
+        return list(self.logs) or _log_tail(LOG_RING)
 
     def status(self) -> dict:
         runner = run_state.read_runner()
@@ -131,6 +241,7 @@ class Blitz:
         exit_code = None
         if self.proc is not None and not own:
             exit_code = self.proc.returncode
+        shown = self.params if running else DEFAULT_RUN
         return {
             "running": running,
             "pid": (runner or {}).get("pid") or (self.proc.pid if own else None),
@@ -139,26 +250,25 @@ class Blitz:
             "stopping": running and control["stop"],
             "external": running and not own,           # started from a terminal, not this page
             "exit_code": exit_code,
-            "command": "agent_runner.py " + " ".join(BLITZ_ARGS),
-            "limit": getattr(self, "limit", None) if running else None,
+            "command": "agent_runner.py " + " ".join(build_args(shown)),
+            "limit": self.limit if running else None,
+            "dry_run": bool(shown.get("dry_run")) if running else False,
+            "ats": shown.get("ats") if running else None,
+            "max_per_company": shown.get("max_per_company"),
+            # Not checked while running: opening the workbook must never get in the runner's way.
+            "excel_locked": (not running) and excel_locked(),
         }
 
     def act(self, action, limit=None) -> tuple[int, dict]:
         if action not in self.ACTIONS:
             return 400, {"error": "action must be one of: " + ", ".join(self.ACTIONS)}
-        if limit not in (None, "", 0):
-            if isinstance(limit, bool) or not isinstance(limit, (int, str)) or not str(limit).isdigit() \
-                    or not 1 <= int(limit) <= MAX_BATCH:
-                return 400, {"error": f"batch size must be a whole number from 1 to {MAX_BATCH}"}
-            limit = int(limit)
-        else:
-            limit = None
+        limit, err = _parse_limit(limit)
+        if err:
+            return 400, {"error": err}
+        if action == "start":
+            return self.start({**DEFAULT_RUN, "limit": limit})
         with self._lock:
             st = self.status()
-            if action == "start":
-                if st["running"]:
-                    return 409, {"error": "a run is already going"}
-                return self._start(limit)
             if not st["running"]:
                 return 409, {"error": "no run is going"}
             if action == "pause":
@@ -179,31 +289,89 @@ class Blitz:
                 run_state.update(None, "", "Run force-stopped from Mission Control")
             return 200, {"ok": True, **self.status()}
 
-    def _start(self, limit: int | None = None) -> tuple[int, dict]:
+    def start(self, params: dict) -> tuple[int, dict]:
+        with self._lock:
+            if self.status()["running"]:
+                return 409, {"error": "a run is already going"}
+            if self.preflight is not None:
+                refused = self.preflight()
+                if refused:
+                    return refused
+            return self._start(params)
+
+    def _start(self, params: dict) -> tuple[int, dict]:
         run_state.clear_control()
         run_state.clear_choice()
         config.LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log_path = blitz_log_path()
+        log_path.write_text("", encoding="utf-8")            # a new run starts a new log
+        self.logs.clear()
         env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
         flags = 0
         if os.name == "nt":
-            # Its own process group and no console: closing Mission Control's window does not kill a
-            # run mid-application, and Stop still reaches it through run_control.json.
+            # No console window (Playwright still opens its own visible Chrome) and its own process
+            # group, so a Ctrl+C in some terminal does not end a run mid-application.
             flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-        with blitz_log_path().open("w", encoding="utf-8") as log:
-            try:
-                extra = ["--limit", str(limit)] if limit else []
-                self.proc = self._popen([sys.executable, "-u", str(CODE_DIR / "agent_runner.py"), *BLITZ_ARGS, *extra],
-                                        cwd=str(CODE_DIR), stdin=subprocess.DEVNULL, stdout=log,
-                                        stderr=subprocess.STDOUT, env=env, creationflags=flags)
-            except OSError as exc:
-                return 500, {"error": f"could not start the runner ({exc.strerror or type(exc).__name__})"}
+        try:
+            proc = self._popen([sys.executable, "-u", str(CODE_DIR / "agent_runner.py"), *build_args(params)],
+                               cwd=str(CODE_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, env=env, creationflags=flags,
+                               text=True, encoding="utf-8", errors="replace", bufsize=1)
+        except OSError as exc:
+            return 500, {"error": f"could not start the runner ({exc.strerror or type(exc).__name__})"}
+        self.proc, self.params = proc, dict(params)
         self.started = time.strftime("%Y-%m-%d %H:%M:%S")
-        self.limit = limit
-        run_state.update(None, "", f"Blitz run starting ({f'batch of {limit}' if limit else 'whole queue'})...")
+        threading.Thread(target=self._pump, args=(proc, log_path), name="runner-log", daemon=True).start()
+        size = f"batch of {params['limit']}" if params.get("limit") else "whole queue"
+        run_state.update(None, "", f"Blitz run starting ({size}{', dry run' if params.get('dry_run') else ''})...")
         return 200, {"ok": True, **self.status()}
 
+    def _pump(self, proc, log_path: Path) -> None:
+        """Daemon thread: the runner's stdout+stderr into the ring buffer and blitz.log, line by line."""
+        stream = getattr(proc, "stdout", None)
+        if stream is None:
+            return
+        try:
+            with log_path.open("a", encoding="utf-8") as out:
+                for raw in stream:
+                    line = raw.replace("\a", "").rstrip("\r\n")
+                    if not line.strip():
+                        continue
+                    self.logs.append(line)
+                    out.write(line + "\n")
+                    out.flush()
+        except (OSError, ValueError):
+            pass                                            # the pipe closed: the run ended
+        finally:
+            try:
+                stream.close()
+            except (OSError, ValueError):
+                pass
 
-blitz = Blitz()
+    def shutdown_runner(self, grace_s: float = 0.0, sleep=time.sleep) -> bool:
+        """Stop the run this server started: finish the current application if it can within `grace_s`,
+        then end it. True if there was one. A run started from a terminal is not ours to stop."""
+        if not self._own_running():
+            return False
+        run_state.set_control(stop=True, paused=False)
+        deadline = time.monotonic() + max(grace_s, 0.0)
+        while self._own_running() and time.monotonic() < deadline:
+            sleep(0.5)
+        if self._own_running():
+            try:
+                self._kill(int(self.proc.pid))
+            except Exception:                              # noqa: BLE001 - nothing left to try
+                pass
+        run_state.clear_control()
+        return True
+
+    def terminate(self) -> None:
+        """atexit: end the child right now so no runner (or its browser) is orphaned."""
+        self.shutdown_runner(grace_s=0.0)
+
+
+Blitz = RunnerManager                                        # the name the earlier code and tests use
+blitz = RunnerManager(preflight=excel_preflight)
 
 
 # ---- state for the page ------------------------------------------------------------------ #
@@ -282,6 +450,60 @@ def handle_blitz(payload) -> tuple[int, dict]:
     if not isinstance(payload, dict):
         return 400, {"error": "send {\"action\": ...}"}
     return blitz.act(payload.get("action"), payload.get("limit"))
+
+
+def run_status() -> dict:
+    """GET /api/run/status: what the Start Applying controls need, in one small object."""
+    st = blitz.status()
+    return {
+        "running": st["running"],
+        "stop_requested": st["stopping"],
+        "pid": st["pid"],
+        "started_at": st["started"] or None,
+        "last_exit_code": st["exit_code"],
+        "excel_locked": st["excel_locked"],
+        "paused": st["paused"],
+        "logs": blitz.log_lines(),
+    }
+
+
+def handle_run_start(payload) -> tuple[int, dict]:
+    """POST /api/run/start {"limit": N | null, "dedup_level": "role" | "company", "max_per_company": N,
+    "dry_run": bool, "ats": "Greenhouse" | ... | null}. 409 if a run is going, 423 if Excel has the tracker open."""
+    params, error = parse_run_params(payload)
+    if error:
+        return 400, {"error": error}
+    return blitz.start(params)
+
+
+def handle_run_stop() -> tuple[int, dict]:
+    """POST /api/run/stop: finish the current application, log its receipt, then stop."""
+    return blitz.act("stop")
+
+
+def handle_run_force_stop() -> tuple[int, dict]:
+    """POST /api/run/force-stop: end the runner now."""
+    return blitz.act("force-stop")
+
+
+_shutdown_hook = None            # main() points this at uvicorn's "please exit"
+_shutting_down = threading.Event()
+
+
+def _shutdown_sequence() -> None:
+    blitz.shutdown_runner(grace_s=SHUTDOWN_GRACE_S)
+    if _shutdown_hook is not None:
+        _shutdown_hook()
+
+
+def handle_shutdown() -> tuple[int, dict]:
+    """POST /api/shutdown: stop the run this server started (the current application may finish), then exit.
+    The answer goes out first; the work happens on a thread."""
+    stopping_run = blitz.owns_run()
+    if not _shutting_down.is_set():
+        _shutting_down.set()
+        threading.Thread(target=_shutdown_sequence, name="shutdown", daemon=True).start()
+    return 200, {"ok": True, "stopping_run": stopping_run}
 
 
 def handle_unblock(item_id: str, payload) -> tuple[int, dict]:
@@ -477,11 +699,21 @@ except ImportError:                                        # main() explains how
     Request = None
 
 
+TOKEN_HEADER = "X-Mission-Token"
+
+
+def token_ok(sent: str, expected: str) -> bool:
+    return hmac.compare_digest((sent or "").encode("utf-8"), expected.encode("utf-8"))
+
+
 def create_app():
     from fastapi import FastAPI
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
     app = FastAPI(title="Mission Control", docs_url=None, redoc_url=None, openapi_url=None)
+    # One random token per server start, handed only to the page this server serves. A page on another
+    # origin can neither read it (no CORS) nor guess it, so it cannot press any button here.
+    token = app.state.session_token = secrets.token_urlsafe(32)
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
@@ -491,6 +723,9 @@ def create_app():
         if request.method not in ("GET", "HEAD"):
             if not origin_ok(request.headers.get("origin", ""), host):
                 return JSONResponse({"error": "cross-site request refused"}, status_code=403)
+            if request.url.path.startswith("/api/") and not token_ok(request.headers.get(TOKEN_HEADER, ""), token):
+                return JSONResponse({"error": "missing or old session token: reload the Mission Control page"},
+                                    status_code=403)
             if "application/json" not in (request.headers.get("content-type") or "").lower():
                 return JSONResponse({"error": "send JSON"}, status_code=415)
             try:
@@ -525,6 +760,27 @@ def create_app():
         payload = await body(request)
         return reply(handle_blitz(payload) if payload is not None else (400, {"error": "bad json"}))
 
+    @app.get("/api/run/status")
+    def run_status_route():
+        return run_status()
+
+    @app.post("/api/run/start")
+    async def run_start(request: Request):
+        payload = await body(request)
+        return reply(handle_run_start(payload) if payload is not None else (400, {"error": "bad json"}))
+
+    @app.post("/api/run/stop")
+    async def run_stop():
+        return reply(handle_run_stop())
+
+    @app.post("/api/run/force-stop")
+    async def run_force_stop():
+        return reply(handle_run_force_stop())
+
+    @app.post("/api/shutdown")
+    async def shutdown():
+        return reply(handle_shutdown())
+
     @app.post("/api/gate-choice")
     async def gate_choice(request: Request):
         payload = await body(request)
@@ -549,7 +805,10 @@ def create_app():
     def index():
         page = UI_DIR / "index.html"
         if page.is_file():
-            return FileResponse(page, media_type="text/html")
+            html = page.read_text(encoding="utf-8")
+            meta = f'<meta name="mission-token" content="{token}">'
+            html = html.replace("</head>", meta + "</head>", 1) if "</head>" in html else meta + html
+            return HTMLResponse(html, headers={"Cache-Control": "no-store"})
         return HTMLResponse(NO_UI)
 
     @app.get("/assets/{name}")
@@ -580,9 +839,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Port {args.port} is in use: Mission Control is probably already running "
                   f"(http://{HOST}:{args.port})", file=sys.stderr)
             return 1
-    print(f"Mission Control: http://{HOST}:{args.port}  (close this window to stop it; a blitz run keeps going)",
+    print(f"Mission Control: http://{HOST}:{args.port}  (stop it with Shut Down Server in the page, or Ctrl+C here)",
           flush=True)
-    uvicorn.run(app, host=HOST, port=args.port, log_level="warning", access_log=False)
+    global _shutdown_hook
+    # The page keeps a live-log stream open; without a timeout uvicorn would wait for it forever on shutdown.
+    server = uvicorn.Server(uvicorn.Config(app, host=HOST, port=args.port, log_level="warning", access_log=False,
+                                           timeout_graceful_shutdown=3))
+    _shutdown_hook = lambda: setattr(server, "should_exit", True)      # noqa: E731
+    atexit.register(blitz.terminate)                                    # no orphaned runner or browser
+    server.run()
     return 0
 
 

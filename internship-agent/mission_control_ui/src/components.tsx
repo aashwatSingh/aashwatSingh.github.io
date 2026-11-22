@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { reasonLabel } from "./labels";
-import type { Activity, Blitz, BlitzAction, Metrics, State, Tracker, UnblockAction, UnblockItem } from "./types";
+import type { Activity, Blitz, BlitzAction, Metrics, RunOptions, State, Tracker, UnblockAction, UnblockItem } from "./types";
 
 function fmtTime(stamp: string) {
   const t = stamp.replace("T", " ");
@@ -65,78 +65,163 @@ export function GoalTracker({ metrics, tracker }: { metrics: Metrics; tracker: T
   );
 }
 
-/* ---- batch controls ------------------------------------------------------------------- */
+/* ---- Start Applying ------------------------------------------------------------------- */
 
-const BATCH_KEY = "mc.batchSize";
+const OPTIONS_KEY = "mc.run.options";
+const ATS_OPTIONS: [string, string][] = [
+  ["all", "All"],
+  ["greenhouse", "Greenhouse"],
+  ["ashby", "Ashby"],
+  ["lever", "Lever"],
+  ["workday", "Workday"],
+];
 
-export function Controls({ blitz, busy, onAction }: {
+interface RunForm {
+  limit: string;
+  perCompany: string;
+  dryRun: boolean;
+  ats: string;
+}
+const DEFAULT_FORM: RunForm = { limit: "20", perCompany: "3", dryRun: false, ats: "all" };
+
+function loadForm(): RunForm {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(OPTIONS_KEY) ?? "{}") as Partial<RunForm>;
+    return {
+      limit: typeof saved.limit === "string" ? saved.limit : DEFAULT_FORM.limit,
+      perCompany: typeof saved.perCompany === "string" ? saved.perCompany : DEFAULT_FORM.perCompany,
+      dryRun: saved.dryRun === true,
+      ats: ATS_OPTIONS.some(([key]) => key === saved.ats) ? (saved.ats as string) : DEFAULT_FORM.ats,
+    };
+  } catch {
+    return DEFAULT_FORM;
+  }
+}
+
+/** The one-click bar: Start Applying and its options, then Pause / Stop After Current Job / Force Stop while a run is going. */
+export function ActionBar({ blitz, busy, onStart, onAction }: {
   blitz: Blitz;
   busy: boolean;
-  onAction: (action: BlitzAction, limit?: number) => void;
+  onStart: (options: RunOptions) => void;
+  onAction: (action: BlitzAction) => void;
 }) {
-  const [size, setSize] = useState(() => window.localStorage.getItem(BATCH_KEY) ?? "25");
-  const valid = /^\d+$/.test(size) && Number(size) >= 1 && Number(size) <= 500;
-  const save = (v: string) => {
-    setSize(v);
-    window.localStorage.setItem(BATCH_KEY, v);
+  const [form, setForm] = useState<RunForm>(loadForm);
+  const limit = form.limit.trim();
+  const limitOk = limit === "" || (/^\d+$/.test(limit) && Number(limit) >= 1 && Number(limit) <= 500);
+  const perOk = /^\d+$/.test(form.perCompany) && Number(form.perCompany) >= 1 && Number(form.perCompany) <= 50;
+  const valid = limitOk && perOk;
+  const change = (patch: Partial<RunForm>) => {
+    const next = { ...form, ...patch };
+    setForm(next);
+    window.localStorage.setItem(OPTIONS_KEY, JSON.stringify(next));
   };
   const status = !blitz.running
     ? blitz.exit_code !== null
       ? `Last run ended (exit code ${blitz.exit_code}).`
-      : "No run is going."
+      : "Ready. Nothing is running."
     : blitz.stopping
-      ? "Stopping after the current application..."
+      ? "Stopping after the current application finishes..."
       : blitz.paused
         ? "Paused: no new application starts until you resume."
-        : `Running${blitz.limit ? ` a batch of ${blitz.limit}` : ""}${blitz.external ? " (started from a terminal)" : ""} since ${blitz.started}.`;
-  const start = (e: FormEvent) => {
+        : `Running${blitz.limit ? ` a batch of ${blitz.limit}` : " the whole queue"}${blitz.dry_run ? " (dry run: nothing is submitted)" : ""}` +
+          `${blitz.ats ? `, ${blitz.ats} only` : ""}${blitz.external ? " (started from a terminal)" : ""} since ${blitz.started}.`;
+  const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (valid) onAction("start", Number(size));
+    if (!valid) return;
+    onStart({
+      limit: limit === "" ? null : Number(limit),
+      dedup_level: "role",
+      max_per_company: Number(form.perCompany),
+      dry_run: form.dryRun,
+      ats: form.ats === "all" ? null : form.ats,
+    });
   };
   return (
-    <section className="card" aria-label="Batch controls">
-      <h3>Batch</h3>
-      <form className="controls" onSubmit={start}>
+    <section className="card action-bar" aria-label="Start applying">
+      {blitz.excel_locked && !blitz.running && (
+        <div className="banner bad" role="alert">
+          internship_tracker.xlsx is open in Excel — close it before starting
+        </div>
+      )}
+      <form className="controls" onSubmit={submit}>
+        <button type="submit" className="primary start" disabled={busy || blitz.running || !valid}>
+          {blitz.running ? (
+            <>
+              <span className="spinner" aria-hidden="true" /> Running...
+            </>
+          ) : (
+            "Start Applying"
+          )}
+        </button>
         <label className="size">
-          Applications
+          Limit
           <input
             type="number"
             min={1}
             max={500}
-            value={size}
-            onChange={(e) => save(e.target.value)}
+            placeholder="all"
+            value={form.limit}
+            onChange={(e) => change({ limit: e.target.value })}
             disabled={blitz.running}
-            aria-invalid={!valid}
+            aria-invalid={!limitOk}
           />
         </label>
-        <button type="submit" className="primary" disabled={busy || blitz.running || !valid}>
-          Start
-        </button>
-        {blitz.paused ? (
-          <button type="button" disabled={busy || !blitz.running} onClick={() => onAction("resume")}>
-            Resume
-          </button>
-        ) : (
-          <button type="button" disabled={busy || !blitz.running || blitz.stopping} onClick={() => onAction("pause")}>
-            Pause
-          </button>
+        <label className="size">
+          Max/Company
+          <input
+            type="number"
+            min={1}
+            max={50}
+            value={form.perCompany}
+            onChange={(e) => change({ perCompany: e.target.value })}
+            disabled={blitz.running}
+            aria-invalid={!perOk}
+          />
+        </label>
+        <label className="size">
+          ATS
+          <select value={form.ats} onChange={(e) => change({ ats: e.target.value })} disabled={blitz.running}>
+            {ATS_OPTIONS.map(([key, label]) => (
+              <option key={key} value={key}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={form.dryRun} onChange={(e) => change({ dryRun: e.target.checked })} disabled={blitz.running} />
+          Dry Run
+        </label>
+        {blitz.running && (
+          <>
+            {blitz.paused ? (
+              <button type="button" disabled={busy} onClick={() => onAction("resume")}>
+                Resume
+              </button>
+            ) : (
+              <button type="button" disabled={busy || blitz.stopping} onClick={() => onAction("pause")}>
+                Pause
+              </button>
+            )}
+            <button type="button" disabled={busy || blitz.stopping} onClick={() => onAction("stop")}>
+              Stop After Current Job
+            </button>
+            <button
+              type="button"
+              className="danger"
+              disabled={busy}
+              onClick={() => {
+                if (window.confirm("Force Stop ends the runner immediately, even in the middle of an application. Continue?")) onAction("force-stop");
+              }}
+            >
+              Force Stop
+            </button>
+          </>
         )}
-        <button type="button" disabled={busy || !blitz.running || blitz.stopping} onClick={() => onAction("stop")}>
-          Stop
-        </button>
-        <button
-          type="button"
-          className="danger"
-          disabled={busy || !blitz.running}
-          onClick={() => {
-            if (window.confirm("Force-stop ends the runner immediately, even mid-application. Continue?")) onAction("force-stop");
-          }}
-        >
-          Force stop
-        </button>
       </form>
-      <p className="dim small">{status}</p>
-      <p className="dim small mono">{blitz.command}</p>
+      <p className="dim small" role="status">
+        {status}
+      </p>
     </section>
   );
 }
