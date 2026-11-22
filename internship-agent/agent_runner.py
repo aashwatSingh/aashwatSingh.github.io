@@ -15,6 +15,7 @@ manual_review_queue.csv, and the loop moves straight on.
 from __future__ import annotations
 
 import argparse
+import functools
 import asyncio
 import csv
 import json
@@ -33,6 +34,7 @@ from playwright.async_api import async_playwright
 import config
 import dedup
 import email_receipt_verifier
+import phone_notify
 import run_state
 import unblock
 import scraper
@@ -167,8 +169,17 @@ _KEYS = {"1": run_state.WAIT, "w": run_state.WAIT, "wait": run_state.WAIT,
          "3": run_state.SKIP, "s": run_state.SKIP, "skip": run_state.SKIP}
 
 
-async def ask_gate_choice(job: dict, *, poll_s: float = 0.5, bell_every_s: float = 30) -> str:
-    """Queue paused: ring, show the three choices, and wait for one from the terminal or the dashboard."""
+def _phone_choice(reply: str) -> str | None:
+    """'1' / '2' / '3' (or the word, or /retry /skip) typed on the phone -> the gate's choice."""
+    word = reply.strip().lower().lstrip("/!")
+    return {"1": run_state.WAIT, "wait": run_state.WAIT, "2": run_state.RETRY, "retry": run_state.RETRY,
+            "3": run_state.SKIP, "skip": run_state.SKIP}.get(word)
+
+
+async def ask_gate_choice(job: dict, *, poll_s: float = 0.5, bell_every_s: float = 30,
+                          max_wait_s: float | None = None) -> str:
+    """Queue paused: ring, show the three choices, and wait for one from the terminal, the dashboard or the
+    phone. With max_wait_s, give up after that long and skip (flag Unverified, move on)."""
     _start_stdin_reader()
     while not _typed.empty():                              # anything typed before the question was asked
         _typed.get_nowait()
@@ -178,7 +189,13 @@ async def ask_gate_choice(job: dict, *, poll_s: float = 0.5, bell_every_s: float
           f"      2) {run_state.CHOICES[run_state.RETRY]} (in case the form did not actually submit)\n"
           f"      3) {run_state.CHOICES[run_state.SKIP]}\n"
           "      Type 1, 2 or 3 and press Enter, or use the buttons in Mission Control (app_server.py).", flush=True)
-    last_bell = time.monotonic()
+    phone = phone_notify.notifier()
+    if phone.enabled:
+        await asyncio.to_thread(phone.ask_choice, f"**📭 No confirmation e-mail** for {phone_notify._escape(job['company'])} — "
+                                f"{phone_notify._escape(job['title'])}. The queue is paused.\n"
+                                "`1.` Wait 60s (keep checking Gmail)\n`2.` Retry in Browser (if it did not submit)\n"
+                                "`3.` Skip as Unconfirmed\nReply `1`, `2` or `3`")
+    last_bell = started = time.monotonic()
     while True:
         if _stop:
             return run_state.SKIP
@@ -187,8 +204,16 @@ async def ask_gate_choice(job: dict, *, poll_s: float = 0.5, bell_every_s: float
             choice = _KEYS.get(_typed.get_nowait())
             if not choice:
                 print("      Type 1, 2 or 3.", flush=True)
+        if not choice and phone.enabled:
+            reply = await phone.apoll_reply()
+            if reply is not None:
+                choice = _phone_choice(reply)
+                if not choice:
+                    await asyncio.to_thread(phone.send_message, "Reply `1`, `2` or `3`.", None, False, advance=False)
         if choice:
             return choice
+        if max_wait_s and time.monotonic() - started >= max_wait_s:
+            return run_state.SKIP
         if time.monotonic() - last_bell >= bell_every_s:
             print("\a      Still waiting for your choice (1 / 2 / 3)...", flush=True)
             last_bell = time.monotonic()
@@ -208,6 +233,9 @@ async def confirm_receipt(gate: ReceiptGate, context, job: dict, *, attended: bo
     An unattended run has nobody to ask, so it always behaves like "queue".
     """
     on_timeout = on_timeout or config.receipt_on_timeout()
+    if attended and on_timeout != "ask" and ask is ask_gate_choice and phone_notify.notifier().enabled:
+        # Someone can answer from the phone, so ask; but never stall the batch longer than PHONE_ASK_WAIT_S.
+        on_timeout, ask = "ask", functools.partial(ask_gate_choice, max_wait_s=config.phone_ask_wait_s())
     while True:
         gate.step(run_state.AWAITING_EMAIL, "Waiting for confirmation email in Gmail...")
         receipt = await gate.wait(context, job["company"], timeout)
@@ -333,6 +361,27 @@ def merged_custom(current: list[dict]) -> list[dict]:
     return fresh + [e for e in current if e.get("pattern") not in patterns]
 
 
+async def run_guarded(context, job: dict, engine: AnswerEngine, ledger: dedup.Ledger, gate: ReceiptGate,
+                      *, use_llm: bool, attended: bool, dog) -> tuple[ApplyResult, str, dict]:
+    """submit_and_confirm under the freeze watchdog: no progress for a while pings the phone, and /retry
+    (before Submit only) or /skip ends the posting cleanly. Used only when phone assist is on."""
+    for attempt in range(2):
+        work = asyncio.ensure_future(submit_and_confirm(context, job, engine, ledger, gate, use_llm=use_llm,
+                                                        attended=attended))
+        verdict = await dog.guard(work, context, job)
+        if verdict == "done":
+            return work.result()
+        if verdict == "retry" and attempt == 0:
+            log("  /retry from the phone: starting the posting again")
+            continue
+        reason, detail = {"skip": ("SKIPPED_FROM_PHONE", "stopped with /skip while it appeared stuck"),
+                          "retry": ("FROZEN", "stuck again after a retry"),
+                          "frozen": ("FROZEN", f"no progress for {dog.stall_s + dog.wait_s:.0f}s and no reply from "
+                                               "the phone")}[verdict]
+        return ApplyResult(MANUAL_REVIEW, reason, detail), "", {}
+    return ApplyResult(MANUAL_REVIEW, "FROZEN", "gave up after a retry"), "", {}
+
+
 def apply_requeued(queue: list[dict], taken: list[dict]) -> list[dict]:
     """Postings Mission Control sent back from the Unblock Queue: pending again. Returns those jobs."""
     by_id = {j.get("id"): j for j in queue}
@@ -446,6 +495,16 @@ async def run(args) -> int:
     if gate:
         log("confirmation gate: each submission waits for its confirmation e-mail in Gmail "
             f"(up to {email_receipt_verifier.POLL_TIMEOUT_S}s) before it is counted")
+    phone = phone_notify.notifier()
+    dog = phone_notify.FreezeWatchdog(phone, stall_s=config.freeze_stall_s())
+    if phone.enabled:
+        def phone_status() -> str:
+            s = run_state.read()
+            job = s.get("job") or {}
+            now = (f"{job.get('company')} — {job.get('title')} ({s.get('step') or 'filling'})" if job else "idle")
+            return f"{ledger.total}/{args.target} applied. This session: {dict(tally) or 'nothing yet'}. Now: {now}."
+        phone.status_provider = phone_status
+        log("phone assist: Discord is on; questions, CAPTCHAs and stalls will ping your phone")
     async with async_playwright() as pw:
         context = await launch_browser(pw, args)
         context.set_default_timeout(15000)
@@ -477,7 +536,10 @@ async def run(args) -> int:
 
                 t0 = time.time()
                 outcome, receipt = "", {}
-                if gate:
+                if gate and phone.enabled:
+                    result, outcome, receipt = await run_guarded(
+                        context, job, engine, ledger, gate, use_llm=use_llm, attended=bool(args.assist), dog=dog)
+                elif gate:
                     result, outcome, receipt = await submit_and_confirm(
                         context, job, engine, ledger, gate, use_llm=use_llm, attended=bool(args.assist))
                 else:
@@ -627,11 +689,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--company", help="company name for --only-url postings not in the queue")
     ap.add_argument("--title", help="role title for --only-url postings not in the queue")
     ap.add_argument("--prefetch", action="store_true", help="cache Greenhouse schemas and exit")
+    ap.add_argument("--test-phone", action="store_true",
+                    help="ping your phone through Discord and echo your reply back (checks the .env setup), then exit")
     args = ap.parse_args(argv)
 
     if args.prefetch:
         prefetch_schemas()
         return 0
+    if args.test_phone:
+        return phone_notify.run_self_test()
 
     email_receipt_verifier.POLL_TIMEOUT_S = (max(30, min(600, args.receipt_timeout)) if args.receipt_timeout
                                              else config.receipt_timeout_s())

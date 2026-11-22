@@ -18,11 +18,12 @@ from playwright.async_api import Page, TimeoutError as PWTimeout
 
 import config
 import essays
+import phone_notify
 import run_state
 from answers import (AI_POLICY, AnswerEngine, Context, Decision, Question, load_custom_answers, pattern_for,
                      remember_answers)
 from ats import assist, otp
-from ats.captcha_solver import detect_and_solve_captcha
+from ats.captcha_solver import detect_and_solve_captcha, notify_phone as captcha_notify
 
 SKIPPED_OPTIONAL = "SKIPPED_OPTIONAL"     # an optional question the profile does not answer: left blank
 FILLED, SUBMITTED_BY_CANDIDATE = "filled", "submitted_by_candidate"     # wait_for_answers outcomes
@@ -72,10 +73,20 @@ class FormState:
     forced: set[str] = field(default_factory=set)         # fields a validation error showed to be required
     learned: list[dict] = field(default_factory=list)     # what the candidate entered, for ApplyResult.learned
     filled: set[str] = field(default_factory=set)         # fields this run put a value into
+    skipped: bool = False                                 # the candidate sent /skip from the phone
 
     def pending(self) -> list[FormField]:
         """Required questions nobody has answered yet."""
         return [f for f in self.unknown_fields if f.key not in self.resolved]
+
+
+def _norm_reply(text: str) -> str:
+    return " ".join(str(text or "").lower().split())
+
+
+def state_phone_filled(adapter) -> set:
+    """Field keys the candidate answered from the phone (already reported back, so not 'answered on laptop')."""
+    return adapter.__dict__.setdefault("_phone_filled", set())
 
 
 class FillError(RuntimeError):
@@ -190,7 +201,7 @@ class BaseAdapter:
     # ---- CAPTCHAs ---------------------------------------------------------------
     CAPTCHA_ATTEMPTS = 2                                   # per page: never loop on a widget that will not clear
 
-    async def captcha_step(self, page: Page, *, manual: bool = False) -> bool:
+    async def captcha_step(self, page: Page, *, manual: bool = False, watch=None) -> bool:
         """A visible CAPTCHA: tick its checkbox in this browser window (ats/captcha_solver.py).
 
         With manual=True the candidate is handed the image puzzle (outlined in purple) and the call
@@ -199,6 +210,8 @@ class BaseAdapter:
         page, so the caller should look at the page again; False when it needs a person, or after
         CAPTCHA_ATTEMPTS tries on this page.
         """
+        if watch is not None and watch.gate and await self._phone_captcha(page, watch):
+            return False                                   # /skip from the phone: the submit loop is ending
         tries = self.__dict__.setdefault("_captcha_tries", {})
         if tries.get(id(page), 0) >= self.CAPTCHA_ATTEMPTS:
             return False
@@ -212,12 +225,32 @@ class BaseAdapter:
             self.__dict__["_captchas_solved"] = self.__dict__.get("_captchas_solved", 0) + 1
             self._captcha_status(f"Solved {self.__dict__['_captchas_solved']} CAPTCHA"
                                  f"{'s' if self.__dict__['_captchas_solved'] != 1 else ''}")
+        if result.method == "skipped":
+            self.__dict__["_phone_skip"] = True
         return result.solved or result.method in ("gone", "navigated")
+
+    async def _phone_captcha(self, page: Page, watch) -> bool:
+        """The submit loop is waiting for you to solve a CAPTCHA: tell the phone once, and end the wait on /skip."""
+        phone = phone_notify.notifier()
+        if not phone.enabled:
+            return False
+        sent = self.__dict__.setdefault("_captcha_notified", set())
+        if id(page) not in sent:
+            sent.add(id(page))
+            await captcha_notify(page, phone)
+        if (await phone.apoll_reply()) == "/skip":
+            self.__dict__["_phone_skip"] = True
+            watch.deadline = 0                             # SubmitWatch.timed_out() then hands it to manual review
+            return True
+        return False
 
     def reset_captchas(self) -> None:
         """A new posting: its own CAPTCHA attempts and count."""
         self.__dict__["_captcha_tries"] = {}
+        self.__dict__["_captcha_notified"] = set()
         self.__dict__["_captchas_solved"] = 0
+        self.__dict__["_phone_skip"] = False
+        self.__dict__["_phone_filled"] = set()
 
     def _captcha_status(self, message: str) -> None:
         """The dashboard's active-job message and CAPTCHA count (run_state.json); never stops a form."""
@@ -306,6 +339,9 @@ class BaseAdapter:
         for f in fields[:8]:
             print(f"      - {f.question.label[:110]}", flush=True)
 
+        phone = phone_notify.notifier()                    # Discord; a no-op unless it is set up in .env
+        asked: set[str] = set()                            # fields the phone was asked about
+        told: set[str] = set()                             # ...and that have been reported back as done
         initial = [await self._entered(page, f, {}) for f in fields]    # a flagged field may hold a bad value
         stable: list[tuple[object, float]] = [(None, 0.0)] * len(fields)
         saved: dict[str, object] = {}
@@ -348,6 +384,11 @@ class BaseAdapter:
                 else:
                     ok = changed and not st["open"] and settled
                 done.append(ok)
+                if ok and f.key in asked and f.key not in told:
+                    told.add(f.key)
+                    if f.key not in state_phone_filled(self):
+                        await asyncio.to_thread(phone.send_message, "Answered on laptop — continuing", None, False,
+                                                advance=False)
                 if ok and f.widget != "file" and saved.get(f.key) != value:
                     saved[f.key] = value
                     self.learn(job, engine, f, value)
@@ -369,15 +410,91 @@ class BaseAdapter:
                     current = -2
                 self._show_step(run_state.WAITING_FOR_ANSWER, f"Waiting for your answer: {label[:120]}",
                                 waiting={"field": label, "remaining": done.count(False), "of": len(fields)})
+                if phone.enabled and fields[target].key not in asked:
+                    asked.add(fields[target].key)
+                    await self._phone_ask(page, phone, job, fields[target])
             try:
                 if await self.confirmed(page):
                     await self._clear_highlight(page)
                     return SUBMITTED_BY_CANDIDATE
             except Exception:                              # noqa: BLE001
                 pass
+            if phone.enabled and current >= 0:             # a reply from the phone, alongside the laptop checks
+                verdict = await self._phone_reply(page, phone, await phone.apoll_reply(), fields[current], job, engine)
+                if verdict == "skip":
+                    await self._clear_highlight(page)
+                    if state is not None:
+                        state.skipped = True
+                    return "skip"
+                if verdict == "retry":
+                    asked.discard(fields[current].key)     # ask again, with a fresh screenshot
+                    current = -2
             await page.wait_for_timeout(250)
         await self._clear_highlight(page)
         return ""
+
+    # ---- the phone (Discord) side of the hand-over --------------------------------------------------
+    async def _phone_ask(self, page: Page, phone, job: dict, f: FormField) -> None:
+        """Post the highlighted question with a screenshot of it. Best effort: never stops the hand-over."""
+        shot = None
+        for target in (page.locator("[data-ia-assist]").first, page):
+            try:
+                shot = await target.screenshot(timeout=3000)
+                break
+            except Exception:                              # noqa: BLE001 - viewport as the fallback
+                continue
+        try:
+            await asyncio.to_thread(phone.ask_question, job.get("company", ""), job.get("title", ""),
+                                    job.get("ats", ""), {"label": f.question.label, "kind": f.question.kind,
+                                                         "options": f.question.options}, shot)
+        except Exception:                                  # noqa: BLE001
+            pass
+
+    async def _phone_reply(self, page: Page, phone, reply: str | None, f: FormField, job: dict,
+                           engine: AnswerEngine | None) -> str:
+        """Act on one message from the phone. "filled", "skip", "retry" or "wait" (keep waiting)."""
+        if reply is None:
+            return "wait"
+        if reply in ("/skip", "/retry"):
+            return reply[1:]
+        q, tell = f.question, lambda text: asyncio.to_thread(phone.send_message, text, None, False, advance=False)
+        if f.widget == "file" or q.kind == "file":
+            await tell("A file cannot be sent from the phone: upload it on the laptop, or send `/skip`.")
+            return "wait"
+        options = [o for o in q.options if str(o).strip()]
+        if q.kind in ("multiselect", "checkbox_group") and options:
+            value = phone_notify.resolve_multi_reply(reply, options)
+        elif q.kind == "checkbox" and not options:
+            value = True if _norm_reply(reply) in ("yes", "y", "true", "1", "ok", "agree", "i agree") else None
+        elif options:
+            value = phone_notify.resolve_option_reply(reply, options)
+        else:
+            value = reply.strip()[:2000] or None
+        if value is None:
+            await tell(f"Didn't match options 1-{len(options)}; reply with a number or /skip" if options
+                       else "I did not understand that for this field; reply again, or send `/skip`.")
+            return "wait"
+        try:
+            await self.fill(page, f, value, engine.p if engine else {})
+            await page.wait_for_timeout(250)
+            try:                                           # the events a person's typing and clicking away would fire
+                await page.evaluate("""(sel) => { const root = document.querySelector(sel); if (!root) return;
+                    const el = root.matches('input, textarea, select') ? root : root.querySelector('input, textarea, select');
+                    if (el) ['input', 'change', 'blur'].forEach(t => el.dispatchEvent(new Event(t, {bubbles: true}))); }""",
+                                    f.sel)
+            except Exception:                              # noqa: BLE001
+                pass
+            got = await self._entered(page, f, {})
+        except Exception as exc:                           # noqa: BLE001 - widget quirks
+            await tell(f"Could not fill that field ({type(exc).__name__}). Try another answer, or do it on the laptop.")
+            return "wait"
+        if not got:
+            await tell(f"The form did not accept `{str(value)[:60]}`. Try another answer, or do it on the laptop.")
+            return "wait"
+        self.__dict__.setdefault("_phone_filled", set()).add(f.key)
+        shown = ", ".join(value) if isinstance(value, list) else str(value)
+        await tell(f"Filled '{shown[:80]}' — continuing")
+        return "filled"
 
     async def _entered(self, page: Page, f: FormField, st: dict):
         """What the field holds right now (None when empty)."""
@@ -594,7 +711,7 @@ class BaseAdapter:
             return ApplyResult(SUBMITTED, "completed by the candidate in the browser",
                                str(await self.confirmed(page) or ""), answers, unknowns, shot_path, state.learned)
         if blocked:
-            return ApplyResult(MANUAL_REVIEW, "UNANSWERED_REQUIRED",
+            return ApplyResult(MANUAL_REVIEW, "SKIPPED_FROM_PHONE" if state.skipped else "UNANSWERED_REQUIRED",
                                " | ".join(f.question.label[:90] for f in state.pending()[:8]),
                                answers, unknowns, shot_path, state.learned)
         # Safety net: never click Submit over an empty required field or an error already on the page.
@@ -609,7 +726,7 @@ class BaseAdapter:
                                    shot_path, state.learned)
             if outcome != FILLED:
                 await _screenshot(page, shot_path)
-                return ApplyResult(MANUAL_REVIEW, "PRESUBMIT_CHECK",
+                return ApplyResult(MANUAL_REVIEW, "SKIPPED_FROM_PHONE" if state.skipped else "PRESUBMIT_CHECK",
                                    "required and still empty, or showing an error: "
                                    + " | ".join(l[:90] for l in labels[:8]),
                                    state.answers, state.unknowns, shot_path, state.learned)
@@ -620,6 +737,9 @@ class BaseAdapter:
                                answers=answers, screenshot=shot_path)
 
         await self.captcha_step(page, manual=attended)      # a checkbox CAPTCHA already on the form
+        if self.__dict__.get("_phone_skip"):
+            return ApplyResult(MANUAL_REVIEW, "SKIPPED_FROM_PHONE", "CAPTCHA skipped from the phone",
+                               state.answers, state.unknowns, shot_path, state.learned)
         for attempt in range(4):
             await self.before_submit(page)
             status, reason, detail = await self.submit(page)
@@ -627,6 +747,8 @@ class BaseAdapter:
             if reason != "VALIDATION_ERROR" or attempt == 3 or not await self.recover_from_validation(
                     page, job, engine, ctx, text, state, attended, detail):
                 break
+        if (state.skipped or self.__dict__.get("_phone_skip")) and status != SUBMITTED:
+            reason = "SKIPPED_FROM_PHONE"                   # /skip on a question raised by the site's own error
         if status != SUBMITTED:
             await _screenshot(page, shot_path)
         return ApplyResult(status, reason, detail, state.answers, state.unknowns, shot_path, state.learned)

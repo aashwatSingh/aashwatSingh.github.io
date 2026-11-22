@@ -65,6 +65,25 @@ def receipt_timeout_s() -> int:
     return max(30, min(600, value))
 
 
+def _env_seconds(name: str, default: int, low: int, high: int) -> int:
+    try:
+        value = int(float(os.environ.get(name, default)))
+    except ValueError:
+        value = default
+    return max(low, min(high, value))
+
+
+def phone_ask_wait_s() -> int:
+    """With phone assist on, how long a missing-receipt question waits for your reply before the posting is
+    flagged Unverified and the batch moves on. PHONE_ASK_WAIT_S in .env (60-3600, default 600)."""
+    return _env_seconds("PHONE_ASK_WAIT_S", 600, 60, 3600)
+
+
+def freeze_stall_s() -> int:
+    """No progress for this long = "appears stuck" on the phone. FREEZE_STALL_S in .env (30-1800, default 120)."""
+    return _env_seconds("FREEZE_STALL_S", 120, 30, 1800)
+
+
 def receipt_on_timeout() -> str:
     """'queue' (default): flag Unverified, add to the Unblock Queue and move on.
     'ask': pause the batch and ask (terminal or Mission Control) what to do. RECEIPT_ON_TIMEOUT in .env."""

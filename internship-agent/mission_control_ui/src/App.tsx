@@ -73,8 +73,13 @@ export default function App() {
     <main>
       <header>
         <h1>Mission Control</h1>
-        <span className={`small ${offline ? "bad-text" : "dim"}`}>
-          {offline ? "Server not reachable: showing the last view" : `Updated ${state.updated || "just now"}`}
+        <span className="small dim">
+          <span className={`phone-badge ${state.phone.connected ? "on" : state.phone.enabled ? "warn" : "off"}`}>
+            Phone Assist: {state.phone.label}
+          </span>{" "}
+          <span className={offline ? "bad-text" : ""}>
+            {offline ? "Server not reachable: showing the last view" : `Updated ${state.updated || "just now"}`}
+          </span>
         </span>
       </header>
       {notice && (

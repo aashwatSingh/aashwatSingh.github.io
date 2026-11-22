@@ -89,6 +89,7 @@ export interface State {
   unconfirmed: boolean;
   waiting: Waiting | null;
   captchas: number;
+  phone: { enabled: boolean; connected: boolean; label: string; token: string; channel: string; user: string };
   steps: Step[];
   choices: { key: string; label: string }[];
   tracker: Tracker;

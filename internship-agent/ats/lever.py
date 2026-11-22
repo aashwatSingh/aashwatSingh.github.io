@@ -169,7 +169,7 @@ class LeverAdapter(BaseAdapter):
                     return done
                 continue
             if await visible_captcha(page):
-                if await self.captcha_step(page):
+                if await self.captcha_step(page, watch=watch):
                     continue
                 done = watch.human_gate("CAPTCHA", "hCaptcha challenge shown on submit")
                 if done:

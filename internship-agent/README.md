@@ -160,6 +160,45 @@ Set `RECEIPT_ON_TIMEOUT=ask` in `.env` to pause the batch instead and choose in 
 Mission Control: wait another 60 s, check the browser and retry, or log it as unconfirmed.
 A `--dry-run` never submits, so the gate does not apply.
 
+### Phone assist (Discord)
+
+When a run needs you (a question the profile cannot answer, a CAPTCHA, a missing confirmation
+e-mail, or a page that has made no progress for 120 s) it posts to a private Discord channel and
+pings you, with the posting, the question, numbered choices and a screenshot. Reply from the
+Discord app: the answer is filled in, saved to `custom_answers.json`, and the run carries on.
+Whichever comes first wins: answering on the laptop works exactly as before, and the phone is told
+"Answered on laptop — continuing". It uses only Discord's REST API over outgoing HTTPS (`requests`),
+polled at most every 2 s: no extra packages, no gateway connection, no open port.
+
+Set it up once (about five minutes):
+
+1. https://discord.com/developers/applications -> New Application -> **Bot** -> Reset Token (copy it).
+   On the same page switch on **Message Content Intent**, or the bot is sent empty message text.
+2. Create a private server or channel just for this. Invite the bot with the link from
+   OAuth2 -> URL Generator (scope `bot`; permissions View Channel, Send Messages, Read Message
+   History, Attach Files). In Discord: Settings -> Advanced -> Developer Mode, then right-click the
+   channel and yourself -> Copy ID.
+3. Add to `.env` (git-ignored; never share it):
+```
+DISCORD_BOT_TOKEN=...
+DISCORD_CHANNEL_ID=...
+DISCORD_USER_ID=...
+```
+4. `python agent_runner.py --test-phone` pings the channel and echoes your reply back within 30 s.
+   Mission Control's header then shows **Phone Assist: Connected**; without all three settings it
+   shows **Off** and nothing changes.
+
+Only messages from `DISCORD_USER_ID` in `DISCORD_CHANNEL_ID` are ever read, and a message sent before
+a prompt can never answer it. Reply with a number or text for choices (`1, 3` for several), or:
+`/status` (where the run is), `/pause` and `/resume` (hold the queue between applications), `/skip`
+(give up on this posting: manual review as `SKIPPED_FROM_PHONE`), `/retry`. `!skip` works too.
+A reply that matches none of a dropdown's choices is answered with "Didn't match options 1-N" and
+the run keeps waiting. A file upload cannot be sent from the phone. The missing-receipt question
+(1 wait 60 s, 2 retry in the browser, 3 skip as unconfirmed) also goes to the phone, and gives up
+(flags it Unverified, moves on) after `PHONE_ASK_WAIT_S` seconds, default 600. `/retry` on a frozen
+page restarts the posting only if Submit was not clicked yet; after Submit a retry could apply
+twice, so it becomes a skip. `FREEZE_STALL_S` (default 120) sets how long a stall must last.
+
 ### Mission Control
 
 Double-click **`Launch_Mission_Control.bat`** (or run it from any terminal). It finds Python,

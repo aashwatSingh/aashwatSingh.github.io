@@ -262,6 +262,8 @@ class WorkdayAdapter(BaseAdapter):
         if errors:
             return MANUAL_REVIEW, "WORKDAY_REVIEW_ERRORS", f"Review shows: {errors[:200]}"
         await self.captcha_step(page, manual=bool(self.human_wait_s))     # a CAPTCHA on the Review page
+        if self.__dict__.get("_phone_skip"):
+            return MANUAL_REVIEW, "SKIPPED_FROM_PHONE", "CAPTCHA skipped from the phone"
         await self.before_submit(page)                         # inbox position, for the confirmation e-mail
         review_step = await self.current_step(page)
         button = page.locator(AID.format(submit)).first
@@ -808,6 +810,10 @@ class WorkdayAdapter(BaseAdapter):
                         state.resolved.update(f.key for f in page_unknowns)
                         del state.unknown_fields[before:]
                         continue
+                    if state.skipped:                          # /skip from the phone: leave the draft, go to review
+                        await _screenshot(page, shot_path)
+                        return ApplyResult(MANUAL_REVIEW, "SKIPPED_FROM_PHONE", f"[{step}] {problem}"[:300],
+                                           state.answers, state.unknowns, shot_path, learned + state.learned)
                 if not page_unknowns:
                     await _screenshot(page, shot_path)         # what was filled on this page, for the audit trail
                     signature = await self._signature(page)

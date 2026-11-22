@@ -33,6 +33,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import config
+import phone_notify
 import run_state
 import unblock
 from fileutil import read_json
@@ -250,6 +251,7 @@ def build_state() -> dict:
         # A required question the profile cannot answer is highlighted in the browser; the runner
         # continues by itself once it is filled and focus has left it.
         "waiting": (state.get("waiting") or {}) if step == run_state.WAITING_FOR_ANSWER else None,
+        "phone": phone_notify.dashboard_status(),               # Phone Assist: Connected / Off (secrets masked)
         "captchas": int(state.get("captchas") or 0),            # CAPTCHAs cleared on this posting (the message names the current one)
         "steps": steps,
         "choices": [{"key": k, "label": v} for k, v in run_state.CHOICES.items()],

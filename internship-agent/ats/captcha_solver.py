@@ -28,6 +28,8 @@ from dataclasses import dataclass
 
 from playwright.async_api import Page
 
+import phone_notify
+
 PROBE_TIMEOUT_S = 0.5              # every DOM / frame access is capped at this
 CHECKBOX_WAIT_S = 8.0
 POLL_S = 0.4
@@ -190,11 +192,14 @@ async def _click_checkbox(page: Page, fam: dict, fr: dict) -> bool:
         return False
 
 
-async def _wait_for_solution(page: Page, seconds: float, interval: float) -> tuple[bool, str]:
-    """(solved, why-it-stopped). Stops when solved, when no widget is left, or on timeout / navigation."""
+async def _wait_for_solution(page: Page, seconds: float, interval: float, abort=None) -> tuple[bool, str]:
+    """(solved, why-it-stopped). Stops when solved, when no widget is left, on timeout / navigation, or
+    when abort() (an async callable, e.g. "/skip" from the phone) returns True."""
     deadline = time.monotonic() + seconds
     start_url = page.url
     while time.monotonic() < deadline:
+        if abort is not None and await abort():
+            return False, "skipped"
         found = await _probe(page)
         if page.is_closed() or page.url != start_url:
             return False, "navigated"
@@ -204,6 +209,22 @@ async def _wait_for_solution(page: Page, seconds: float, interval: float) -> tup
             return False, "gone"
         await asyncio.sleep(interval)
     return False, "timeout"
+
+
+async def notify_phone(page: Page, phone) -> None:
+    """Screenshot + "CAPTCHA needs attention" on the phone; replies after this can race the browser. Best effort."""
+    try:
+        import run_state
+        job = run_state.read().get("job") or {}
+        who = f"{job.get('company', 'this posting')} ({job.get('title', '')})".replace(" ()", "")
+        try:
+            shot = await page.screenshot(timeout=3000)
+        except Exception:                                  # noqa: BLE001
+            shot = None
+        await asyncio.to_thread(phone.ask_choice, f"**🧩 CAPTCHA needs attention** on {who}. "
+                                "Solve it on the laptop, or reply `/skip`", shot)
+    except Exception:                                      # noqa: BLE001 - never stops the hand-over
+        pass
 
 
 async def detect_and_solve_captcha(page: Page, *, timeout_s: float = 45, allow_manual_fallback: bool = True,
@@ -260,8 +281,15 @@ async def detect_and_solve_captcha(page: Page, *, timeout_s: float = 45, allow_m
     print(f"\a[ACTION REQUIRED] Solve the {result.kind} CAPTCHA in the browser window "
           f"(waiting up to {int(manual_timeout_s)}s; the form continues by itself)", flush=True)
     say("Waiting for you to solve the CAPTCHA")
+    phone = phone_notify.notifier()
+    if phone.enabled:
+        await notify_phone(page, phone)
+
+    async def skipped() -> bool:
+        return (await phone.apoll_reply()) == "/skip"
     try:
-        solved, why = await _wait_for_solution(page, manual_timeout_s, MANUAL_POLL_S)
+        solved, why = await _wait_for_solution(page, manual_timeout_s, MANUAL_POLL_S,
+                                               abort=skipped if phone.enabled else None)
     finally:
         try:
             await page.evaluate(CLEAR_JS)
@@ -270,6 +298,9 @@ async def detect_and_solve_captcha(page: Page, *, timeout_s: float = 45, allow_m
     if solved:
         result.solved, result.method = True, "manual"
         say(f"Solved {result.kind} (manual)")
+    elif why == "skipped":
+        result.method, result.error = "skipped", "skipped from the phone"
+        say("CAPTCHA skipped from the phone")
     elif why in ("gone", "navigated"):
         result.method = why                                # not a token, but the page has moved on: callers re-check it
     else:
