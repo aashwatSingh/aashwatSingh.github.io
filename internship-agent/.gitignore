@@ -9,6 +9,8 @@ manual_review_queue.csv
 unconfirmed_applications.csv
 custom_answers.json
 custom_answers.backup.json
+workday_accounts.json
+workday_accounts.backup.json
 *.tmp
 .env
 

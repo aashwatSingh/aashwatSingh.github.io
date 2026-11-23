@@ -13,9 +13,11 @@ pages. That code follows the same field convention and is written to fail safe:
   no confirmation follows the click, blitz mode rings and waits for you; otherwise the posting goes
   to manual review with the draft saved in your Workday candidate account. --dry-run always
   stops at Review.
-* It never creates an account unless you pass --workday-create-accounts.
-* It tries your portal password at most once per Workday site per run, so a wrong password
-  cannot lock an account through repetition.
+* Sign-in is ats/workday_auth.py: the password is WORKDAY_PASSWORD in .env only, Sign In is clicked at
+  most once per site (and never again after a failure, even in a later run: workday_accounts.json
+  remembers each tenant), and a refused sign-in is followed by Create Account, not a retry. An
+  account that exists with a different password is handed to you (and Discord) instead of guessed at.
+  --workday-manual-sign-in keeps the old behaviour: it never types a password.
 * Any page it cannot complete is handed to you (blitz mode) or sent to manual review.
 * It only touches inputs inside `formField-*` wrappers, so the hidden honeypot input Workday
   places on its pages is never filled.
@@ -34,6 +36,7 @@ from playwright.async_api import Page, TimeoutError as PWTimeout
 import config
 from answers import Decision, Question, school_names
 from urls import host_matches
+from ats import workday_auth
 from ats.base import (CLOSED, DRY_RUN_OK, FILLED, MANUAL_REVIEW, SUBMITTED, SUBMITTED_BY_CANDIDATE, ApplyResult,
                       BaseAdapter, FormField, FormState, _screenshot, visible_captcha)
 
@@ -125,9 +128,10 @@ def step_name(raw: str) -> str:
 class WorkdayAdapter(BaseAdapter):
     name = "Workday"
     timeout_s = 900                    # a multi-page wizard, far longer than a single-page form
-    create_accounts = False            # --workday-create-accounts
-    try_sign_in = True                 # one attempt per site per run
-    _sign_in_failed: set[str] = set()  # hosts where the portal password was rejected this run
+    create_accounts = False            # --workday-create-accounts: kept for old command lines; ats/workday_auth.py now
+                                       # creates the account itself after one refused sign-in
+    try_sign_in = True                 # False with --workday-manual-sign-in: never type a password
+    _sign_in_failed: set[str] = set()  # unused since sign-in moved to ats/workday_auth.py
 
     @staticmethod
     def matches(url: str) -> bool:
@@ -618,15 +622,17 @@ class WorkdayAdapter(BaseAdapter):
             pass
 
     # ---- sign in ------------------------------------------------------------------
-    async def _authenticate(self, page: Page, profile: dict, host: str, dry_run: bool) -> ApplyResult | None:
-        """Get past 'Create Account/Sign In'. None when signed in, else the result to return."""
+    async def _authenticate(self, page: Page, profile: dict, host: str, dry_run: bool,
+                            job: dict | None = None) -> ApplyResult | None:
+        """Get past 'Create Account/Sign In'. None when signed in, else the result to return.
+
+        The typing is ats/workday_auth.py: at most one Sign In click per tenant, a per-tenant account
+        registry (workday_accounts.json), Create Account instead of a second try, and a clean
+        hand-over to you / Discord when an account exists that we cannot sign in to. The password
+        comes only from WORKDAY_PASSWORD in .env."""
         step = await self.current_step(page)
         if step and not AUTH_STEP.search(step):
             return None                                        # already signed in (saved browser profile)
-        portal = profile.get("portal") or {}
-        user = portal.get("username") or profile["identity"]["email"]
-        passwords = [x for x in (portal.get("passwords") or [portal.get("password")]) if x]
-        password = passwords[0] if passwords else ""
         try:                                                   # the step bar appears before the sign-in widgets
             await page.wait_for_selector(f'{AID.format("SignInWithEmailButton")}, {AID.format("email")}',
                                          state="visible", timeout=15000)
@@ -646,53 +652,15 @@ class WorkdayAdapter(BaseAdapter):
         if not self.matches(page.url):                         # never type a password off Workday's own domains
             return ApplyResult(MANUAL_REVIEW, "WORKDAY_LOGIN",
                                f"sign-in page is not on a Workday domain ({urlparse(page.url).netloc[:60]})")
-        if not self.try_sign_in or not password or host in self._sign_in_failed:
+        if not self.try_sign_in:                               # --workday-manual-sign-in: you sign in yourself
             return await human("WORKDAY_LOGIN", f"Sign in to {host} in the browser window")
 
-        if await self._visible(page, "SignInWithEmailButton"):
-            await self._click(page, "SignInWithEmailButton")
-            await page.wait_for_timeout(1500)
-        if not await self._visible(page, "signInSubmitButton") and await self._visible(page, "signInLink"):
-            await self._click(page, "signInLink")              # landed on the create-account form
-            await page.wait_for_timeout(1500)
-        if not await self._visible(page, "email") or not await self._visible(page, "signInSubmitButton"):
-            return await human("WORKDAY_LOGIN", f"Sign in to {host} in the browser window (unrecognised sign-in page)")
-        for attempt in passwords[:2]:                          # at most two tries per site per run
-            if not self.matches(page.url):
-                break
-            await page.fill(AID.format("email"), user)
-            await page.fill(AID.format("password"), attempt)
-            clicked_at = time.time()
-            await self._click(page, "signInSubmitButton")
-            moved = await self._wait_step_change(page, step, 12)
-            if not moved and await self.code_step(page, clicked_at) == "entered":   # e-mailed sign-in code
-                moved = await self._wait_step_change(page, step, 20)
-            if moved and not AUTH_STEP.search(moved):
-                return None
-        self._sign_in_failed.add(host)                         # never retry this site in this run
-        error = await self._errors(page)
-
-        if self.create_accounts and self.matches(page.url) and await self._visible(page, "createAccountLink"):
-            await self._click(page, "createAccountLink")
-            try:
-                await page.wait_for_selector(AID.format("verifyPassword"), state="visible", timeout=8000)
-            except PWTimeout:
-                return await human("WORKDAY_ACCOUNT", f"Create your account on {host} in the browser window")
-            await page.fill(AID.format("email"), user)
-            await page.fill(AID.format("password"), password)
-            if await self._visible(page, "verifyPassword"):
-                await page.fill(AID.format("verifyPassword"), password)
-            if await self._visible(page, "createAccountCheckbox"):
-                await page.locator(AID.format("createAccountCheckbox")).first.check(force=True)
-            await self._click(page, "createAccountSubmitButton")
-            moved = await self._wait_step_change(page, step, 15)
-            if moved and not AUTH_STEP.search(moved):
-                return None
-            note = await self._errors(page) or "the site may have e-mailed a verification link"
-            return await human("WORKDAY_ACCOUNT", f"Finish creating / verifying your account on {host}: {note[:120]}")
-        return await human("WORKDAY_LOGIN",
-                           f"Sign in to {host} in the browser window (portal password was not accepted"
-                           + (f": {error[:80]}" if error else "") + "; no account was created)")
+        outcome = await workday_auth.ensure_workday_signed_in(
+            page, profile, allow_manual=bool(self.human_wait_s), company=(job or {}).get("company", ""),
+            code_step=self.code_step, manual_wait_s=max(self.human_wait_s, 240))
+        if outcome.ok:
+            return None
+        return ApplyResult(MANUAL_REVIEW, outcome.reason, outcome.detail)
 
     async def _enter_wizard(self, page: Page) -> bool:
         """From the posting: Apply, then 'Autofill with Resume' (else 'Apply Manually'). True once a step shows."""
@@ -757,7 +725,7 @@ class WorkdayAdapter(BaseAdapter):
             await _screenshot(page, shot_path)
             return ApplyResult(MANUAL_REVIEW, "FORM_NOT_FOUND", "the application wizard did not open", screenshot=shot_path)
 
-        stopped = await self._authenticate(page, engine.p, host, dry_run)
+        stopped = await self._authenticate(page, engine.p, host, dry_run, job)
         if stopped:
             await _screenshot(page, shot_path)
             stopped.screenshot = shot_path

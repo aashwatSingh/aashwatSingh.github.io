@@ -438,11 +438,30 @@ Information, My Experience (adds your two most recent jobs when the parser finds
 Questions pages, Voluntary Disclosures, Self Identify, and stop at Review. Other tenants use the same page
 types with their own questions, so expect some to stop for an answer. On a live run it clicks the final Submit
 on Review once that page shows no error (the click itself has only been exercised on a mock wizard, not a
-live tenant); in `--dry-run` it stops at Review. It tries at most two of `portal.passwords` per site per run, and creates accounts only with
-the flag. Stepping through pages saves a draft in your Workday account even in `--dry-run`; pre-filled
+live tenant); in `--dry-run` it stops at Review. Stepping through pages saves a draft in your Workday account even in `--dry-run`; pre-filled
 dropdowns in a saved draft are re-checked against your profile. Workday sometimes answers back-to-back
 sessions with a "Something went wrong" page: the posting goes to manual review with that note and works on a
 later run.
+
+### Workday sign-in never loops (`ats/workday_auth.py`)
+
+Workday locks an account after a few wrong passwords, and its "wrong email address or password or your account
+might be locked" banner looks the same for "no account", "other password" and "locked". So sign-in is one click,
+once, per site:
+
+* Put one strong password in `.env` as `WORKDAY_PASSWORD=...` (8+ characters with upper, lower, digit and symbol).
+  It is the only place the password is read from, and it is never written to a file, a log or a screenshot. If it
+  is missing or weak the runner does not submit it: you sign in yourself.
+* Unknown site: Sign In once. If that is refused, **Create Account** (same e-mail, same password, terms box) instead
+  of trying again. If Workday wants the e-mail verified, the runner reads the link from your Gmail
+  (`GMAIL_APP_PASSWORD`, same as the Greenhouse code), opens it in a temporary tab, and signs in once.
+* "Account already exists" means an account is there with a password the runner does not have. It stops typing,
+  rings the bell, sends Discord a screenshot ("Workday sign-in needs you on ... Sign in / reset password in Chrome,
+  or reply `!skip`"), and waits for you. A run with no one at the keyboard sends the posting to manual review.
+* Each site is remembered in `workday_accounts.json` (`verified`, `needs_verify`, `manual_auth`, `locked`; the
+  e-mail and a time, never a password). `manual_auth` and `locked` sites are never typed into again. The file and
+  its `.backup` copy are git-ignored; delete a site's entry to let the runner try it afresh.
+* `--workday-manual-sign-in` still means: never type a password, wait for you.
 
 ## Files it writes
 
@@ -451,6 +470,7 @@ later run.
 | `job_queue.json` | every listing seen, with status (`pending`, `applied`, `manual_review`, `duplicate`, `skipped_ineligible`, `closed`) |
 | `applied_tracker.csv` | `Timestamp, Company, Role, Location, ATS_Platform, URL, Status` — tracker rows plus new applications |
 | `internship_tracker.xlsx` | one row appended per submitted application (a timestamped backup is taken before each live run) |
+| `workday_accounts.json` | per Workday site: `verified` / `needs_verify` / `manual_auth` / `locked`, the e-mail, a time. Never a password (git-ignored, with a `.backup` copy) |
 | `manual_review_queue.csv` | postings to finish by hand, with the reason and unanswered questions |
 | `logs/` | runner log, per-application answer logs, screenshots |
 
