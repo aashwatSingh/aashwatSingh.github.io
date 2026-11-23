@@ -65,6 +65,22 @@ def update(job: dict | None, step: str = "", message: str = "", **extra) -> dict
     return state
 
 
+def waiting_for_you(message: str) -> None:
+    """A person is being waited on (CAPTCHA, a page to finish, a sign-in): say so in the run state.
+
+    The message starts with "Waiting for you", which FreezeWatchdog.exempt() treats as "a human is in
+    charge": the watchdog then neither alerts about a stall nor polls Discord for /retry and /skip,
+    which would steal the replies that hcaptcha_grid, wait_for_answers or workday_auth are waiting for.
+    The step, the posting and the OTP / CAPTCHA counts are kept as they were. Never raises."""
+    try:
+        state = read()
+        text = message if message.startswith(("Waiting for you", "Waiting for your")) else f"Waiting for you: {message}"
+        update(state.get("job"), state.get("step") or "", text,
+               **{k: state[k] for k in ("otp", "captchas") if k in state})
+    except Exception:                                      # noqa: BLE001 - a dashboard file must not stop a wait
+        pass
+
+
 def read() -> dict:
     try:
         data = json.loads(config.RUN_STATE_JSON.read_text(encoding="utf-8"))

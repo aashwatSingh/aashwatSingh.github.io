@@ -34,6 +34,7 @@ from urllib.parse import urlparse
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
 import config
+import run_state
 from answers import Decision, Question, school_names
 from urls import host_matches
 from ats import workday_auth
@@ -446,6 +447,29 @@ class WorkdayAdapter(BaseAdapter):
             except Exception:                              # noqa: BLE001
                 return None
             return None if re.fullmatch(r"select( one)?", shown, re.I) else shown or None
+        if f.widget == "search":                           # a picked school / skill shows as a selectedItem chip
+            try:
+                chips = await page.locator(f'{f.sel} [data-automation-id="selectedItem"]').evaluate_all(
+                    r"""els => els.filter(e => e.offsetParent !== null)
+                              .map(e => (e.innerText || '').replace(/\s+/g, ' ').trim()).filter(Boolean)""")
+            except Exception:                              # noqa: BLE001
+                return None
+            return (chips[0] if len(chips) == 1 else chips) or None
+        if f.widget == "date":                             # month / day / year boxes -> "YYYY-MM-DD"
+            try:
+                parts = await page.evaluate(
+                    r"""(sel) => { const get = id => { const e = document.querySelector(`${sel} [data-automation-id="${id}"]`);
+                                                       return e ? String(e.value || '').trim() : null; };
+                                   return [get('dateSectionYear-input'), get('dateSectionMonth-input'), get('dateSectionDay-input')]; }""",
+                    f.sel)
+            except Exception:                              # noqa: BLE001
+                return None
+            year, month, day = parts
+            shown = [p for p in parts if p is not None]
+            if not shown or not all(shown) or (year is not None and not re.fullmatch(r"\d{4}", year)):
+                return None                                # a box is still empty: nothing was chosen yet
+            pad = lambda p: p.zfill(2)                     # noqa: E731 - "6" and "06" are the same month
+            return "-".join(x for x in (year, pad(month) if month else None, pad(day) if day else None) if x)
         return await super().read_value(page, f)
 
     async def fill(self, page: Page, f: FormField, value, profile: dict) -> None:
@@ -644,6 +668,7 @@ class WorkdayAdapter(BaseAdapter):
                 return ApplyResult(MANUAL_REVIEW, reason, what)
             wait = max(self.human_wait_s, 240)
             print(f"\a[ACTION REQUIRED] {what} (waiting up to {wait}s)", flush=True)
+            run_state.waiting_for_you(what)
             moved = await self._wait_step_change(page, step, wait)
             if moved and not AUTH_STEP.search(moved):
                 return None
@@ -816,6 +841,7 @@ class WorkdayAdapter(BaseAdapter):
             wait = max(self.human_wait_s, 240)
             print(f"\a[ACTION REQUIRED] Finish the '{step}' page in the browser and click Save and Continue "
                   f"(waiting up to {wait}s): {problem[:160]}", flush=True)
+            run_state.waiting_for_you(f"Finish the '{step}' page and click Save and Continue")
             deadline, seen = time.monotonic() + wait, {}
             moved = None
             while time.monotonic() < deadline and not moved:
@@ -853,6 +879,7 @@ class WorkdayAdapter(BaseAdapter):
         wait = max(self.human_wait_s, 240)
         print(f"\a[ACTION REQUIRED] Workday was not submitted automatically ({detail[:140]}). Check the "
               f"application in the browser and click Submit (waiting up to {wait}s)", flush=True)
+        run_state.waiting_for_you("Check the application in the browser and click Submit")
         deadline = time.monotonic() + wait
         while time.monotonic() < deadline:
             await page.wait_for_timeout(800)

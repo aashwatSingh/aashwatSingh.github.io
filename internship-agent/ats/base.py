@@ -447,6 +447,11 @@ class BaseAdapter:
     # ---- the phone (Discord) side of the hand-over --------------------------------------------------
     async def _phone_ask(self, page: Page, phone, job: dict, f: FormField) -> None:
         """Post the highlighted question with a screenshot of it. Best effort: never stops the hand-over."""
+        if f.extra.get("lazy_options") and not f.question.options:
+            try:                                           # a dropdown that loads its list on open (presubmit_blockers,
+                f.question.options = list(await self.read_options(page, f))   # flagged_fields): numbered choices
+            except Exception:                              # noqa: BLE001 - widget quirks: ask without a list
+                pass
         shot = None
         for target in (page.locator("[data-ia-assist]").first, page):
             try:
@@ -793,6 +798,7 @@ class SubmitWatch:
                     else "Solve CAPTCHA in browser window and click Submit")
             print(f"\a[ACTION REQUIRED] {what}... (waiting up to {wait}s; the form is already filled)",
                   flush=True)
+            run_state.waiting_for_you(what)                # FreezeWatchdog stays out of a human wait
         return None
 
     def timed_out(self) -> tuple[str, str, str]:

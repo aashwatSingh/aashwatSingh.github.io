@@ -171,6 +171,11 @@ class LeverAdapter(BaseAdapter):
             return Decision("skip", rule="lever-current-company")
         return None
 
+    def reset_captchas(self) -> None:
+        """A new posting: also forget the per-page parser state (a closed page's id can be handed out again)."""
+        super().reset_captchas()
+        self.__dict__["_lever_pages"] = {}
+
     # ---- the resume parser ------------------------------------------------------------------------
     def _st(self, page: Page, reset: bool = False) -> dict:
         """Per-page state: the parse watch and the values we intend for the fields the parser also writes."""
@@ -321,7 +326,10 @@ class LeverAdapter(BaseAdapter):
 
     async def fill(self, page: Page, f: FormField, value, profile: dict) -> None:
         if f.widget == "file":
-            st = self._st(page, reset=True)                # a new application form: forget the last one
+            if self._st(page)["watch"] is not None:        # a second upload (Cover Letter): the parse watch and the
+                await page.set_input_files(f"{f.sel} input[type=file]", value)   # intended values stay as they are
+                return
+            st = self._st(page, reset=True)                # the first upload of this application form
             st["profile"], st["watch"] = profile, ParseWatch(page)
             await page.set_input_files(f"{f.sel} input[type=file]", value)
             await self._await_parse(page, st)

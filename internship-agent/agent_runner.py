@@ -335,32 +335,40 @@ async def submit_and_confirm(context, job: dict, engine: AnswerEngine, ledger: d
     timeout = email_receipt_verifier.POLL_TIMEOUT_S
     gate.start(job)
     await gate.snapshot(context)                           # baseline; adapters refine it right before Submit
-    result = await apply(context, job, engine, ledger, dry_run=False, use_llm=use_llm, keep_open=True)
-    while True:
-        if result.status != SUBMITTED:
-            return result, "", {}
-        outcome, receipt = await confirm(gate, context, job, attended=attended, timeout=timeout)
-        if outcome != RETRY:
-            await _close_page(result.page)
-            return result, outcome, receipt
-        proof = None
-        try:
-            if adapter is not None and result.page is not None and not result.page.is_closed():
-                await result.page.bring_to_front()
-                proof = await adapter.confirmed(result.page)
-        except Exception:                                          # noqa: BLE001 - tab gone or navigating
-            proof = None
-        if proof:
-            log(f"  the browser shows the confirmation ({str(proof)[:80]}): not submitting again; "
-                f"checking Gmail for another {int(email_receipt_verifier.EXTRA_WAIT_S)}s")
-            timeout = email_receipt_verifier.EXTRA_WAIT_S
-            continue
-        log("  no confirmation in the browser: opening the form again")
-        await _close_page(result.page)
-        gate.start(job)
-        await gate.snapshot(context)
-        timeout = email_receipt_verifier.POLL_TIMEOUT_S
+    result = None
+    try:
         result = await apply(context, job, engine, ledger, dry_run=False, use_llm=use_llm, keep_open=True)
+        while True:
+            if result.status != SUBMITTED:
+                return result, "", {}
+            outcome, receipt = await confirm(gate, context, job, attended=attended, timeout=timeout)
+            if outcome != RETRY:
+                await _close_page(result.page)
+                return result, outcome, receipt
+            proof = None
+            try:
+                if adapter is not None and result.page is not None and not result.page.is_closed():
+                    await result.page.bring_to_front()
+                    proof = await adapter.confirmed(result.page)
+            except Exception:                                      # noqa: BLE001 - tab gone or navigating
+                proof = None
+            if proof:
+                log(f"  the browser shows the confirmation ({str(proof)[:80]}): not submitting again; "
+                    f"checking Gmail for another {int(email_receipt_verifier.EXTRA_WAIT_S)}s")
+                timeout = email_receipt_verifier.EXTRA_WAIT_S
+                continue
+            log("  no confirmation in the browser: opening the form again")
+            await _close_page(result.page)
+            result = None                                          # closed: nothing for the finally to close
+            gate.start(job)
+            await gate.snapshot(context)
+            timeout = email_receipt_verifier.POLL_TIMEOUT_S
+            result = await apply(context, job, engine, ledger, dry_run=False, use_llm=use_llm, keep_open=True)
+    finally:
+        # Cancelled by FreezeWatchdog (/skip, /retry, frozen) or failed while the confirmation tab was
+        # held open: that tab must not outlive the posting. Closing a closed page does nothing.
+        if result is not None:
+            await _close_page(result.page)
 
 
 async def _safe_shot(page, path: str) -> None:
@@ -652,7 +660,9 @@ async def run(args) -> int:
                 if result.status in (SUBMITTED, DRY_RUN_OK) and result.screenshot \
                         and os.path.exists(result.screenshot):
                     # the filled form as it looked right before submit: audit trail, not a review item
-                    os.replace(result.screenshot, config.SUBMITTED_DIR / os.path.basename(result.screenshot))
+                    moved = config.SUBMITTED_DIR / os.path.basename(result.screenshot)
+                    os.replace(result.screenshot, moved)
+                    result.screenshot = str(moved)         # the old path is gone: the Unblock Queue needs this one
                 if result.status == SUBMITTED and outcome == UNCONFIRMED:
                     # Submitted in the browser but never confirmed by e-mail: hold list, not counted.
                     detail = f"{result.reason}: {result.detail}"[:300]
@@ -700,8 +710,8 @@ async def run(args) -> int:
         finally:
             await context.close()
             save_queue(queue)
-            if gate:
-                run_state.update(None, "", "Runner stopped")
+            # Always: Mission Control's "Now" box must not stay on "Blitz run starting..." after a dry run
+            run_state.update(None, "", "Dry run finished" if args.dry_run else "Runner stopped")
             run_state.runner_finished()
             profile_lock.release()
 

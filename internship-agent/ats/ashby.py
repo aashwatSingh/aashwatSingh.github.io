@@ -203,8 +203,11 @@ class AshbyAdapter(BaseAdapter):
                 raise LookupError(f"option {wanted!r} not found")
             return
         if f.widget == "combobox":
+            # The home-address lookup is for the candidate's own location only. "Preferred office location?"
+            # is an ordinary dropdown and must select the value it was given.
             if f.question.field_id == "_systemfield_location" or "ashby-location" in str(f.extra.get("rule", "")) \
-                    or re.search(r"location|located|based", f.question.label, re.I):
+                    or re.search(r"^(current )?location|where are you (currently )?(located|based)",
+                                 f.question.label, re.I):
                 addr = profile["address"]
                 options = await self._options(page, f, typed=f"{addr['city']}, {addr['state_abbr']}")
                 hit = next((o for o in options if o.lower().startswith(addr["city"].lower())

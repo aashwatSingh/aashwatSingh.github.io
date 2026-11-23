@@ -306,7 +306,9 @@ class RunnerManager:
         log_path = blitz_log_path()
         log_path.write_text("", encoding="utf-8")            # a new run starts a new log
         self.logs.clear()
-        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
+        # .env is read again for every run: a changed WORKDAY_PASSWORD, GMAIL_APP_PASSWORD or DISCORD_BOT_TOKEN
+        # reaches the next run without restarting this server (which may have been started at sign-in).
+        env = {**os.environ, **config.read_dotenv(), "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
         flags = 0
         if os.name == "nt":
             # No console window (Playwright still opens its own visible Chrome) and its own process

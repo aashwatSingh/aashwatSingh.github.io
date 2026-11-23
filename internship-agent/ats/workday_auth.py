@@ -42,6 +42,7 @@ from urllib.parse import urlparse
 import config
 import imap_otp
 import phone_notify
+import run_state
 from fileutil import atomic_write_text, file_lock, read_json
 from urls import host_matches
 
@@ -436,6 +437,7 @@ async def _verify_by_mail(page, profile: dict, host: str, company: str, since: f
         await temp.wait_for_timeout(2500)
     except Exception as exc:                               # noqa: BLE001
         print(f"      The verification link did not open cleanly ({type(exc).__name__})", flush=True)
+        return False                                       # not verified: the tenant is not marked verified
     finally:
         await temp.close()
     return True
@@ -469,6 +471,7 @@ async def _hand_over(page, host: str, email_address: str, registry: AccountRegis
     if not allow_manual:
         return AuthResult(False, reason, terminal, status or "")
     print(f"\a[ACTION REQUIRED] {terminal} (waiting up to {int(wait_s)}s)", flush=True)
+    run_state.waiting_for_you(terminal)                    # FreezeWatchdog must not poll Discord while we do
     if getattr(notifier, "enabled", False):
         await _blank_password_fields(page)                 # no password can be in the picture
         try:
@@ -517,9 +520,10 @@ async def ensure_workday_signed_in(page, profile: dict, *, notifier=None, allow_
     company = company or host.split(".")[0]
     password = workday_password()
 
-    def hand_over(status, terminal, phone):
+    def hand_over(status, terminal, phone, reason=REASON):
         return _hand_over(page, host, email_address, registry, status=status, terminal=terminal, phone=phone,
-                          notifier=notifier, allow_manual=allow_manual, wait_s=manual_wait_s, poll_ms=poll_ms)
+                          notifier=notifier, allow_manual=allow_manual, wait_s=manual_wait_s, poll_ms=poll_ms,
+                          reason=reason)
 
     def existing_account(why):
         """Rule 3: an account exists here that we cannot sign in to. Nothing more is typed."""
@@ -601,4 +605,12 @@ async def ensure_workday_signed_in(page, profile: dict, *, notifier=None, allow_
             MANUAL_AUTH, f"Verify your e-mail for {company} ({host}) from the Workday message in Gmail, then sign in",
             f"Workday needs you on {company} ({host}) — verify the account from the e-mail Workday sent, then sign "
             "in in Chrome, or reply !skip.")
-    return await existing_account(MANUAL_AUTH)             # Outcome C (and anything unrecognised): hands off
+    if created == "exists":                                # Outcome C: an account is there that we cannot open
+        return await existing_account(MANUAL_AUTH)
+    # "unclear" / "no_form": the site did not take the new account (a password-policy rejection, a terms box, a
+    # changed form). That says nothing about an existing account, so the tenant is not marked: hand it over only.
+    return await hand_over(
+        None, f"Create your account on {host} in the browser window (Workday did not accept the new account: check "
+        "its password rules and terms)",
+        f"Workday sign-in needs you on {company} ({host}) — Workday did not accept the new account. Create it or "
+        "sign in in Chrome, or reply !skip.", reason="WORKDAY_ACCOUNT")

@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from playwright.async_api import Page
 
 import phone_notify
+import run_state
 from ats import hcaptcha_grid
 
 PROBE_TIMEOUT_S = 0.5              # every DOM / frame access is capped at this
@@ -272,6 +273,7 @@ async def detect_and_solve_captcha(page: Page, *, timeout_s: float = 45, allow_m
     print(f"\a[ACTION REQUIRED] Solve the {result.kind} CAPTCHA in the browser window "
           f"(waiting up to {int(manual_timeout_s)}s; the form continues by itself)", flush=True)
     say("Waiting for you to solve the CAPTCHA")
+    run_state.waiting_for_you("Waiting for you to solve the CAPTCHA")   # even when no on_status is wired
     phone = phone_notify.notifier()
     relayed = None
     if phone.enabled:                                      # an hCaptcha 3x3 grid goes to the phone, round by round

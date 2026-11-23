@@ -128,16 +128,26 @@ def load_profile(path: Path | None = None) -> dict:
     return profile
 
 
-def load_dotenv(path: Path | None = None) -> None:
-    """KEY=value lines from .env (git-ignored) into the environment; existing variables win."""
+def read_dotenv(path: Path | None = None) -> dict[str, str]:
+    """KEY=value lines from .env (git-ignored), read fresh from disk. {} when there is no .env."""
     path = path or BASE / ".env"
-    if not path.exists():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
+    values: dict[str, str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return values
+    for line in lines:
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip().removeprefix("export ").strip(), value.strip().strip("'\""))
+            values[key.strip().removeprefix("export ").strip()] = value.strip().strip("'\"")
+    return values
+
+
+def load_dotenv(path: Path | None = None) -> None:
+    """.env into the environment; variables already set in the environment win."""
+    for key, value in read_dotenv(path).items():
+        os.environ.setdefault(key, value)
 
 
 load_dotenv()
