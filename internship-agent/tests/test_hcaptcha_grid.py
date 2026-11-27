@@ -595,7 +595,8 @@ def test_the_profile_lock_lets_one_runner_in_and_names_the_other(tmp_path):
     other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
         lock_path = tmp_path / "chrome_profile.runner.lock"
-        lock_path.write_text(f"{other.pid} 2026-11-22 10:00:00")
+        time.sleep(0.1)                                                  # a runner writes its lock after it starts
+        lock_path.write_text(f"{other.pid} {time.strftime('%Y-%m-%d %H:%M:%S')}")
         with pytest.raises(agent_runner.ProfileBusy) as err:
             agent_runner.ProfileLock(profile).acquire()
         assert str(other.pid) in str(err.value) and "chrome_profile" in str(err.value) and "Stop" in str(err.value)

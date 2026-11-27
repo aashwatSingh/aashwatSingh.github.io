@@ -168,8 +168,23 @@ class BaseAdapter:
             await self.receipt_gate.before_submit(page.context, step)
 
     # ---- adapter hooks ----------------------------------------------------
+    submit_selector = ""          # the final Submit button (a dry run names it instead of clicking it)
+
     def form_url(self, job: dict) -> str:
         return job["url"]
+
+    async def submit_target(self, page: Page) -> str:
+        """What a live run would click to send this form, and on which page (a dry run's detail)."""
+        if not self.submit_selector:
+            return f"submit on {page.url}"
+        try:
+            button = page.locator(self.submit_selector).first
+            if await button.count() and await button.is_visible():
+                label = " ".join((await button.inner_text(timeout=2000)).split())[:60] or "Submit"
+                return f"would click '{label}' on {page.url}"
+        except Exception:                                  # noqa: BLE001 - a report, never a failure
+            pass
+        return f"no visible Submit button on {page.url}"
 
     async def extract(self, page: Page, include_filled: bool = False) -> list[FormField]:
         raise NotImplementedError
@@ -750,7 +765,7 @@ class BaseAdapter:
 
         if dry_run:
             return ApplyResult(DRY_RUN_OK, "all required questions answered (not submitted)",
-                               answers=answers, screenshot=shot_path)
+                               await self.submit_target(page), answers=answers, screenshot=shot_path)
 
         await self.captcha_step(page, manual=attended)      # a checkbox CAPTCHA already on the form
         if self.__dict__.get("_phone_skip"):

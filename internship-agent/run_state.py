@@ -206,6 +206,39 @@ def pid_alive(pid) -> bool:
     return True
 
 
+def process_started_at(pid) -> float | None:
+    """When process `pid` started (epoch seconds), or None when that cannot be told. Used with pid_alive to
+    tell a live runner from an unrelated process that was handed the same PID after the runner died."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+    if pid <= 0:
+        return None
+    if os.name == "nt":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return None
+        try:
+            created, exited, kernel, user = (ctypes.c_ulonglong() for _ in range(4))
+            if not kernel32.GetProcessTimes(handle, ctypes.byref(created), ctypes.byref(exited),
+                                            ctypes.byref(kernel), ctypes.byref(user)):
+                return None
+            return created.value / 1e7 - 11644473600           # FILETIME (100 ns since 1601) -> Unix epoch
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as fh:
+            ticks = int(fh.read().rsplit(")", 1)[1].split()[19])   # field 22: start time, clock ticks after boot
+        with open("/proc/stat", encoding="utf-8") as fh:
+            boot = next(int(line.split()[1]) for line in fh if line.startswith("btime "))
+        return boot + ticks / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError, StopIteration, AttributeError):
+        return None
+
+
 def read_runner() -> dict | None:
     """The live runner's {pid, started, args}, or None. A file left by a crashed runner is ignored."""
     try:

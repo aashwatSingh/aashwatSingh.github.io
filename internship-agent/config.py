@@ -55,6 +55,22 @@ UNBLOCK_JSON = BASE / "unblock_queue.json"
 
 RECEIPT_TIMEOUT_DEFAULT_S = 120
 
+# The one resume every application attaches. RESUME_PDF in .env overrides it (a file name next to this folder,
+# or a full path). candidate_profile.json's old "resume_path" is ignored, so there is one place to change it.
+RESUME_PDF_DEFAULT = "Aashwat_Singh_SWE_Resume_ATS.pdf"
+
+
+def resume_pdf() -> Path:
+    name = os.environ.get("RESUME_PDF", "").strip().strip("'\"") or RESUME_PDF_DEFAULT
+    path = Path(name)
+    return path if path.is_absolute() else BASE / path
+
+
+def queue_refresh_hours() -> float:
+    """job_queue.json is re-read from the listing sources at the start of a run when it was last refreshed this
+    many hours ago or more (QUEUE_REFRESH_HOURS in .env, 1-168, default 6)."""
+    return float(_env_seconds("QUEUE_REFRESH_HOURS", 6, 1, 168))
+
 
 def receipt_timeout_s() -> int:
     """How long the confirmation gate waits for the receipt e-mail: RECEIPT_TIMEOUT_S in .env (30-600)."""
@@ -105,10 +121,7 @@ def load_profile(path: Path | None = None) -> dict:
             "and fill in your details (it is git-ignored)."
         )
     profile = json.loads(path.read_text(encoding="utf-8"))
-    resume = Path(profile.get("resume_path", ""))
-    if not resume.is_absolute():
-        resume = BASE / resume
-    profile["resume_path"] = str(resume)
+    profile["resume_path"] = str(resume_pdf())         # always the one configured resume (RESUME_PDF)
     # Essays and behavioural stories can live in the git-tracked shared_answers.json; the profile wins.
     shared = BASE / "shared_answers.json"
     if shared.exists():

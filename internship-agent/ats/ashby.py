@@ -87,6 +87,7 @@ SUBMIT_BUTTON = "button.ashby-application-form-submit-button, button:has-text('S
 
 
 class AshbyAdapter(BaseAdapter):
+    submit_selector = SUBMIT_BUTTON
     name = "Ashby"
     form_ready_selector = ".ashby-application-form-field-entry, [class*='_fieldEntry_']"
     _boards: dict[str, dict] = {}

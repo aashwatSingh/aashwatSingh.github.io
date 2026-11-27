@@ -176,6 +176,7 @@ async def retrieve_code(page: Page, since: float) -> str | None:
 
 
 class GreenhouseAdapter(BaseAdapter):
+    submit_selector = SUBMIT_BUTTON
     name = "Greenhouse"
     form_ready_selector = "#application-form"
 

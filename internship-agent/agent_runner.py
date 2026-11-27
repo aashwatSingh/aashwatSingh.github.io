@@ -121,13 +121,15 @@ def push_blocker(job: dict, result: ApplyResult) -> None:
         log(f"  ! could not add it to the Unblock Queue ({type(exc).__name__})")
 
 
-def write_application_log(job: dict, result: ApplyResult) -> None:
+def write_application_log(job: dict, result: ApplyResult, outcome: str = "") -> None:
+    """logs/applications/<id>.json: what happened to one posting. `outcome` is the confirmation gate's verdict
+    for a submitted form ("confirmed" / "unconfirmed"), so run_status.py can tell the two apart."""
     out = config.LOG_DIR / "applications"
     out.mkdir(parents=True, exist_ok=True)
     (out / f"{job['id']}.json").write_text(json.dumps({
         "when": datetime.now().isoformat(timespec="seconds"),
         "job": {k: job.get(k) for k in ("company", "title", "url", "ats", "locations")},
-        "status": result.status, "reason": result.reason, "detail": result.detail,
+        "status": result.status, "reason": result.reason, "detail": result.detail, "outcome": outcome,
         "answers": result.answers,
     }, indent=1, ensure_ascii=False), encoding="utf-8")
 
@@ -388,9 +390,32 @@ class ProfileLock:
     file next to the folder, `<profile>.runner.lock`, holding its pid. A lock whose pid is gone (a crash
     or a force-stop) is taken over; a live one stops the second runner with a clear message."""
 
-    def __init__(self, profile_dir, pid_alive=run_state.pid_alive):
+    def __init__(self, profile_dir, pid_alive=run_state.pid_alive, process_started=run_state.process_started_at):
         self.path = Path(str(profile_dir) + ".runner.lock")
-        self._alive, self.held = pid_alive, False
+        self._alive, self._started, self.held = pid_alive, process_started, False
+
+    @staticmethod
+    def _written_at(rest: str) -> float | None:
+        """When the lock was written: the epoch seconds at its end, else its "YYYY-mm-dd HH:MM:SS" (local)."""
+        parts = rest.split()
+        try:
+            return float(parts[-1]) if len(parts) >= 3 else time.mktime(time.strptime(" ".join(parts[:2]),
+                                                                                       "%Y-%m-%d %H:%M:%S"))
+        except (ValueError, IndexError, OverflowError):
+            return None
+
+    def _holder_alive(self, pid: int, rest: str) -> bool:
+        """The runner that wrote the lock is still running. Windows hands a dead process's PID to the next new
+        process (often a Chrome helper), so a live PID alone is not enough: a process that started after the
+        lock was written cannot be the one that wrote it."""
+        if not self._alive(pid):
+            return False
+        written = self._written_at(rest)
+        try:
+            started = self._started(pid) if written is not None else None
+        except Exception:                                          # noqa: BLE001 - no start time: trust the PID
+            started = None
+        return started is None or started <= written + 2
 
     def acquire(self) -> "ProfileLock":
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -402,8 +427,9 @@ class ProfileLock:
                     pid, _, started = self.path.read_text(encoding="utf-8").partition(" ")
                 except OSError:
                     pid, started = "", ""
-                if pid.isdigit() and int(pid) != os.getpid() and self._alive(int(pid)):
-                    raise ProfileBusy(f"another runner (pid {pid}, started {started.strip() or '?'}) is using the browser "
+                if pid.isdigit() and int(pid) != os.getpid() and self._holder_alive(int(pid), started):
+                    when = " ".join(started.split()[:2]) or "?"
+                    raise ProfileBusy(f"another runner (pid {pid}, started {when}) is using the browser "
                                       f"profile {self.path.name[:-len('.runner.lock')]}. Stop it first (Mission Control: "
                                       "Stop), or give this run its own --profile-dir.")
                 try:
@@ -412,7 +438,8 @@ class ProfileLock:
                     pass
                 continue
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(f"{os.getpid()} {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                now = time.time()
+                fh.write(f"{os.getpid()} {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now))} {now:.0f}")
             self.held = True
             return self
         raise ProfileBusy(f"could not take {self.path.name}")
@@ -495,6 +522,71 @@ def apply_requeued(queue: list[dict], taken: list[dict]) -> list[dict]:
     return back
 
 
+def _refresh_record() -> Path:
+    return config.CACHE_DIR / "queue_refreshed.json"
+
+
+def queue_refreshed_at() -> float | None:
+    """When this runner last merged fresh listings into job_queue.json (None: never)."""
+    try:
+        return float(json.loads(_refresh_record().read_text(encoding="utf-8"))["at"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def mark_queue_refreshed(now: float | None = None) -> None:
+    config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _refresh_record().write_text(json.dumps({"at": now or time.time()}), encoding="utf-8")
+
+
+MIN_CANDIDATES = 20     # fewer pending postings than this (or than --limit) and the listings are read again
+
+
+def queue_refresh_reason(queue: list[dict], args, now: float | None = None) -> str | None:
+    """Why the listing sources should be read before this run, or None. The queue used to be rebuilt only with
+    --rescrape or when empty, so after the first days every run drew from one shrinking, ageing list."""
+    if getattr(args, "only_url", None):
+        return None
+    if args.rescrape:
+        return "--rescrape"
+    if getattr(args, "no_rescrape", False):
+        return None
+    if not queue:
+        return "the queue is empty"
+    at = queue_refreshed_at()
+    if at is None:
+        return "no refresh on record"
+    hours = ((now or time.time()) - at) / 3600
+    if hours >= config.queue_refresh_hours():
+        return f"last refreshed {hours:.0f} h ago"
+    wanted = max(args.limit or 0, MIN_CANDIDATES)
+    have = len(select_jobs(queue, args))
+    if have < wanted:
+        return f"only {have} pending posting(s) for {args.ats}"
+    return None
+
+
+def refresh_queue(queue: list[dict], args, reason: str) -> list[dict]:
+    """Merge fresh listings into the queue (existing postings keep their status) and save them to disk at once,
+    so a dry run that refreshed still leaves the new postings for the live run. A failure keeps the old queue."""
+    log(f"refreshing job_queue.json from the listing sources ({reason})")
+    try:
+        scraped = scraper.scrape(crawl=args.crawl_boards)
+    except Exception as exc:                                       # noqa: BLE001 - never stop a run over the lists
+        log(f"! could not read the listing sources ({type(exc).__name__}: {str(exc)[:120]}); using the queue as it is")
+        return queue
+    if not scraped:
+        log("! the listing sources returned nothing; using the queue as it is")
+        return queue
+    on_disk, added = scraper.merge_into_queue(dedup.load_queue(), scraped)
+    dedup.save_queue(scraper.sort_queue(on_disk))
+    mark_queue_refreshed()
+    queue, _ = scraper.merge_into_queue(queue, scraped)
+    queue = scraper.sort_queue(queue)
+    log(f"queue: {len(queue)} listings ({added} new)")
+    return queue
+
+
 def select_jobs(queue: list[dict], args) -> list[dict]:
     if args.only_url:
         key = dedup.canonical_url(args.only_url)
@@ -535,20 +627,21 @@ def select_jobs(queue: list[dict], args) -> list[dict]:
 async def run(args) -> int:
     config.ensure_dirs()
     profile = config.load_profile()
-    if not os.path.exists(profile["resume_path"]):
-        print(f"Resume not found at {profile['resume_path']}", file=sys.stderr)
+    if not os.path.isfile(profile["resume_path"]):
+        print(f"Resume not found: {profile['resume_path']}\n  Put {Path(profile['resume_path']).name} in "
+              f"{config.BASE}, or set RESUME_PDF in .env to the file every application should attach.",
+              file=sys.stderr)
         return 2
     engine = AnswerEngine(profile)
     ledger = dedup.Ledger()
     ledger.write_csv()
 
     queue = dedup.load_queue()
-    if args.rescrape or not queue:
-        log("refreshing job_queue.json from the listing sources")
-        queue, added = scraper.merge_into_queue(queue, scraper.scrape(crawl=args.crawl_boards))
-        queue = scraper.sort_queue(queue)
-        log(f"queue: {len(queue)} listings ({added} new)")
     queue, _ = dedup.filter_queue(queue, ledger, args.dedup_level, args.max_per_company)
+    reason = queue_refresh_reason(queue, args)
+    if reason:
+        queue = refresh_queue(queue, args, reason)
+        queue, _ = dedup.filter_queue(queue, ledger, args.dedup_level, args.max_per_company)
     save_queue = (lambda q: None) if args.dry_run else dedup.save_queue    # a dry run never edits the queue
     if not args.dry_run:
         back = apply_requeued(queue, unblock.take_requeued())
@@ -569,6 +662,7 @@ async def run(args) -> int:
         log("unattended run: postings that hit a CAPTCHA or emailed code go to manual review "
             "(use --local-blitz on your own machine to clear those in the browser)")
     jobs = select_jobs(queue, args)
+    log(f"resume: {Path(profile['resume_path']).name}")
     log_tracker_report(ledger)
     start_total = ledger.total
     log(f"ledger: {start_total} applied, target {args.target}; {len(jobs)} candidate postings "
@@ -589,6 +683,7 @@ async def run(args) -> int:
             log(f"! {config.TRACKER_XLSX.name} is open in another program: close it so new rows can be written")
 
     tally: Counter = Counter()
+    skipped_dups = 0
     deadline = time.time() + args.max_minutes * 60 if args.max_minutes else None
     gate = None if args.dry_run else ReceiptGate(log=log)
     for adapter in ADAPTERS.values():
@@ -642,6 +737,7 @@ async def run(args) -> int:
                     dup = ledger.duplicate_reason(job, args.dedup_level)      # spec step 2
                     if dup:
                         job["status"], job["status_detail"] = "duplicate", dup
+                        skipped_dups += 1
                         continue
 
                 t0 = time.time()
@@ -655,7 +751,7 @@ async def run(args) -> int:
                 else:
                     result = await apply_one(context, job, engine, ledger, dry_run=args.dry_run, use_llm=use_llm)
                 tally[UNCONFIRMED if outcome == UNCONFIRMED else result.status] += 1
-                write_application_log(job, result)
+                write_application_log(job, result, outcome)
 
                 if result.status in (SUBMITTED, DRY_RUN_OK) and result.screenshot \
                         and os.path.exists(result.screenshot):
@@ -719,7 +815,8 @@ async def run(args) -> int:
     if ledger.pending_xlsx:
         log(f"! {len(ledger.pending_xlsx)} submitted application(s) are in applied_tracker.csv but not yet in "
             f"{config.TRACKER_XLSX.name} (it was locked). Close Excel; the next run adds them.")
-    log(f"done: {dict(tally)}; ledger {start_total} -> {ledger.total} of {args.target}")
+    log(f"done: {dict(tally)}; ledger {start_total} -> {ledger.total} of {args.target}"
+        + (f"; {skipped_dups} skipped as already applied" if skipped_dups else ""))
     remaining = sum(1 for j in queue if j.get("status") == "pending")
     log(f"queue: {remaining} still pending; manual review list: {config.MANUAL_REVIEW_CSV.name}")
     return 0
@@ -774,7 +871,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-per-company", type=int, default=0,
                     help="with --dedup-level role: cap applications per company, counting the tracker (0 = none)")
     ap.add_argument("--retry-manual", action="store_true", help="re-attempt postings in manual review")
-    ap.add_argument("--rescrape", action="store_true", help="refresh the queue before starting")
+    ap.add_argument("--rescrape", action="store_true", help="refresh the queue before starting (forced)")
+    ap.add_argument("--no-rescrape", action="store_true",
+                    help="never refresh the queue (by default it is refreshed when older than QUEUE_REFRESH_HOURS, "
+                         "6 by default, or when it has fewer pending postings than the run needs)")
     ap.add_argument("--crawl-boards", action="store_true", help="with --rescrape: crawl ATS boards too")
     ap.add_argument("--headed", action="store_true", help="show the browser window")
     ap.add_argument("--no-essays", action="store_true",

@@ -33,7 +33,7 @@ nothing personal is ever committed):
 | File | What |
 |---|---|
 | `candidate_profile.json` | copy of `candidate_profile.example.json`, filled in |
-| the resume PDF | path set by `resume_path` in the profile |
+| the resume PDF | `Aashwat_Singh_SWE_Resume_ATS.pdf` next to the scripts: the one file every application attaches (`config.RESUME_PDF_DEFAULT`; `RESUME_PDF=...` in `.env` overrides it). The profile's old `resume_path` is ignored. A run stops before opening anything if the file is missing |
 | `internship_tracker.xlsx` | your existing tracker (header row starting with `Company`) |
 | `swe_internship_agent_prompt.md` | only needed for the optional LLM agent |
 
@@ -78,6 +78,14 @@ python agent_runner.py --local-blitz --dedup-level role --max-per-company 3
 * `--ats all` (with `ANTHROPIC_API_KEY` set and `pip install browser-use anthropic`) also hands
   Workday / iCIMS / other portals to the browser-use agent in `llm_agent.py`.
 * Ctrl-C finishes the current application and stops cleanly. State is saved after every posting.
+* The queue refreshes itself: at the start of a run the listing sources are read again when the last refresh is
+  6 hours old or more (`QUEUE_REFRESH_HOURS` in `.env`), when there is no refresh on record, or when fewer
+  postings are pending than the run needs. New postings are merged in (old ones keep their status) and tried
+  newest first. If the sources cannot be read, the run goes on with the queue it has. `--rescrape` forces a
+  refresh, `--no-rescrape` turns it off.
+* `python run_status.py` shows where the last 50 postings stopped (submitted, submitted without a confirmation
+  e-mail, filtered out, form error, stuck waiting, skipped by you, crashed), the counts, how fresh the queue is,
+  which `.env` keys are set (never their values) and which resume is attached. `--last N`, `--csv out.csv`.
 
 Every attempt writes `logs/applications/<id>.json` with each question, the answer given and
 the rule that produced it, so any submission can be audited afterwards.
@@ -461,6 +469,11 @@ once, per site:
 * Each site is remembered in `workday_accounts.json` (`verified`, `needs_verify`, `manual_auth`, `locked`; the
   e-mail and a time, never a password). `manual_auth` and `locked` sites are never typed into again. The file and
   its `.backup` copy are git-ignored; delete a site's entry to let the runner try it afresh.
+* At most 2 Sign In clicks and 1 Create Account per site per day, across runs (`workday_attempts.json`,
+  git-ignored). A successful sign-in resets the day's count. When the tries are used up the sign-in is handed to
+  you, and the runner tries again the next day.
+* A verification link that cannot be read from Gmail or does not open leaves the site `needs_verify` (not
+  `manual_auth`): the next run looks for the link again, and signing in by hand after verifying marks it `verified`.
 * `--workday-manual-sign-in` still means: never type a password, wait for you.
 
 ## Files it writes
@@ -470,6 +483,7 @@ once, per site:
 | `job_queue.json` | every listing seen, with status (`pending`, `applied`, `manual_review`, `duplicate`, `skipped_ineligible`, `closed`) |
 | `applied_tracker.csv` | `Timestamp, Company, Role, Location, ATS_Platform, URL, Status` — tracker rows plus new applications |
 | `internship_tracker.xlsx` | one row appended per submitted application (a timestamped backup is taken before each live run) |
+| `workday_attempts.json` | per Workday site, today's Sign In and Create Account clicks (git-ignored) |
 | `workday_accounts.json` | per Workday site: `verified` / `needs_verify` / `manual_auth` / `locked`, the e-mail, a time. Never a password (git-ignored, with a `.backup` copy) |
 | `manual_review_queue.csv` | postings to finish by hand, with the reason and unanswered questions |
 | `logs/` | runner log, per-application answer logs, screenshots |

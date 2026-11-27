@@ -126,6 +126,7 @@ def wanted_place(profile: dict) -> tuple[str, set[str]]:
 
 
 class LeverAdapter(BaseAdapter):
+    submit_selector = "#btn-submit"
     name = "Lever"
     form_ready_selector = "#application-form, form .application-question"
 

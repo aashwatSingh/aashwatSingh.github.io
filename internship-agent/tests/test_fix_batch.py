@@ -421,7 +421,7 @@ def run_the_runner(tmp_path, monkeypatch, *, dry_run, jobs, outcome=None):
         for attr in ("human_wait_s", "write_essays", "receipt_gate", "try_sign_in", "create_accounts"):
             monkeypatch.setattr(adapter, attr, getattr(adapter, attr, None), raising=False)
     args = argparse.Namespace(
-        dry_run=dry_run, rescrape=False, crawl_boards=False, dedup_level="role", max_per_company=3, ats="Greenhouse",
+        dry_run=dry_run, rescrape=False, no_rescrape=True, crawl_boards=False, dedup_level="role", max_per_company=3, ats="Greenhouse",
         assist=0, no_essays=False, workday_create_accounts=False, workday_manual_sign_in=False, headed=False,
         target=500, max_minutes=0, profile_dir=str(tmp_path / "profile"), limit=0, only_url=None)
     monkeypatch.setattr(agent_runner, "_stop", False)
