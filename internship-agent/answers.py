@@ -677,8 +677,16 @@ class AnswerEngine:
                     rel.append(o)
             return rel[0] if len(rel) == 1 else None
 
+        def works_there(company: str, label: str) -> bool:
+            """An employer on the resume is this company (or is named in the question): never answer No for it."""
+            mine = [str(x.get("company") or "").lower() for x in p.get("experience") or []]
+            asked = f"{company or ''} {label}".lower()
+            return any(m and (m in asked or (company and company.lower().split()[0] in m)) for m in mine)
+
         def graduation(q, label, ctx):
             year = str(edu["grad_year"])
+            if q.kind in CHOICE_KINDS and pick_yes_no(q.options, True) is not None:
+                return None                                  # a Yes/No question: a month or year is never the answer
             if q.kind in CHOICE_KINDS:
                 windowed = grad_option(q.options)
                 if windowed:
@@ -1445,7 +1453,8 @@ class AnswerEngine:
              lambda q, *_: YesNo(True) if q.kind in CHOICE_KINDS else None),
             ("x-fulltime-after-graduation", r"interested in full[- ]time .{0,50}(upon|after) graduation",
              lambda q, *_: YesNo(True) if q.kind in CHOICE_KINDS else None),
-            ("x-enrolled-program", r"enrolled in an? (undergraduate|bachelor)|current program type|still (a )?student",
+            ("x-enrolled-program", r"enrolled in an? (undergraduate|bachelor)|current program type|still (a )?student|"
+                                   r"are you (a )?current(ly)? (a )?(student|enrolled)",
              lambda q, *_: Check() if q.kind == "checkbox" else YesNo(True, [r"^undergrad|bachelor"])
              if q.kind in CHOICE_KINDS else None),
             ("x-relocate-ok", r"\b(okay|ok|comfortable|fine) (with )?(spending|living|relocating|being based|working) .{0,60}"
@@ -1527,7 +1536,9 @@ class AnswerEngine:
              lambda q, *_: YesNo(True) if q.kind in CHOICE_KINDS and pick_yes_no(q.options, True) else None),
             ("x-completed-education", r"most recent(ly)? completed .{0,20}(education|degree)|"
                                       r"highest (level of )?education (you have )?completed",
-             lambda q, *_: Choice([r"high school|secondary", r"some college"]) if q.kind in CHOICE_KINDS else None),
+             lambda q, *_: Choice([r"high school (diploma|graduate)|diploma|\bged\b", r"^(high school|secondary)\b",
+                                   r"some college", r"high school|secondary"], exclude=r"^some (high school|secondary)")
+             if q.kind in CHOICE_KINDS else None),
             ("x-class-next-fall", r"class (year|standing) .{0,40}(entering|be) .{0,12}fall 2027|"
                                   r"(entering|be) .{0,20}fall 2027 as an?",
              lambda q, *_: Choice([r"^senior\b", r"\b(4th|fourth)[- ]year"], text="Senior")
@@ -1714,7 +1725,9 @@ class AnswerEngine:
             ("first-name", r"^(legal )?first name|given name|^first$", t(ident["first_name"])),
             ("last-name", r"^(legal )?last name|surname|family name|^last$", t(ident["last_name"])),
             ("school", r"\b(school|university|college|institution)\b(?!.{0,30}\b(year|gpa|email|location|"
-                       r"city|state|graduat\w*|start|end|major|degree)\b)", school),
+                       r"city|state|graduat\w*|start|end|major|degree)\b)",
+             lambda q, label, ctx: None if re.search(r"\bcity\b|state of residence|\baddress\b|where (do )?you (live|reside)",
+                                                     label) else school(q, label, ctx)),
             ("name", r"\bname\b|\bsignature\b|\be-?sign(ature)?\b", name),
             ("pronouns", r"pronoun", pronouns),
             ("email", r"^e-?mail|e-?mail address", t(ident["email"])),
@@ -1730,7 +1743,8 @@ class AnswerEngine:
             ("residence-country", r"^(what|which|please select).{0,25}country.{0,30}(resid|live|located|based)",
              lambda *_: Text(addr["country"], [r"^united states( of america)?$", r"^usa?$", r"^united states"])),
             ("residence-state", r"^(what|which|please select).{0,25}state\b.{0,40}(resid|live|located|based)",
-             lambda *_: Text(addr["state"], [rf"^{addr['state_abbr']}$", rf"^{addr['state']}\b"])),
+             lambda q, label, ctx: None if re.search(r"city (and|&|/|,) ?state", label)    # the city too: "location"
+             else Text(addr["state"], [rf"^{addr['state_abbr']}$", rf"^{addr['state']}\b"])),
             ("local-resident", r"^(are you|do you|will you).{0,20}(local|located|based|living|residing|live|reside)\b|"
                                r"local to",
              local_resident),
@@ -1741,7 +1755,8 @@ class AnswerEngine:
              t(addr["city"])),
             ("state", r"^(current |home |residing )?state$|state/province|^province|state of residence|^state\b(?!ment)|"
                       r"state .{0,40}work(ing)? (remotely )?from",
-             lambda *_: Text(addr["state"], [rf"^{addr['state_abbr']}$", rf"^{addr['state']}\b"])),
+             lambda q, label, ctx: None if re.search(r"city (and|&|/|,) ?state", label)    # the city too: "location"
+             else Text(addr["state"], [rf"^{addr['state_abbr']}$", rf"^{addr['state']}\b"])),
             ("country", r"^country$|country of residence|country (where|in which) you|^country\b|"
                         r"country .{0,30}(located|based|live|reside)",
              lambda *_: Text(addr["country"], [r"^united states( of america)?$", r"^usa?$", r"^united states"])),
@@ -1779,8 +1794,9 @@ class AnswerEngine:
                                r"year of study|school year", lambda *_: Choice(
                 [rf"^{edu['class_standing']}\b", rf"\({edu['class_standing']}\)", r"\b(3rd|third)[- ]year"],
                 text=edu["class_standing"], exclude=r"rising")),
-            ("edu-start", r"(school|education|degree|university|enrollment) start|start date.*(school|degree)",
-             lambda q, *_: Text(_fmt_date(start_edu_iso, q))),
+            ("edu-start", r"(school|education|degree|university|enrollment) start|start date.{0,30}(school|degree)",
+             lambda q, label, ctx: None if re.search(r"internship|availab|summer|return(ing)? to school", label)
+             else Text(_fmt_date(start_edu_iso, q))),
             ("degree", r"degree|level of (study|education)|education level|highest (level of )?education", degree),
             ("returning-to-school", r"return(ing)? to (school|university|college|your (degree|program|studies)|"
                                     r"an? degree[- ]seeking program)|"
@@ -1841,6 +1857,10 @@ class AnswerEngine:
              lambda *_: YesNo(log["worked_for_us_federal_government"])),
             ("applied-before", r"(previously|ever|before|already|in the past|prior).{0,40}appl(y|ied)|"
                                r"appl(y|ied).{0,60}(before|previously|in the past)", applied_before),
+            ("x-current-affiliate", r"\bare you (currently )?(a |an )?(current|active) (employee|contractor|consultant|"
+                                    r"intern|worker|vendor)\b",
+             lambda q, label, ctx: YesNo(False) if q.kind in CHOICE_KINDS and not works_there(ctx.company, label)
+             else None),
             ("worked-before", r"(previously|ever|before|formerly|in the past|prior|currently|current or former)"
                               r".{0,60}(worked|employed|employee|interned|contractor)|former employee|"
                               r"(worked|employed|interned) (by|at|for|with) .{0,50}(before|previously|in the past)|"

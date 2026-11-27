@@ -274,6 +274,9 @@ def may_draft(question: str, job: dict, rule: str) -> bool:
     """Should the essay generator be tried for a question the fact rules did not answer?"""
     if rule in NEVER_DRAFT:
         return False
+    if rule == "follow-up" and re.search(r"^if (yes|no|so|not|applicable)\b|^if you (answered|selected|chose)\b",
+                                         question.strip().lower()):
+        return False                       # a conditional that does not apply: never answered with an essay
     if rule in OPEN_RULES:
         return True
     # some other rule matched a keyword inside a long prompt: only a recognised essay type may override it
