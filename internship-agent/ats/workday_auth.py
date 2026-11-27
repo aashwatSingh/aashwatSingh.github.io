@@ -4,8 +4,9 @@ Workday locks an account after a few wrong passwords, and the same "wrong email 
 or your account might be locked" banner covers "no such account", "different password" and "locked".
 So this module never guesses and never repeats:
 
-* One Sign In click per tenant and per set of credentials (counted *before* the click). A second try
-  is never made, in this run or, because every failure is saved, in the next.
+* One Sign In click per tenant and per set of credentials in a run (counted *before* the click), and at most
+  SIGN_IN_DAILY_CAP (2) per tenant per calendar day across runs, CREATE_DAILY_CAP (1) Create Account. The
+  daily counts live in workday_attempts.json (git-ignored), so a restart cannot buy more tries.
 * Each tenant (its normalised hostname) is remembered in workday_accounts.json (git-ignored, written
   atomically with a .backup copy like custom_answers.json): verified / needs_verify / manual_auth /
   locked, plus the e-mail used and when. Passwords are never written there, nor logged, nor typed
@@ -14,7 +15,8 @@ So this module never guesses and never repeats:
     A. created and signed in           -> verified
     B. "verify your e-mail"            -> needs_verify; the verification link is read from Gmail over IMAP
                                           (GMAIL_APP_PASSWORD, as for Greenhouse), opened in a temporary
-                                          tab -> verified; Sign In once
+                                          tab -> verified; Sign In once. A link that cannot be read or
+                                          opened leaves the tenant needs_verify: the next run looks again.
     C. "account already exists"        -> manual_auth: an account exists with a password we do not have
 * manual_auth / locked, a refused sign-in on a verified tenant, or Outcome C: nothing more is typed.
   Attended (allow_manual): terminal bell, Discord ping with a screenshot, wait for you to sign in or
@@ -137,6 +139,58 @@ class AccountRegistry:
                     if target == self.path:
                         raise                       # the backup is best effort; the record is not
         return record
+
+
+# ---- attempts per tenant per day (workday_attempts.json) ----------------------------------------- #
+
+SIGN_IN_DAILY_CAP = 2
+CREATE_DAILY_CAP = 1
+
+
+def attempts_path() -> Path:
+    return config.BASE / "workday_attempts.json"
+
+
+class AttemptLog:
+    """{tenant_host: {"date": "YYYY-MM-DD", "sign_in": n, "create": n}} for today only. Counted before the click."""
+
+    def __init__(self, path: Path | None = None, today=None):
+        self._path = Path(path) if path else None
+        self._today = today or (lambda: time.strftime("%Y-%m-%d"))
+
+    @property
+    def path(self) -> Path:
+        return self._path or attempts_path()
+
+    def _load(self) -> dict:
+        data = read_json(self.path)
+        return data if isinstance(data, dict) else {}
+
+    def count(self, host: str, kind: str) -> int:
+        rec = self._load().get(normalize_host(host)) or {}
+        if not isinstance(rec, dict) or rec.get("date") != self._today():
+            return 0
+        try:
+            return int(rec.get(kind) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _write(self, host: str, kind: str, value) -> None:
+        host = normalize_host(host)
+        with file_lock(self.path):
+            data = self._load()
+            rec = data.get(host) if isinstance(data.get(host), dict) else {}
+            if rec.get("date") != self._today():
+                rec = {"date": self._today()}
+            rec[kind] = value(rec.get(kind) or 0)
+            data[host] = rec
+            atomic_write_text(self.path, json.dumps(data, indent=1, ensure_ascii=False))
+
+    def add(self, host: str, kind: str) -> None:
+        self._write(host, kind, lambda n: int(n) + 1)
+
+    def clear(self, host: str, kind: str) -> None:
+        self._write(host, kind, lambda n: 0)
 
 
 # ---- the password (.env only) -------------------------------------------------------------------- #
@@ -281,21 +335,27 @@ async def _auth_result(page, clicked_at: float, seconds: float, code_step=None) 
 
 
 async def _sign_in_once(page, host: str, email_address: str, password: str, code_step=None) -> tuple[str, str]:
-    """Click Sign In once. 'blocked' when this tenant and e-mail already used their one click; 'no_form'
-    when no click was made because the sign-in form was not recognised."""
+    """Click Sign In once. 'blocked' when this tenant and e-mail already used their one click in this run;
+    'capped' when the tenant had its SIGN_IN_DAILY_CAP clicks today; 'no_form' when no click was made because
+    the sign-in form was not recognised."""
     key = _budget(host, email_address)
     if _sign_in_clicks.get(key, 0) >= 1:
         return "blocked", ""
+    attempts = AttemptLog()
+    if attempts.count(host, "sign_in") >= SIGN_IN_DAILY_CAP:
+        return "capped", ""
     if not await _open_sign_in_form(page):
         return "no_form", ""
     await _type_clean(page, "email", email_address)
     await _type_clean(page, "password", password)
     _sign_in_clicks[key] = 1                               # counted before the click: a crash cannot buy a retry
+    attempts.add(host, "sign_in")                          # ... in this run, and across runs today
     clicked_at = time.time()
     await _click_aid(page, "signInSubmitButton")
     result = await _auth_result(page, clicked_at, SIGN_IN_WAIT_S, code_step)
     if result[0] == "ok":
         _sign_in_clicks.pop(key, None)                     # these credentials work: signing in again is safe
+        attempts.clear(host, "sign_in")
     return result
 
 
@@ -305,10 +365,13 @@ _create_clicks: dict[str, int] = {}
 
 
 async def _create_account(page, host: str, email_address: str, password: str) -> str:
-    """'created' | 'needs_verify' | 'exists' | 'unclear' | 'no_form'."""
+    """'created' | 'needs_verify' | 'exists' | 'unclear' | 'no_form' | 'capped'."""
     host = normalize_host(host)
     if _create_clicks.get(host, 0) >= 1:
         return "no_form"
+    attempts = AttemptLog()
+    if attempts.count(host, "create") >= CREATE_DAILY_CAP:
+        return "capped"
     link = page.locator(f'{AID.format("createAccountLink")}, a:has-text("Create Account"), '
                         'button:has-text("Create Account")').first
     try:
@@ -324,6 +387,7 @@ async def _create_account(page, host: str, email_address: str, password: str) ->
     if await _visible(page, "createAccountCheckbox"):
         await page.locator(AID.format("createAccountCheckbox")).first.check(force=True)
     _create_clicks[host] = 1
+    attempts.add(host, "create")
     await _click_aid(page, "createAccountSubmitButton")
     deadline = time.monotonic() + CREATE_WAIT_S
     while time.monotonic() < deadline:
@@ -463,9 +527,10 @@ async def _blank_password_fields(page) -> None:
 
 async def _hand_over(page, host: str, email_address: str, registry: AccountRegistry, *, status: str | None,
                      terminal: str, phone: str, notifier, allow_manual: bool, wait_s: float, poll_ms: int,
-                     reason: str = REASON) -> AuthResult:
+                     reason: str = REASON, signed_in_status: str = MANUAL_AUTH) -> AuthResult:
     """Stop typing. Save `status` first (so even a crash cannot make the next run try again), then wait
-    for the candidate: signed in by hand (-> manual_auth), `!skip`, or time out."""
+    for the candidate: signed in by hand (-> `signed_in_status`, manual_auth unless said otherwise), `!skip`,
+    or time out."""
     if status:
         registry.set(host, status, email_address)
     if not allow_manual:
@@ -486,9 +551,9 @@ async def _hand_over(page, host: str, email_address: str, registry: AccountRegis
     while time.monotonic() < deadline:
         await page.wait_for_timeout(poll_ms)
         if await is_past_auth(page):
-            if status:                                     # signed in by hand on an account we cannot type into
-                registry.set(host, MANUAL_AUTH, email_address)
-            return AuthResult(True, status=MANUAL_AUTH if status else "")
+            if status:                                     # signed in by hand
+                registry.set(host, signed_in_status, email_address)
+            return AuthResult(True, status=signed_in_status if status else "")
         if getattr(notifier, "enabled", False):
             try:
                 reply = await notifier.apoll_reply()
@@ -520,10 +585,25 @@ async def ensure_workday_signed_in(page, profile: dict, *, notifier=None, allow_
     company = company or host.split(".")[0]
     password = workday_password()
 
-    def hand_over(status, terminal, phone, reason=REASON):
+    def hand_over(status, terminal, phone, reason=REASON, signed_in_status=MANUAL_AUTH):
         return _hand_over(page, host, email_address, registry, status=status, terminal=terminal, phone=phone,
                           notifier=notifier, allow_manual=allow_manual, wait_s=manual_wait_s, poll_ms=poll_ms,
-                          reason=reason)
+                          reason=reason, signed_in_status=signed_in_status)
+
+    def verify_by_hand():
+        """The account exists with our password but is not verified yet, and its link could not be used here.
+        It stays needs_verify, so the next run reads Gmail again instead of never typing into it; signing in by
+        hand after verifying makes it verified (the password is ours)."""
+        return hand_over(
+            NEEDS_VERIFY, f"Verify your e-mail for {company} ({host}) from the Workday message in Gmail, then sign in",
+            f"Workday needs you on {company} ({host}) — verify the account from the e-mail Workday sent, then sign "
+            "in in Chrome, or reply !skip.", signed_in_status=VERIFIED)
+
+    def capped(what, cap):
+        return hand_over(None, f"{what} was already tried {cap} time(s) today on {host}: sign in yourself in the "
+                         "browser window (it is tried again tomorrow)",
+                         f"Workday sign-in needs you on {company} ({host}) — {what} was already tried {cap} time(s) "
+                         "today. Sign in in Chrome, or reply !skip.")
 
     def existing_account(why):
         """Rule 3: an account exists here that we cannot sign in to. Nothing more is typed."""
@@ -544,7 +624,8 @@ async def ensure_workday_signed_in(page, profile: dict, *, notifier=None, allow_
 
     async def finish_verification(since: float) -> AuthResult | None:
         """needs_verify: Gmail -> link -> verified -> one Sign In. None means: hand it to the candidate."""
-        registry.set(host, NEEDS_VERIFY, email_address)
+        if status != NEEDS_VERIFY:
+            registry.set(host, NEEDS_VERIFY, email_address)
         if not await _verify_by_mail(page, profile, host, company, since, fetch_link):
             return None
         registry.set(host, VERIFIED, email_address)
@@ -556,20 +637,27 @@ async def ensure_workday_signed_in(page, profile: dict, *, notifier=None, allow_
                 except Exception:                          # noqa: BLE001
                     pass
             outcome, _ = await _sign_in_once(page, host, email_address, password, code_step)
-            if outcome != "ok":
-                return await existing_account(MANUAL_AUTH)
+            if outcome == "unverified":                    # the link opened but did not verify (expired?)
+                return await verify_by_hand()
+            if outcome in ("error", "locked", "blocked"):  # refused: an account we cannot type into
+                return await existing_account(LOCKED if outcome == "locked" else MANUAL_AUTH)
+            if outcome == "capped":
+                return await capped("Sign In", SIGN_IN_DAILY_CAP)
+            if outcome != "ok":                            # no answer / no form: nothing learned, stays verified
+                return await hand_over(None, f"Sign in to {host} in the browser window (no answer after verifying)",
+                                       f"Workday sign-in needs you on {company} ({host}) — no answer after "
+                                       "verifying the account. Sign in in Chrome, or reply !skip.")
         return AuthResult(True, status=VERIFIED)
 
     if status == NEEDS_VERIFY:                             # an earlier run created the account and stopped
-        done = await finish_verification(time.time() - 1800)
+        done = await finish_verification(time.time() - 3 * 86400)   # the mail may be from an earlier day
         if done is not None:
             return done
-        return await hand_over(
-            MANUAL_AUTH, f"Verify your e-mail for {company} ({host}) from the Workday message in Gmail, then sign in",
-            f"Workday needs you on {company} ({host}) — verify the account from the e-mail Workday sent, then sign "
-            "in in Chrome, or reply !skip.")
+        return await verify_by_hand()
 
     outcome, text = await _sign_in_once(page, host, email_address, password, code_step)
+    if outcome == "capped":                                # its tries for today are used up: never a third
+        return await capped("Sign In", SIGN_IN_DAILY_CAP)
     if outcome == "ok":
         registry.set(host, VERIFIED, email_address)
         return AuthResult(True, status=VERIFIED)
@@ -584,11 +672,8 @@ async def ensure_workday_signed_in(page, profile: dict, *, notifier=None, allow_
     if outcome == "locked" or status == VERIFIED or outcome == "blocked":
         return await existing_account(LOCKED if outcome == "locked" else MANUAL_AUTH)
     if outcome == "unverified":
-        done = await finish_verification(time.time() - 1800)
-        return done if done is not None else await hand_over(
-            MANUAL_AUTH, f"Verify your e-mail for {company} ({host}) from the Workday message in Gmail, then sign in",
-            f"Workday needs you on {company} ({host}) — verify the account from the e-mail Workday sent, then sign "
-            "in in Chrome, or reply !skip.")
+        done = await finish_verification(time.time() - 3 * 86400)
+        return done if done is not None else await verify_by_hand()
 
     # Unknown tenant, Sign In refused once: never retry it. Create the account instead.
     since = time.time() - imap_otp.CLOCK_SLACK_S
@@ -601,12 +686,11 @@ async def ensure_workday_signed_in(page, profile: dict, *, notifier=None, allow_
         done = await finish_verification(since)
         if done is not None:
             return done
-        return await hand_over(
-            MANUAL_AUTH, f"Verify your e-mail for {company} ({host}) from the Workday message in Gmail, then sign in",
-            f"Workday needs you on {company} ({host}) — verify the account from the e-mail Workday sent, then sign "
-            "in in Chrome, or reply !skip.")
+        return await verify_by_hand()
     if created == "exists":                                # Outcome C: an account is there that we cannot open
         return await existing_account(MANUAL_AUTH)
+    if created == "capped":                                # Create Account was already tried today
+        return await capped("Create Account", CREATE_DAILY_CAP)
     # "unclear" / "no_form": the site did not take the new account (a password-policy rejection, a terms box, a
     # changed form). That says nothing about an existing account, so the tenant is not marked: hand it over only.
     return await hand_over(

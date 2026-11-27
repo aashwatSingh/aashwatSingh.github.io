@@ -11,6 +11,7 @@ custom_answers.json
 custom_answers.backup.json
 workday_accounts.json
 workday_accounts.backup.json
+workday_attempts.json
 *.tmp
 .env
 
